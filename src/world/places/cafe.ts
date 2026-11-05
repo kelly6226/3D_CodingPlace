@@ -353,7 +353,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
     wb.add(box(0.06, 0.03, 0.6, M.metal, [x, 0.06, 0]));
     for (const z of [-0.27, 0.27]) wb.add(mesh(new THREE.SphereGeometry(0.03, 8, 6), M.black, [x, 0.03, z]));
   }
-  note(wb, ['📝 뒷면에는 TODO가 있어요. 리팩토링은 2019년부터 예정이래요.']);
+  note(wb, ["📝 뒷면에는 TODO가 있어요. 리팩토링은 2080년부터 예정이래요."]);
 
   // 서버랙
   const rack = new THREE.Group();

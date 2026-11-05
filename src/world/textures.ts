@@ -201,7 +201,7 @@ export function whiteboardBack() {
   ctx.font = `bold 72px ${FONT_HAND}`;
   ctx.fillText('TODO', 60, 40);
   const items: [boolean, string][] = [
-    [false, '리팩토링 (2019년부터 예정)'],
+    [false, '리팩토링 (2080년부터 예정)'],
     [false, '테스트 코드 작성'],
     [false, '문서화'],
     [true, '일단 돌아가게 하기'],
@@ -578,10 +578,10 @@ export function clockFace(label: string) {
 /** 캔버스에 그리는 글자들. 한글 웹폰트는 글자 단위로 나눠 받기 때문에 미리 요청해둬요 */
 export const CANVAS_TEXT = {
   hand:
-    'It works on my machine ¯\\_(ツ)_/¯ 금요일 배포 금지 앱 API DB 여기서 터짐 TODO 리팩토링 (2019년부터 예정) 테스트 코드 작성 문서화 일단 돌아가게 하기 ' +
-    'MENU 아메리카노 코드 1,000줄 디카페인 의미 없음 에너지 드링크 야근 필수템 오늘의 라떼 NullPointer 라떼 핫픽스 샷 추가 +500원 판교의 등대는 오늘도 켜져 있다',
+    "It works on my machine ¯\\_(ツ)_/¯ 금요일 배포 금지 앱 API DB 여기서 터짐 TODO 리팩토링 (2080년부터 예정) 테스트 코드 작성 문서화 일단 돌아가게 하기 " +
+    "MENU 아메리카노 코드 1,000줄 디카페인 의미 없음 에너지 드링크 야근 필수템 오늘의 라떼 NullPointer 라떼 핫픽스 샷 추가 +500원 판교의 등대는 오늘도 켜져 있다",
   ui:
-    '판교 사투리 사전 얼라인 = 맞춰보자 싱크 회의하자 ASAP 어제까지 R&R 네 일 리소스 사람 디벨롭 다시 해와 Wi-Fi pangyo_mogakco PW 1q2w3e4r! ' +
-    '서버는 UTC 타임존 버그 주의 COFFEE → CODE 커피를 코드로 바꾸는 곳 PROD 만지지 마시오 금요일 배포 버튼 누르지 마시오 러버덕 상담소 24시간 · 무료',
-  mono: 'mogakco — zsh — 판교 새벽 카페 $ git log --oneline --graph * (HEAD -> main) 0123456789abcdef 아직 남긴 커밋이 없어요. 첫 커밋의 주인공이 되어보세요. while (alive) { code(); } WELCOME to production KST UTC </>',
+    "판교 사투리 사전 얼라인 = 맞춰보자 싱크 회의하자 ASAP 어제까지 R&R 네 일 리소스 사람 디벨롭 다시 해와 Wi-Fi pangyo_mogakco PW 1q2w3e4r! " +
+    "서버는 UTC 타임존 버그 주의 COFFEE → CODE 커피를 코드로 바꾸는 곳 PROD 만지지 마시오 금요일 배포 버튼 누르지 마시오 러버덕 상담소 24시간 · 무료",
+  mono: "mogakco — zsh — 판교 새벽 카페 $ git log --oneline --graph * (HEAD -> main) 0123456789abcdef 아직 남긴 커밋이 없어요. 첫 커밋의 주인공이 되어보세요. while (alive) { code(); } WELCOME to production KST UTC </>",
 };
