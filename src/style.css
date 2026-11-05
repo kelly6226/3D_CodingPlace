@@ -542,14 +542,18 @@ button {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 10px;
+  flex-direction: column;
+  padding: 4px 10px;
   border-radius: 12px;
   background: #0a0d16;
   border: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 13px;
+}
+.term-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .term .prompt {
   color: var(--mint);
@@ -565,7 +569,7 @@ button {
   color: #e3b341;
   font-family: var(--mono);
   font-size: 13px;
-  padding: 10px 0;
+  padding: 6px 0;
 }
 .term input {
   flex: 1;
@@ -573,7 +577,7 @@ button {
   background: transparent;
   border: 0;
   outline: 0;
-  padding: 10px 0;
+  padding: 6px 0;
   font-size: 14px;
 }
 .primary {
@@ -646,6 +650,32 @@ button {
   font-size: 11.5px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* 커밋 방명록: 벽 TV를 크게 본 것처럼 화면 가운데에 넓게 (모바일은 아래 시트 그대로, 높이만 늘림) */
+@media (min-width: 641px) {
+  .sheet.board {
+    top: 50%;
+    bottom: auto;
+    translate: -50% -50%;
+    width: min(720px, calc(100vw - 48px));
+    max-height: min(80vh, 760px);
+    animation-name: board-in;
+  }
+  .sheet.board .log {
+    font-size: 14px;
+  }
+}
+@media (max-width: 640px) {
+  .sheet.board {
+    max-height: 85vh;
+  }
+}
+@keyframes board-in {
+  from {
+    opacity: 0;
+    translate: -50% calc(-50% + 10px);
+  }
 }
 
 /* 잔디 */
