@@ -1,7 +1,7 @@
 // 창밖 판교 야경: 밤새 불 켜진 오피스(판교의 등대) + 비
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { officeWindows, skyGradient } from './textures';
+import { officeWindows } from './textures';
 
 let s = 42;
 const rnd = () => {
@@ -39,8 +39,8 @@ function building(w: number, h: number, d: number, x: number, y: number, z: numb
   return g;
 }
 
-export function buildSkyline(scene: THREE.Scene) {
-  scene.background = skyGradient();
+/** 창밖 야경을 parent 안에 만들어요 (배경색은 장소 설정에서) */
+export function buildSkyline(scene: THREE.Object3D) {
 
   const groups: Record<string, THREE.BufferGeometry[]> = { warm: [], cool: [], lighthouse: [] };
 

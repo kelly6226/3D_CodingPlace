@@ -371,7 +371,7 @@ export class Avatar {
   private placeSeated(s: Seat) {
     this.seat = s;
     this.targetSeat = null;
-    this.root.position.set(s.x, Math.max(0, s.h - HIP), s.z);
+    this.root.position.set(s.x, seatY(s), s.z);
     this.yaw = s.yaw;
     this.root.rotation.y = s.yaw;
     this.mode = 'seated';
@@ -384,7 +384,7 @@ export class Avatar {
     this.mode = 'seating';
     this.trans = 0;
     this.transFrom.copy(this.root.position);
-    this.transTo.set(s.x, Math.max(0, s.h - HIP), s.z);
+    this.transTo.set(s.x, seatY(s), s.z);
     this.yawFrom = this.yaw;
     this.yawTo = s.yaw;
     this.spawnLaptop();
@@ -659,6 +659,12 @@ export class Avatar {
     const sleepy = seated && away ? 0.2 : blink;
     for (const e of this.eyes) e.scale.y = sleepy;
   }
+}
+
+/** 앉았을 때 아바타 발밑 높이. 바닥·침대는 엉덩이 높이에 맞춰 몸을 내림 */
+function seatY(s: Seat) {
+  if (s.kind === 'floor' || s.kind === 'bed') return s.h - HIP;
+  return Math.max(0, s.h - HIP);
 }
 
 function lerpAngle(a: number, b: number, t: number) {

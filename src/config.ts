@@ -1,13 +1,6 @@
 // 서비스 전체에서 쓰는 상수와 밈 데이터
 
-export const PLACE = {
-  id: 'pangyo',
-  name: '판교 새벽 카페',
-  short: '판교점',
-};
-
-/** 한 방(인스턴스)에 들어갈 수 있는 최대 인원. 넘치면 다음 호점으로 */
-export const ROOM_CAP = 20;
+/** 방 하나가 꽉 차면 2호점, 3호점… 으로 나눠요. 몇 호점까지 열지 (한 호점 정원은 장소마다 PLACES의 cap) */
 export const MAX_INSTANCE = 9;
 
 export const SPRINT_PRESETS = [
@@ -195,6 +188,8 @@ export interface RoomInfo {
   name: string;
   tags: string[];
   isPublic: boolean;
+  /** 어느 장소인지 (PLACES의 id) */
+  place: PlaceId;
   builtin?: boolean;
   creator?: string;
   createdAt?: number;
@@ -202,11 +197,11 @@ export interface RoomInfo {
 
 /** 처음부터 있는 방들. DB에 없어도 늘 목록에 떠요 */
 export const BUILTIN_ROOMS: RoomInfo[] = [
-  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true },
-  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true },
-  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true },
-  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true },
-  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true },
+  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true, place: 'cafe' },
+  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true, place: 'cafe' },
+  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true, place: 'serverroom' },
+  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true, place: 'studio' },
+  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon' },
 ];
 
 export const DEFAULT_ROOM = 'pangyo';
@@ -225,3 +220,139 @@ export function newRoomSlug(): string {
 export function roomUrl(slug: string): string {
   return `${location.origin}/r/${slug}`;
 }
+
+// ── 장소 ─────────────────────────────────────────
+// 3D 모델은 src/world/places/ 에 있고, 여기엔 화면 글자와 숫자만 있어요.
+// id는 supabase/schema.sql의 rooms_place_check와 같아야 해요.
+
+export type PlaceId = 'cafe' | 'serverroom' | 'studio' | 'hackathon';
+
+export interface PlaceMeta {
+  id: PlaceId;
+  name: string;
+  emoji: string;
+  /** 입장 화면 맨 위 한 줄 */
+  tagline: string;
+  /** 방 만들기에서 보이는 설명 */
+  desc: string;
+  /** 한 호점 정원 */
+  cap: number;
+  /** 하단 액션바의 먹고 마시기 버튼 */
+  use: { emoji: string; label: string; making: string; unit: string; lines: string[] };
+  /** 배포 버튼: 확인 창 글자, 참았을 때(calm), 경보(alarm, {name}에 누른 사람), 복구(done) */
+  deploy: { confirmTitle: string; confirmBody: string; yes: string; no: string; calm: string; alarm: string; done: string };
+}
+
+export const PLACES: PlaceMeta[] = [
+  {
+    id: 'cafe',
+    name: '판교 새벽 카페',
+    emoji: '☕',
+    tagline: '판교 새벽 카페 · 24시간 영업',
+    desc: '창밖에 판교의 등대. 긴 테이블과 창가 바',
+    cap: 20,
+    use: {
+      emoji: '☕',
+      label: '커피',
+      making: '☕ 내리는 중…',
+      unit: '잔째',
+      lines: COFFEE_LINES,
+    },
+    deploy: {
+      confirmTitle: '정말 배포하시겠어요?',
+      confirmBody: '이 버튼은 언제 눌러도 금요일 배포예요. 방에 있는 모두에게 장애 경보가 울려요.',
+      yes: '배포한다',
+      no: '참는다',
+      calm: '현명한 선택이에요. 배포는 월요일 오전에.',
+      alarm: '🚨 [P1] prod 장애 발생 · {name}님이 배포 버튼을 눌렀어요',
+      done: '✅ 롤백 완료. 오늘도 평화로운 판교예요.',
+    },
+  },
+  {
+    id: 'serverroom',
+    name: '서버실',
+    emoji: '🖥️',
+    tagline: 'B2 서버실 · 출입 기록 남음',
+    desc: '18°C, 팬 소리, 랙 사이 접이식 테이블',
+    cap: 12,
+    use: {
+      emoji: '🥤',
+      label: '음료',
+      making: '🥤 자판기 덜컹…',
+      unit: '캔째',
+      lines: [
+        '🥤 에너지 드링크 +1. 서버실은 음료 반입 금지인데…',
+        '🥤 자판기가 동전을 먹었어요. 한 번 더 눌렀더니 나왔어요',
+        '🥤 차가운 게 나왔어요. 여긴 다 차가워요',
+      ],
+    },
+    deploy: {
+      confirmTitle: 'EPO를 누르시겠어요?',
+      confirmBody: '비상 전원 차단(EPO) 버튼이에요. 누르면 서버실 전원이 전부 내려가요. 방에 있는 모두에게 경보가 울려요.',
+      yes: '누른다',
+      no: '손 뗀다',
+      calm: '손 뗐어요. 오늘도 서버실은 평화로워요.',
+      alarm: '🚨 [P0] 서버실 전원 차단 · {name}님이 EPO를 눌렀어요',
+      done: '✅ UPS가 버텼어요. 전원 복구 완료',
+    },
+  },
+  {
+    id: 'studio',
+    name: '새벽 2시 원룸',
+    emoji: '🛏️',
+    tagline: '새벽 2시 원룸 · 층간소음 주의',
+    desc: '모니터 불빛만 켜진 작은 방. 침대, 컵라면, 고양이',
+    cap: 8,
+    use: {
+      emoji: '🍜',
+      label: '컵라면',
+      making: '🍜 물 붓고 3분…',
+      unit: '개째',
+      lines: [
+        '🍜 컵라면 완성. 국물은 키보드에서 멀리',
+        '🍜 새벽 2시 컵라면은 0칼로리래요',
+        '🍜 면이 불었어요. 코드 리뷰가 길어서',
+      ],
+    },
+    deploy: {
+      confirmTitle: '집에서 배포하시겠어요?',
+      confirmBody: 'VPN 연결이 안 된 것 같은데요… 새벽 2시예요. 방에 있는 모두에게 경보가 울려요.',
+      yes: '배포한다',
+      no: '내일 할래',
+      calm: '내일 출근해서 하기로 해요. 일단 자요.',
+      alarm: '🚨 [P1] {name}님이 새벽 2시에 집에서 prod 배포함',
+      done: '✅ 일단 롤백 완료. 출근하면 혼날 예정',
+    },
+  },
+  {
+    id: 'hackathon',
+    name: '해커톤장',
+    emoji: '🏆',
+    tagline: 'HACK THE NIGHT · 데모까지 얼마 안 남음',
+    desc: '팀 테이블 4개, 피자 탑, 카운트다운 전광판',
+    cap: 20,
+    use: {
+      emoji: '🍕',
+      label: '피자',
+      making: '🍕 식은 피자 고르는 중…',
+      unit: '조각째',
+      lines: [
+        '🍕 피자 한 조각. 이미 식었어요',
+        '🍕 마지막 한 조각은 아무도 안 먹어요',
+        '🍕 페퍼로니 하나 먹고 버그 하나 고침',
+      ],
+    },
+    deploy: {
+      confirmTitle: '최종 제출하시겠어요?',
+      confirmBody: '데모가 아직 안 되는 것 같은데요. 방에 있는 모두에게 경보가 울려요.',
+      yes: '제출한다',
+      no: '조금만 더',
+      calm: '조금만 더 다듬어요. 아직 시간 있어요.',
+      alarm: '🚨 제출 서버 다운 · {name}님이 마감 3초 전에 제출했어요',
+      done: '✅ 운영진: 마감을 30분 연장합니다',
+    },
+  },
+];
+
+export const placeMeta = (id?: string | null): PlaceMeta => PLACES.find((p) => p.id === id) ?? PLACES[0];
+export const isPlaceId = (id: unknown): id is PlaceId => PLACES.some((p) => p.id === id);

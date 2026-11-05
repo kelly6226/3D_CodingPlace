@@ -10,7 +10,9 @@ import {
   SKIN_TONES,
   STATUSES,
   builtinRoom,
+  isPlaceId,
   newRoomSlug,
+  placeMeta,
   type RoomInfo,
 } from '../config';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
@@ -46,8 +48,9 @@ export class DemoNet implements Net {
   private countCbs: ((c: Record<string, number>) => void)[] = [];
 
   // ── 방 목록 (이 브라우저에만 저장) ────────────────
-  private savedRooms() {
-    return getDemoRooms<RoomInfo>();
+  private savedRooms(): RoomInfo[] {
+    // 예전에 저장한 방에는 place가 없을 수 있어서 카페로 채움
+    return getDemoRooms<RoomInfo>().map((r) => ({ ...r, place: isPlaceId(r.place) ? r.place : 'cafe' }));
   }
 
   async listRooms(): Promise<RoomInfo[]> {
@@ -59,7 +62,7 @@ export class DemoNet implements Net {
   }
 
   async createRoom(r: NewRoom): Promise<RoomInfo> {
-    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, creator: r.creator, createdAt: Date.now() };
+    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, creator: r.creator, createdAt: Date.now() };
     setDemoRooms([room, ...this.savedRooms()]);
     return room;
   }
@@ -96,10 +99,17 @@ export class DemoNet implements Net {
     this.fill(room);
   }
 
+  /** 이 장소에 봇이 몇 명까지 있을 수 있는지 (나 포함 정원, 자리 수) */
+  private maxBots() {
+    return Math.max(1, Math.min(10, this.cap - 1, SEATS.length - 1));
+  }
+  private cap = 20;
+
   /** 방에 원래 앉아 있던 단골들 채우기 */
   private fill(room: RoomInfo) {
     this.room = room.slug;
-    const n = room.builtin ? fakeCount(room.slug) : 2;
+    this.cap = placeMeta(room.place).cap;
+    const n = Math.min(this.maxBots(), room.builtin ? fakeCount(room.slug) : 2);
     const free = SEATS.slice().sort(() => Math.random() - 0.5);
     for (let i = 0; i < n; i++) {
       const s = free[i];
@@ -159,14 +169,14 @@ export class DemoNet implements Net {
     const r = Math.random();
     const b = pick(this.bots);
 
-    if (r < 0.06 && this.bots.length > 4) {
+    if (r < 0.06 && this.bots.length > Math.min(4, this.maxBots() - 1)) {
       // 퇴근
       this.bots = this.bots.filter((x) => x !== b);
       this.usedNames.delete(b.name);
       this.emit(true);
       return;
     }
-    if (r < 0.12 && this.bots.length < 10) {
+    if (r < 0.12 && this.bots.length < this.maxBots()) {
       // 새로 들어옴 → 빈자리로 걸어감
       const seat = pick(this.freeSeats());
       const nb = this.makeBot({});
@@ -197,10 +207,11 @@ export class DemoNet implements Net {
       return;
     }
     if (r < 0.27) {
-      // 커피 한 잔
+      // 커피 한 잔 (장소마다 컵라면, 피자, 음료)
       b.seat = null;
-      b.x = SPOTS.coffee.x;
-      b.z = SPOTS.coffee.z;
+      const [ux, uz] = nearestWalkable(SPOTS.use.x + rand(-0.4, 0.4), SPOTS.use.z + rand(-0.4, 0.4));
+      b.x = ux;
+      b.z = uz;
       this.h.onEvent({ type: 'move', id: b.id, x: b.x, z: b.z, seat: null });
       window.setTimeout(() => {
         b.coffee += 1;
@@ -222,7 +233,7 @@ export class DemoNet implements Net {
     if (r < 0.31) {
       // 오리한테 상담
       b.seat = null;
-      const [x, z] = nearestWalkable(SPOTS.duck.x + 0.9, SPOTS.duck.z - 0.6);
+      const [x, z] = nearestWalkable(SPOTS.pet.x + rand(-0.3, 0.3), SPOTS.pet.z + rand(-0.3, 0.3));
       b.x = x;
       b.z = z;
       b.status = 'duck';

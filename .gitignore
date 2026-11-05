@@ -1,7 +1,7 @@
 node_modules
 dist
-.env
-.env.local
-.env.*.local
+# 환경변수 파일은 전부 올리지 않음 (예시 파일만 예외)
+.env*
+!.env.example
 .vercel
 .DS_Store
