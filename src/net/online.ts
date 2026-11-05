@@ -6,9 +6,12 @@
 //
 // 보안: 채널은 공개라서 받은 값은 전부 validate.ts로 검사하고, 보낸 사람별로 속도를 제한해요.
 // 커밋 알림은 Broadcast 내용을 믿지 않고 DB에서 다시 읽어서 진짜 저장된 것만 보여줘요.
-import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
+//
+// 로그인(선택): Supabase Auth의 GitHub 로그인. PKCE 방식이라 GitHub에서 돌아올 때 주소에 붙은
+// 일회용 code를 supabase-js가 토큰으로 바꾸고 주소에서 지워요. 토큰은 이 브라우저에만 저장돼요.
+import { createClient, type RealtimeChannel, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { BUILTIN_ROOMS, MAX_INSTANCE, ROOM_SLUG_RE, builtinRoom, isPlaceId, newRoomSlug, placeMeta, type RoomInfo } from '../config';
-import type { Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
+import type { AuthUser, Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
 import { RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
 interface RoomRow {
@@ -25,6 +28,17 @@ const ROOM_COLUMNS = 'slug,name,tags,is_public,place,creator,created_at';
 /** 한 방에서 받아들이는 최대 인원 (가짜 Presence를 잔뜩 띄우는 공격 대비) */
 const MAX_PEERS = 60;
 
+const AVATAR_RE = /^https:\/\/avatars\.githubusercontent\.com\/[A-Za-z0-9/_.?=&%-]+$/;
+
+/** Supabase 사용자 → 화면에 쓸 최소 정보 (GitHub 아이디, 프로필 사진). 이메일은 버려요 */
+function toAuthUser(u: User | null | undefined): AuthUser | null {
+  if (!u) return null;
+  const m = (u.user_metadata ?? {}) as Record<string, unknown>;
+  const login = text(m.user_name ?? m.preferred_username ?? m.name, 39);
+  const avatar = typeof m.avatar_url === 'string' && AVATAR_RE.test(m.avatar_url) ? m.avatar_url : null;
+  return { id: u.id, login: login || 'github-user', avatar };
+}
+
 const toRoom = (r: RoomRow): RoomInfo | null => {
   if (!r || typeof r.slug !== 'string' || !ROOM_SLUG_RE.test(r.slug)) return null;
   return {
@@ -40,6 +54,7 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
 
 export class OnlineNet implements Net {
   readonly mode = 'online' as const;
+  readonly canLogin = true;
   instance = 1;
   room = '';
   private roomPublic = true;
@@ -65,7 +80,8 @@ export class OnlineNet implements Net {
     private clientId: string,
   ) {
     this.sb = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false },
+      // 로그인 상태를 이 브라우저에 기억하고, 토큰이 만료되기 전에 알아서 새로 받아요
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' },
       // 백그라운드 탭에서도 하트비트가 끊기지 않게 Web Worker에서 돌림
       realtime: { worker: true, params: { eventsPerSecond: 10 } },
     });
@@ -299,5 +315,34 @@ export class OnlineNet implements Net {
       .insert({ room: this.room, hash: c.hash, name: c.name, msg: c.msg, lang: c.lang });
     if (error) throw new Error(error.message);
     this.send({ type: 'commit', commit: c });
+  }
+
+  // ── 로그인 ───────────────────────────────────
+  async currentUser(): Promise<AuthUser | null> {
+    // getSession은 GitHub에서 돌아온 직후의 code 교환이 끝날 때까지 기다려줘요
+    const { data } = await this.sb.auth.getSession();
+    return toAuthUser(data.session?.user);
+  }
+
+  onAuthChange(cb: (u: AuthUser | null) => void) {
+    this.sb.auth.onAuthStateChange((_event, session) => {
+      // 콜백 안에서 다른 Supabase 호출을 기다리면 멈출 수 있어서 바깥으로 미룸 (supabase-js 권장)
+      window.setTimeout(() => cb(toAuthUser(session?.user)), 0);
+    });
+  }
+
+  async signIn() {
+    // 로그인이 끝나면 지금 보고 있던 방 주소로 돌아옴 (Supabase의 Redirect URLs에 등록된 주소만 허용)
+    const { error } = await this.sb.auth.signInWithOAuth({
+      provider: 'github',
+      options: { redirectTo: location.origin + location.pathname },
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  async signOut() {
+    // 이 브라우저에서만 로그아웃
+    const { error } = await this.sb.auth.signOut({ scope: 'local' });
+    if (error) throw new Error(error.message);
   }
 }

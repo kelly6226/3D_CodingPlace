@@ -3,15 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <title>온라인 모각코 · 판교 새벽 카페</title>
-    <meta name="description" content="판교 어딘가, 불이 꺼지지 않는 카페. 모여서 각자 코딩하는 3D 온라인 모각코." />
+    <title>온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코</title>
+    <meta name="description" content="3D 카페와 서버실, 새벽 2시 원룸에 모여 각자 코딩해요. 링크 하나로 들어와 빈자리에 앉으면 끝. 금요일 배포 버튼은 진짜 누르지 마세요." />
+    <meta name="keywords" content="온라인 모각코, 모각코, 모여서 각자 코딩, 개발자 커뮤니티, 뽀모도로, 코딩 공부, 3D" />
     <meta name="theme-color" content="#0c1020" />
+    <meta name="color-scheme" content="dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta property="og:title" content="온라인 모각코" />
-    <meta property="og:description" content="모여서 각자 코딩해요. 말은 안 해도 괜찮아요." />
+    <meta name="apple-mobile-web-app-title" content="모각코" />
+    <link rel="canonical" href="%SITE_URL%/" />
+    <!-- 링크 미리보기 (카카오톡, 슬랙, 디스코드, X). 이미지는 절대 주소여야 해서 빌드할 때 도메인을 채워 넣어요 (vite.config.ts) -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="온라인 모각코" />
+    <meta property="og:locale" content="ko_KR" />
+    <meta property="og:url" content="%SITE_URL%/" />
+    <meta property="og:title" content="온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코" />
+    <meta property="og:description" content="3D 카페와 서버실, 새벽 2시 원룸에 모여 각자 코딩해요. 링크 하나로 들어와 빈자리에 앉으면 끝. 금요일 배포 버튼은 진짜 누르지 마세요." />
+    <meta property="og:image" content="%SITE_URL%/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="밤의 판교 카페에서 후드티 입은 개발자들이 노트북으로 코딩하는 3D 장면" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코" />
+    <meta name="twitter:description" content="3D 카페와 서버실, 새벽 2시 원룸에 모여 각자 코딩해요. 링크 하나로 들어와 빈자리에 앉으면 끝." />
+    <meta name="twitter:image" content="%SITE_URL%/og.jpg" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
@@ -27,7 +44,20 @@
   <body>
     <div id="stage"></div>
     <div id="app"></div>
-    <noscript>3D 카페를 보려면 JavaScript를 켜주세요.</noscript>
+    <noscript>
+      <main style="max-width: 640px; margin: 48px auto; padding: 0 20px; color: #efe9de; font-family: sans-serif; line-height: 1.7">
+        <h1>온라인 모각코</h1>
+        <p>혼자 하면 야근, 같이 하면 모각코. 모여서 각자 코딩하는 3D 웹 공간이에요. 링크로 들어와 빈자리에 앉아 할 일을 하면 돼요. 말은 안 해도 괜찮아요.</p>
+        <ul>
+          <li>☕ 판교 새벽 카페: 통창 너머 밤새 불 켜진 오피스, 긴 테이블과 창가 바</li>
+          <li>🖥️ 서버실: 18°C, 랙 앞 바닥에 앉아 코딩. 기둥엔 EPO 버튼</li>
+          <li>🛏️ 새벽 2시 원룸: 모니터 불빛, 침대, 컵라면, 고양이</li>
+          <li>🏆 해커톤장: 팀 테이블, 피자 탑, 데모까지 남은 시간 전광판</li>
+        </ul>
+        <p>25분 스프린트로 잔디를 심고, 커밋 방명록에 한 줄 남기고, 막히면 러버덕에게 물어봐요.</p>
+        <p>3D 화면을 보려면 JavaScript를 켜주세요.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

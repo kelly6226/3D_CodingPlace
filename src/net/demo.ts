@@ -18,7 +18,7 @@ import {
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
-import type { Commit, Net, NetHandlers, NewRoom, PeerState } from './types';
+import type { AuthUser, Commit, Net, NetHandlers, NewRoom, PeerState } from './types';
 
 type SavedCommit = Commit & { room?: string };
 
@@ -36,6 +36,8 @@ export const randomHash = () =>
 
 export class DemoNet implements Net {
   readonly mode = 'demo' as const;
+  /** 데모 모드엔 서버가 없어서 로그인도 없어요 */
+  readonly canLogin = false;
   readonly instance = 1;
   room = '';
   private bots: PeerState[] = [];
@@ -315,4 +317,11 @@ export class DemoNet implements Net {
     setDemoCommits(mine);
     this.commits.unshift(c);
   }
+
+  async currentUser(): Promise<AuthUser | null> {
+    return null;
+  }
+  onAuthChange() {}
+  async signIn() {}
+  async signOut() {}
 }
