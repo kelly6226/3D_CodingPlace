@@ -1,0 +1,561 @@
+import './style.css';
+import { COFFEE_LINES, DUCK_LINES, PLACE, RACK_LINES, SPRINT_PRESETS, emoteById, statusById } from './config';
+import { sound } from './audio';
+import { DemoNet, randomHash } from './net/demo';
+import type { Commit, Net, NetEvent, PeerState } from './net/types';
+import * as store from './store';
+import { UI } from './ui/ui';
+import { SEATS, SPAWN, SPOTS, seatById } from './world/layout';
+import type { World } from './world/world';
+
+const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const app = document.getElementById('app')!;
+const stage = document.getElementById('stage')!;
+const ui = new UI(app);
+
+const profile = store.getProfile();
+ui.showIntro(profile, store.hasSavedProfile());
+ui.setSound(store.getSound());
+sound.enabled = store.getSound();
+
+const params = new URLSearchParams(location.search);
+const roomParam = params.get('room') ?? '';
+const instance = Math.max(1, Math.min(9, Number(roomParam.split('-')[1]) || 1));
+
+let world: World;
+let net: Net;
+let self: PeerState;
+let commits: Commit[] = [];
+let enteredAt = 0;
+let connWarned = false;
+
+// ── 1. 폰트 → 3D 장면 준비 ─────────────────────────
+async function boot() {
+  ui.setProgress(0.1);
+  try {
+    const { CANVAS_TEXT: t } = await import('./world/textures');
+    await Promise.race([
+      Promise.all([
+        document.fonts.load('700 40px Gaegu', t.hand),
+        document.fonts.load('500 20px "JetBrains Mono"', t.mono),
+        document.fonts.load('800 20px Pretendard', t.ui + t.mono),
+        document.fonts.load('500 20px Pretendard', t.ui + t.mono),
+      ]),
+      wait(3000),
+    ]);
+  } catch {
+    /* 폰트가 없어도 기본 글꼴로 진행 */
+  }
+  ui.setProgress(0.35);
+  const { World } = await import('./world/world');
+  ui.setProgress(0.7);
+  world = new World(stage);
+  world.start(onFrame);
+  ui.setProgress(0.9);
+
+  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
+  if (url && key && params.get('demo') !== '1') {
+    const { OnlineNet } = await import('./net/online');
+    net = new OnlineNet(url, key, instance);
+  } else {
+    net = new DemoNet();
+  }
+  ui.setMode(net.mode);
+  ui.setRoom(net.instance);
+  commits = await Promise.race([net.loadCommits(), wait(5000).then(() => [] as Commit[])]);
+  world.room.gitlog.draw(commits);
+  ui.setCommits(commits);
+  ui.ready();
+}
+
+// ── 2. 입장 ──────────────────────────────────────
+async function enter(p: store.Profile) {
+  store.saveProfile(p);
+  sound.start();
+  enteredAt = Date.now();
+  self = {
+    ...p,
+    status: 'coding',
+    seat: null,
+    seatAt: 0,
+    x: SPAWN.x,
+    z: SPAWN.z,
+    focusUntil: null,
+    coffee: store.getCoffeeToday(),
+    joinedAt: Date.now(),
+  };
+  const me = world.addAvatar(self, true);
+  ui.setSelf(self);
+
+  const connecting = net.connect(self, {
+    onPeers,
+    onEvent,
+    onStatus: (s) => {
+      ui.setConn(s);
+      if (s === 'offline' && !connWarned) {
+        connWarned = true;
+        ui.toast('실시간 서버에 연결하지 못했어요. 다시 연결하는 중이에요.', 'bad', 5000);
+      }
+      if (s === 'online') connWarned = false;
+    },
+    onRoomChange: (n) => {
+      ui.setRoom(n);
+      const u = new URL(location.href);
+      u.searchParams.set('room', `${PLACE.id}-${n}`);
+      history.replaceState(null, '', u);
+      for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
+      ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
+    },
+  });
+  // 연결이 늦어도 카페 구경은 먼저 할 수 있게
+  await Promise.race([connecting, wait(8000)]);
+
+  await wait(700);
+  // 빈자리 찾아서 앉기 (창가 바 자리 먼저)
+  const taken = takenSeats();
+  const free = SEATS.filter((s) => !taken.has(s.id));
+  const seat = free.find((s) => s.kind === 'stool') ?? free[0];
+  if (seat) {
+    sitAt(seat.id);
+    ui.toast(`${seat.label}에 앉을게요. 다른 의자를 누르면 옮길 수 있어요.`);
+  } else {
+    ui.toast('자리가 다 찼어요. 서서 코딩해도 괜찮아요.');
+    me.goTo(4.6, 0.8);
+  }
+}
+
+function takenSeats() {
+  const set = new Set<string>();
+  for (const a of world.avatars.values()) if (a.id !== self?.id && a.state.seat) set.add(a.state.seat);
+  return set;
+}
+
+function meAvatar() {
+  return world.avatars.get(self.id)!;
+}
+
+// ── 3. 내 행동 ───────────────────────────────────
+function moveTo(x: number, z: number, then?: () => void) {
+  self.seat = null;
+  self.x = x;
+  self.z = z;
+  meAvatar().goTo(x, z, null, then);
+  net.send({ type: 'move', id: self.id, x, z, seat: null });
+  net.updateSelf({ seat: null, x, z });
+}
+
+function sitAt(id: string) {
+  const s = seatById(id);
+  if (!s) return;
+  if (self.seat === id) return;
+  self.seat = id;
+  self.seatAt = Date.now();
+  self.x = s.x;
+  self.z = s.z;
+  meAvatar().goTo(s.x, s.z, id);
+  net.send({ type: 'move', id: self.id, x: s.x, z: s.z, seat: id });
+  net.updateSelf({ seat: id, seatAt: self.seatAt, x: s.x, z: s.z });
+}
+
+function setStatus(id: string) {
+  self.status = id;
+  meAvatar().apply(self);
+  ui.setSelf(self);
+  net.updateSelf({ status: id });
+}
+
+function emote(id: string, to?: string) {
+  const e = emoteById(id);
+  if (!e) return;
+  meAvatar().emote(e.emoji, e.label);
+  sound.pop();
+  net.send({ type: 'emote', id: self.id, emote: id, to });
+}
+
+let coffeeBusy = false;
+function getCoffee() {
+  if (coffeeBusy) return;
+  coffeeBusy = true;
+  moveTo(SPOTS.coffee.x, SPOTS.coffee.z, async () => {
+    sound.coffee();
+    meAvatar().say('☕ 내리는 중…');
+    await wait(2600);
+    const n = store.addCoffee();
+    self.coffee = n;
+    meAvatar().sip();
+    net.updateSelf({ coffee: n });
+    net.send({ type: 'coffee', id: self.id });
+    ui.toast(`${pick(COFFEE_LINES)} · 오늘 ${n}잔째`, 'good');
+    if (n >= 5) window.setTimeout(() => ui.toast('카페인 5잔 넘었어요. 물도 한 잔 마셔요 💧'), 1800);
+    coffeeBusy = false;
+  });
+}
+
+let lastDeploy = 0;
+async function pressDeploy() {
+  if (Date.now() - lastDeploy < 60e3) {
+    ui.toast('방금 장애 나서 롤백했어요. 1분만 참아주세요.');
+    return;
+  }
+  const fri = isFridayKST();
+  const ok = await ui.confirm(
+    fri ? '진짜 금요일인데 배포하시겠어요?' : '정말 배포하시겠어요?',
+    fri ? '오늘은 진짜 금요일이에요. 주말이 위험해요.' : `오늘은 ${weekdayKST()}이지만, 이 버튼은 언제 눌러도 금요일 배포예요. 방에 있는 모두에게 장애 경보가 울려요.`,
+    '배포한다',
+    '참는다',
+  );
+  if (!ok) {
+    ui.toast('현명한 선택이에요. 배포는 월요일 오전에.');
+    return;
+  }
+  moveTo(SPOTS.deploy.x, SPOTS.deploy.z, () => {
+    meAvatar().press();
+    window.setTimeout(() => {
+      net.send({ type: 'deploy', id: self.id, name: self.name });
+      triggerDeploy(self.name);
+    }, 350);
+  });
+}
+
+function triggerDeploy(name: string) {
+  if (Date.now() - lastDeploy < 60e3) return;
+  lastDeploy = Date.now();
+  const sec = 7;
+  world.room.alarm(sec);
+  sound.siren(sec - 0.5);
+  ui.alarm(`🚨 [P1] prod 장애 발생 · ${name}님이 배포 버튼을 눌렀어요`, sec);
+  let i = 0;
+  for (const a of world.avatars.values()) {
+    const e = pick(['🔥 불났다', '🤯 뭐야', '🙏 롤백 제발', '😱 내 코드 아님']);
+    window.setTimeout(() => a.emote(e.split(' ')[0], e.slice(e.indexOf(' ') + 1)), 300 + i++ * 180);
+  }
+  window.setTimeout(() => {
+    ui.toast('✅ 롤백 완료. 오늘도 평화로운 판교예요.', 'good', 4200);
+    sound.chime();
+  }, sec * 1000 + 300);
+}
+
+let lastCommit = 0;
+async function commit(type: string, msg: string): Promise<string | null> {
+  if (Date.now() - lastCommit < 30e3) return `커밋은 30초에 한 번씩 남길 수 있어요. ${Math.ceil((30e3 - (Date.now() - lastCommit)) / 1000)}초 남았어요.`;
+  const full = type === 'wip' ? `wip: ${msg}` : `${type}: ${msg}`;
+  const c: Commit = { hash: randomHash(), name: self.name, msg: full.slice(0, 72), lang: self.lang, at: Date.now() };
+  try {
+    await net.postCommit(c);
+  } catch (e) {
+    console.warn(e);
+    return '커밋을 저장하지 못했어요. 잠시 후 다시 해주세요.';
+  }
+  lastCommit = Date.now();
+  addCommit(c);
+  meAvatar().emote('⎇', 'commit!');
+  ui.toast(`[main ${c.hash}] ${c.msg}`, 'good');
+  return null;
+}
+
+function addCommit(c: Commit) {
+  if (commits.some((x) => x.hash === c.hash)) return;
+  commits = [c, ...commits].slice(0, 30);
+  world.room.gitlog.draw(commits);
+  ui.setCommits(commits);
+}
+
+// ── 4. 스프린트 (뽀모도로) ─────────────────────────
+let sprint = { phase: 'idle' as 'idle' | 'focus' | 'rest', endsAt: 0, total: 0, preset: '25' };
+
+function startSprint(presetId: string) {
+  const p = SPRINT_PRESETS.find((x) => x.id === presetId) ?? SPRINT_PRESETS[0];
+  store.setSprintPreset(p.id);
+  sprint = { phase: 'focus', endsAt: Date.now() + p.focus * 60e3, total: p.focus * 60e3, preset: p.id };
+  self.focusUntil = sprint.endsAt;
+  meAvatar().apply(self);
+  net.updateSelf({ focusUntil: self.focusUntil });
+  ui.setSprint(sprint);
+  ui.toast(`🎧 ${p.focus}분 스프린트 시작. 헤드폰을 썼어요.`, 'good');
+  if (!self.seat) ui.toast('자리에 앉아서 하면 더 집중돼요 (의자를 눌러보세요)');
+}
+
+function stopSprint() {
+  const wasFocus = sprint.phase === 'focus';
+  sprint = { ...sprint, phase: 'idle' };
+  self.focusUntil = null;
+  meAvatar().apply(self);
+  net.updateSelf({ focusUntil: null });
+  ui.setSprint(sprint);
+  document.title = `온라인 모각코 · ${PLACE.name}`;
+  if (wasFocus) ui.toast('스프린트를 멈췄어요. 괜찮아요, 회고 때 말하면 돼요.');
+}
+
+function tickSprint() {
+  if (sprint.phase === 'idle') return;
+  const left = sprint.endsAt - Date.now();
+  if (left <= 0) {
+    const p = SPRINT_PRESETS.find((x) => x.id === sprint.preset) ?? SPRINT_PRESETS[0];
+    sound.chime();
+    if (sprint.phase === 'focus') {
+      store.addSprint(p.focus);
+      ui.toast(`🌱 스프린트 완료! 잔디 한 칸 심었어요. ${p.rest}분 쉬어요.`, 'good', 5000);
+      meAvatar().emote('🌱', '스프린트 완료');
+      net.send({ type: 'emote', id: self.id, emote: 'ship' });
+      sprint = { ...sprint, phase: 'rest', endsAt: Date.now() + p.rest * 60e3, total: p.rest * 60e3 };
+      self.focusUntil = null;
+      meAvatar().apply(self);
+      net.updateSelf({ focusUntil: null });
+    } else {
+      ui.toast('휴식 끝! 다음 스프린트 시작해볼까요?', 'info', 5000);
+      sprint = { ...sprint, phase: 'idle' };
+      document.title = `온라인 모각코 · ${PLACE.name}`;
+    }
+  }
+  ui.setSprint(sprint);
+  if (sprint.phase !== 'idle') {
+    const l = Math.max(0, sprint.endsAt - Date.now());
+    const mm = String(Math.floor(l / 60e3)).padStart(2, '0');
+    const ss = String(Math.floor((l % 60e3) / 1000)).padStart(2, '0');
+    document.title = `${sprint.phase === 'focus' ? '🎧' : '☕'} ${mm}:${ss} · 온라인 모각코`;
+  }
+}
+
+// ── 5. 다른 사람들 ───────────────────────────────
+const known = new Map<string, PeerState>();
+
+function onPeers(peers: PeerState[]) {
+  if (!world || !self) return;
+  const ids = new Set(peers.map((p) => p.id));
+  for (const p of peers) {
+    const prev = known.get(p.id);
+    let a = world.avatars.get(p.id);
+    if (!a) {
+      const fresh = enteredAt && Date.now() - enteredAt > 2500 && p.joinedAt > enteredAt - 1000;
+      if (fresh) {
+        // 방금 들어온 사람: 문에서 걸어 들어옴
+        a = world.addAvatar({ ...p, seat: null, x: SPAWN.x, z: SPAWN.z }, false);
+        a.state.seat = p.seat;
+        if (p.seat) a.goTo(p.x, p.z, p.seat);
+        else if (p.x !== SPAWN.x || p.z !== SPAWN.z) a.goTo(p.x, p.z);
+        ui.toast(`👋 ${p.name}님이 모각코에 들어왔어요`);
+      } else {
+        a = world.addAvatar(p, false);
+      }
+    } else {
+      a.apply(p);
+      if (prev && (prev.seat !== p.seat || (!p.seat && (prev.x !== p.x || prev.z !== p.z)))) {
+        if (a.seatId !== p.seat || !p.seat) a.goTo(p.x, p.z, p.seat);
+      }
+    }
+    known.set(p.id, { ...p });
+
+    // 같은 자리를 먼저 잡은 사람이 있으면 내가 양보
+    if (self.seat && p.seat === self.seat && p.seatAt < self.seatAt) {
+      const s = seatById(self.seat)!;
+      ui.toast('앗, 누가 먼저 앉았어요. 다른 자리를 골라주세요.');
+      moveTo(s.ax, s.az);
+    }
+  }
+  for (const id of [...world.avatars.keys()]) {
+    if (id === self.id || ids.has(id)) continue;
+    const name = known.get(id)?.name;
+    world.removeAvatar(id);
+    known.delete(id);
+    if (name) ui.toast(`${name}님이 퇴근했어요`);
+  }
+  ui.setPeers(peers);
+}
+
+function onEvent(e: NetEvent) {
+  if (!world) return;
+  switch (e.type) {
+    case 'move': {
+      const a = world.avatars.get(e.id);
+      if (!a || a.isSelf) return;
+      a.state.seat = e.seat;
+      a.state.x = e.x;
+      a.state.z = e.z;
+      a.goTo(e.x, e.z, e.seat);
+      const k = known.get(e.id);
+      if (k) Object.assign(k, { seat: e.seat, x: e.x, z: e.z });
+      break;
+    }
+    case 'emote': {
+      const a = world.avatars.get(e.id);
+      const em = emoteById(e.emote);
+      if (!a || !em) return;
+      a.emote(em.emoji, em.label);
+      if (e.to && e.to === self?.id) ui.toast(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
+      break;
+    }
+    case 'deploy':
+      triggerDeploy(e.name);
+      break;
+    case 'commit':
+      addCommit(e.commit);
+      ui.toast(`⎇ ${e.commit.name}: ${e.commit.msg}`);
+      break;
+    case 'coffee':
+      world.avatars.get(e.id)?.sip();
+      break;
+    case 'typing':
+      world.avatars.get(e.id)?.typeBurst();
+      break;
+  }
+}
+
+// ── 6. 3D 클릭 ───────────────────────────────────
+function bindWorld() {
+  world.setHandlers({
+    onFloor: (x, z) => {
+      if (!self) return;
+      ui.hidePop();
+      moveTo(x, z);
+    },
+    onSeat: (id) => {
+      if (!self) return;
+      if (takenSeats().has(id)) {
+        ui.toast('누가 앉아 있는 자리예요');
+        return;
+      }
+      sitAt(id);
+    },
+    onInteract: (k) => {
+      if (!self) return;
+      switch (k) {
+        case 'coffee':
+          getCoffee();
+          break;
+        case 'duck':
+          sound.quack();
+          world.room.quack();
+          ui.toast(`🦆 ${pick(DUCK_LINES)}`, 'info', 4200);
+          break;
+        case 'deploy':
+          void pressDeploy();
+          break;
+        case 'tv':
+          ui.openSheet('commit');
+          break;
+        case 'rack':
+          ui.toast(pick(RACK_LINES));
+          break;
+        case 'whiteboard':
+          ui.toast('📝 뒷면에는 TODO가 있어요. 리팩토링은 2019년부터 예정이래요.');
+          break;
+        case 'poster':
+          ui.toast('📖 판교 사투리 사전: ASAP = 어제까지, R&R = 네 일');
+          break;
+        case 'menu':
+          ui.toast('☕ 오늘의 메뉴는 NullPointer 라떼예요. 가끔 안 나와요.');
+          break;
+      }
+    },
+    onAvatar: (id, pt) => {
+      const a = world.avatars.get(id);
+      if (!a) return;
+      ui.showPop(a.isSelf ? self : a.state, pt.x, pt.y, a.isSelf);
+    },
+  });
+}
+
+// ── 7. 매 프레임 / 주기 작업 ───────────────────────
+let secT = 0;
+let keysT = 3;
+let tagT = 0;
+function onFrame(dt: number) {
+  secT += dt;
+  if (secT >= 1) {
+    secT = 0;
+    tickSprint();
+    ui.tickClock();
+  }
+  if (!self) return;
+  // 멀리서 들리는 다른 사람들 타자 소리
+  keysT -= dt;
+  if (keysT <= 0) {
+    const coders = [...world.avatars.values()].filter((a) => !a.isSelf && a.seated && a.state.status !== 'away' && a.state.status !== 'meal').length;
+    if (coders > 0) sound.distantKeys(2 + Math.floor(Math.random() * Math.min(8, coders * 2)));
+    keysT = 1.2 + Math.random() * (6 / Math.max(1, coders));
+  }
+  // 집중 남은 시간 표시 갱신
+  tagT += dt;
+  if (tagT > 20) {
+    tagT = 0;
+    for (const a of world.avatars.values()) a.renderTag();
+  }
+}
+
+// 진짜 키보드를 치면 내 아바타도 열심히 침 (무슨 키인지는 안 봐요)
+addEventListener('keydown', (e) => {
+  if (!self || !world || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target as HTMLElement;
+  if (t.closest('input, textarea, select, [contenteditable]')) return;
+  const me = meAvatar();
+  if (!me.seated) return;
+  me.typeBurst();
+  sound.key(0.12);
+});
+
+// ── 유틸 ─────────────────────────────────────────
+function weekdayKST() {
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', weekday: 'long' }).format(new Date());
+}
+function isFridayKST() {
+  return weekdayKST() === '금요일';
+}
+
+// ── 시작 ─────────────────────────────────────────
+ui.bind({
+  onEnter: (p) => void enter(p),
+  onStatus: setStatus,
+  onEmote: (id) => emote(id),
+  onSprintStart: startSprint,
+  onSprintStop: stopSprint,
+  onCoffee: getCoffee,
+  onCommit: commit,
+  onSound: (on) => {
+    store.setSound(on);
+    sound.setEnabled(on);
+    if (on) sound.start();
+  },
+  onShare: async () => {
+    const u = new URL(location.origin + location.pathname);
+    u.searchParams.set('room', `${PLACE.id}-${net?.instance ?? 1}`);
+    try {
+      await navigator.clipboard.writeText(u.toString());
+      ui.toast('링크를 복사했어요. 같이 모각코 할 사람한테 보내주세요.', 'good');
+    } catch {
+      ui.toast(u.toString(), 'info', 6000);
+    }
+  },
+  onProfileSave: (p) => {
+    store.saveProfile(p);
+    Object.assign(self, p);
+    meAvatar().apply(self);
+    ui.setSelf(self);
+    net.updateSelf({ name: p.name, color: p.color, lang: p.lang, glasses: p.glasses });
+    ui.toast('프로필을 바꿨어요');
+  },
+  onWave: (id) => {
+    emote('wave', id);
+    const a = world.avatars.get(id);
+    if (a) ui.toast(`${a.state.name}님에게 손을 흔들었어요`);
+  },
+  onFocusPeer: (id) => {
+    const a = world.avatars.get(id);
+    if (!a) return;
+    const p = world.toScreen(a.position.clone().setY(1.6));
+    ui.showPop(a.isSelf ? self : a.state, p.x, p.y, a.isSelf);
+  },
+});
+
+ui.tickClock();
+boot()
+  .then(bindWorld)
+  .catch((err) => {
+    console.error(err);
+    ui.toast('3D 화면을 불러오지 못했어요. 새로고침하거나 다른 브라우저로 열어주세요.', 'bad', 10000);
+  });
+
+// 디버그용
+Object.assign(window, { __mogakco: { get world() { return world; }, get self() { return self; }, statusById, triggerDeploy, emote } });
