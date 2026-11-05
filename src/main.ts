@@ -1,5 +1,17 @@
 import './style.css';
-import { COFFEE_LINES, DUCK_LINES, PLACE, RACK_LINES, SPRINT_PRESETS, emoteById, statusById } from './config';
+import {
+  COFFEE_LINES,
+  DEFAULT_ROOM,
+  DUCK_LINES,
+  RACK_LINES,
+  ROOM_SLUG_RE,
+  SPRINT_PRESETS,
+  builtinRoom,
+  emoteById,
+  roomUrl,
+  statusById,
+  type RoomInfo,
+} from './config';
 import { sound } from './audio';
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
@@ -21,12 +33,22 @@ ui.setSound(store.getSound());
 sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
-const roomParam = params.get('room') ?? '';
-const instance = Math.max(1, Math.min(9, Number(roomParam.split('-')[1]) || 1));
+
+/** 주소에서 방 찾기: /r/<방>, 예전 형식 ?room=pangyo-2 도 받아줌 */
+function roomFromUrl(): { slug: string | null; instance: number } {
+  const m = location.pathname.match(/^\/r\/([a-z0-9-]{3,32})\/?$/);
+  if (m) return { slug: m[1], instance: Number(new URLSearchParams(location.search).get('n')) || 1 };
+  const legacy = new URLSearchParams(location.search).get('room');
+  const mm = legacy?.match(/^([a-z0-9-]+?)(?:-(\d))?$/);
+  if (mm && ROOM_SLUG_RE.test(mm[1])) return { slug: mm[1], instance: Number(mm[2]) || 1 };
+  return { slug: null, instance: 1 };
+}
 
 let world: World;
 let net: Net;
 let self: PeerState;
+let room: RoomInfo = builtinRoom(DEFAULT_ROOM)!;
+let startInstance = 1;
 let commits: Commit[] = [];
 let enteredAt = 0;
 let connWarned = false;
@@ -59,16 +81,45 @@ async function boot() {
   const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
   if (url && key && params.get('demo') !== '1') {
     const { OnlineNet } = await import('./net/online');
-    net = new OnlineNet(url, key, instance);
+    net = new OnlineNet(url, key, profile.id);
   } else {
     net = new DemoNet();
   }
   ui.setMode(net.mode);
-  ui.setRoom(net.instance);
-  commits = await Promise.race([net.loadCommits(), wait(5000).then(() => [] as Commit[])]);
-  world.room.gitlog.draw(commits);
-  ui.setCommits(commits);
+
+  // 링크로 들어왔으면 그 방, 아니면 기본 방
+  const fromUrl = roomFromUrl();
+  let found: RoomInfo | null = null;
+  if (fromUrl.slug) found = await Promise.race([net.getRoom(fromUrl.slug), wait(5000).then(() => null)]);
+  if (fromUrl.slug && !found) {
+    ui.toast('링크의 방을 찾을 수 없어요. 판교 새벽 카페로 안내할게요.', 'bad', 5000);
+    history.replaceState(null, '', '/');
+  }
+  room = found ?? builtinRoom(DEFAULT_ROOM)!;
+  startInstance = found ? fromUrl.instance : 1;
+  ui.setCurrentRoom(room, !!found);
+  ui.setRoom(startInstance);
+  void refreshRooms();
+  net.watchCounts((c) => ui.setCounts(c));
+  await loadRoomCommits();
   ui.ready();
+}
+
+let roomsCache: RoomInfo[] = [];
+async function refreshRooms() {
+  roomsCache = await Promise.race([net.listRooms(), wait(6000).then(() => roomsCache)]);
+  ui.setRooms(roomsCache);
+  ui.setCurrentRoom(room);
+}
+
+async function loadRoomCommits() {
+  const slug = room.slug;
+  const list = await Promise.race([net.loadCommits(slug), wait(5000).then(() => [] as Commit[])]);
+  if (slug !== room.slug) return; // 그 사이 방을 옮겼으면 버림
+  commits = list;
+  world.room.gitlog.draw(commits, room.name);
+  ui.setCommits(commits);
+  document.title = `${room.name} · 온라인 모각코`;
 }
 
 // ── 2. 입장 ──────────────────────────────────────
@@ -87,45 +138,138 @@ async function enter(p: store.Profile) {
     coffee: store.getCoffeeToday(),
     joinedAt: Date.now(),
   };
-  const me = world.addAvatar(self, true);
+  world.addAvatar(self, true);
   ui.setSelf(self);
 
-  const connecting = net.connect(self, {
-    onPeers,
-    onEvent,
-    onStatus: (s) => {
-      ui.setConn(s);
-      if (s === 'offline' && !connWarned) {
-        connWarned = true;
-        ui.toast('실시간 서버에 연결하지 못했어요. 다시 연결하는 중이에요.', 'bad', 5000);
-      }
-      if (s === 'online') connWarned = false;
+  const connecting = net.connect(
+    self,
+    {
+      onPeers,
+      onEvent,
+      onStatus: (s) => {
+        ui.setConn(s);
+        if (s === 'offline' && !connWarned) {
+          connWarned = true;
+          ui.toast('실시간 서버에 연결하지 못했어요. 다시 연결하는 중이에요.', 'bad', 5000);
+        }
+        if (s === 'online') connWarned = false;
+      },
+      onRoomChange: (n) => {
+        ui.setRoom(n);
+        for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
+        known.clear();
+        ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
+      },
     },
-    onRoomChange: (n) => {
-      ui.setRoom(n);
-      const u = new URL(location.href);
-      u.searchParams.set('room', `${PLACE.id}-${n}`);
-      history.replaceState(null, '', u);
-      for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
-      ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
-    },
-  });
+    room,
+    startInstance,
+  );
   // 연결이 늦어도 카페 구경은 먼저 할 수 있게
   await Promise.race([connecting, wait(8000)]);
+  if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', `/r/${room.slug}`);
 
   await wait(700);
-  // 빈자리 찾아서 앉기 (창가 바 자리 먼저)
+  autoSeat(true);
+}
+
+/** 빈자리 찾아서 앉기 (창가 바 자리 먼저) */
+function autoSeat(first: boolean) {
   const taken = takenSeats();
   const free = SEATS.filter((s) => !taken.has(s.id));
   const seat = free.find((s) => s.kind === 'stool') ?? free[0];
   if (seat) {
     sitAt(seat.id);
-    ui.toast(`${seat.label}에 앉을게요. 다른 의자를 누르면 옮길 수 있어요.`);
+    if (first) ui.toast(`${seat.label}에 앉을게요. 다른 의자를 누르면 옮길 수 있어요.`);
   } else {
     ui.toast('자리가 다 찼어요. 서서 코딩해도 괜찮아요.');
-    me.goTo(4.6, 0.8);
+    meAvatar().goTo(4.6, 0.8);
   }
 }
+
+// ── 방 고르기 · 옮기기 · 만들기 ─────────────────────
+async function pickRoom(slug: string, push = true) {
+  const r = roomsCache.find((x) => x.slug === slug) ?? (await net.getRoom(slug));
+  if (!r) {
+    ui.toast('방을 찾을 수 없어요', 'bad');
+    return;
+  }
+  ui.closeSheet();
+  if (!self) {
+    // 입장 전: 고르기만
+    room = r;
+    startInstance = 1;
+    ui.setCurrentRoom(r, false);
+    ui.setRoom(1);
+    history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
+    await loadRoomCommits();
+    return;
+  }
+  await switchRoom(r, push);
+}
+
+let switching = false;
+async function switchRoom(r: RoomInfo, push = true) {
+  if (switching || r.slug === room.slug) return;
+  switching = true;
+  room = r;
+  // 이전 방 사람들은 조용히 정리 (퇴근 알림 없이)
+  for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
+  known.clear();
+  ui.setPeers([]);
+  self.seat = null;
+  self.x = SPAWN.x;
+  self.z = SPAWN.z;
+  self.joinedAt = Date.now();
+  meAvatar().teleport(SPAWN.x, SPAWN.z, null);
+  enteredAt = Date.now();
+  lastDeploy = 0;
+  ui.setCurrentRoom(r, false);
+  ui.setRoom(1);
+  if (push) history.pushState(null, '', `/r/${r.slug}`);
+  void loadRoomCommits();
+  await Promise.race([net.switchRoom(r), wait(8000)]);
+  switching = false;
+  ui.toast(`🚪 ${r.name}에 들어왔어요`, 'good');
+  await wait(600);
+  autoSeat(false);
+}
+
+let lastRoomCreate = 0;
+async function createRoom(name: string, tags: string[], isPublic: boolean): Promise<string | null> {
+  const nm = name.trim().slice(0, 24);
+  if (!nm) return '방 이름을 적어주세요.';
+  if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
+  let r: RoomInfo;
+  try {
+    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic, creator: self?.name ?? profile.name });
+  } catch (e) {
+    console.warn(e);
+    return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
+  }
+  lastRoomCreate = Date.now();
+  roomsCache = [r, ...roomsCache];
+  ui.setRooms(roomsCache);
+  const copied = await copyText(roomUrl(r.slug));
+  ui.closeSheet();
+  if (self) await switchRoom(r);
+  else await pickRoom(r.slug);
+  ui.toast(copied ? `"${r.name}" 방을 만들고 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.` : `"${r.name}" 방을 만들었어요 · ${roomUrl(r.slug)}`, 'good', 6000);
+  return null;
+}
+
+/** 클립보드 복사. 브라우저가 권한을 묻느라 멈추는 경우가 있어서 1.5초만 기다림 */
+async function copyText(text: string) {
+  try {
+    return await Promise.race([navigator.clipboard.writeText(text).then(() => true), wait(1500).then(() => false)]);
+  } catch {
+    return false;
+  }
+}
+
+addEventListener('popstate', () => {
+  const slug = roomFromUrl().slug ?? DEFAULT_ROOM;
+  if (slug !== room.slug) void pickRoom(slug, false);
+});
 
 function takenSeats() {
   const set = new Set<string>();
@@ -285,7 +429,7 @@ function stopSprint() {
   meAvatar().apply(self);
   net.updateSelf({ focusUntil: null });
   ui.setSprint(sprint);
-  document.title = `온라인 모각코 · ${PLACE.name}`;
+  document.title = `${room.name} · 온라인 모각코`;
   if (wasFocus) ui.toast('스프린트를 멈췄어요. 괜찮아요, 회고 때 말하면 돼요.');
 }
 
@@ -307,7 +451,7 @@ function tickSprint() {
     } else {
       ui.toast('휴식 끝! 다음 스프린트 시작해볼까요?', 'info', 5000);
       sprint = { ...sprint, phase: 'idle' };
-      document.title = `온라인 모각코 · ${PLACE.name}`;
+      document.title = `${room.name} · 온라인 모각코`;
     }
   }
   ui.setSprint(sprint);
@@ -519,15 +663,20 @@ ui.bind({
     if (on) sound.start();
   },
   onShare: async () => {
-    const u = new URL(location.origin + location.pathname);
-    u.searchParams.set('room', `${PLACE.id}-${net?.instance ?? 1}`);
-    try {
-      await navigator.clipboard.writeText(u.toString());
-      ui.toast('링크를 복사했어요. 같이 모각코 할 사람한테 보내주세요.', 'good');
-    } catch {
-      ui.toast(u.toString(), 'info', 6000);
+    const link = roomUrl(room.slug);
+    if (!(await copyText(link))) {
+      ui.toast(link, 'info', 8000);
+      return;
     }
+    ui.toast(
+      room.isPublic
+        ? `"${room.name}" 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.`
+        : `🔒 비공개 방 링크를 복사했어요. 받은 사람만 들어올 수 있어요.`,
+      'good',
+    );
   },
+  onPickRoom: (slug) => void pickRoom(slug),
+  onCreateRoom: createRoom,
   onProfileSave: (p) => {
     store.saveProfile(p);
     Object.assign(self, p);

@@ -23,6 +23,7 @@ interface Saved {
   focusMin?: Record<string, number>;
   coffee?: { date: string; count: number };
   demoCommits?: unknown[];
+  demoRooms?: unknown[];
 }
 
 let cache: Saved = {};
@@ -131,6 +132,15 @@ export function getDemoCommits<T>(): T[] {
 
 export function setDemoCommits<T>(list: T[]) {
   cache.demoCommits = list.slice(0, 40);
+  persist();
+}
+
+export function getDemoRooms<T>(): T[] {
+  return (cache.demoRooms as T[] | undefined) ?? [];
+}
+
+export function setDemoRooms<T>(list: T[]) {
+  cache.demoRooms = list.slice(0, 30);
   persist();
 }
 

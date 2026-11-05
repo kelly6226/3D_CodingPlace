@@ -1,4 +1,5 @@
 // 실시간 연결(온라인/데모)이 공통으로 지키는 약속
+import type { RoomInfo } from '../config';
 
 export interface PeerState {
   id: string;
@@ -46,13 +47,35 @@ export interface NetHandlers {
   onStatus?(s: 'connecting' | 'online' | 'offline'): void;
 }
 
+export interface NewRoom {
+  name: string;
+  tags: string[];
+  isPublic: boolean;
+  creator: string;
+}
+
 export interface Net {
   readonly mode: 'online' | 'demo';
   readonly instance: number;
-  connect(self: PeerState, h: NetHandlers): Promise<void>;
+  /** 지금 들어가 있는 방 */
+  readonly room: string;
+
+  // ── 방 목록 (입장 전에도 씀) ─────────────────
+  /** 공개 방 목록 (기본 방 + 사람들이 만든 공개 방) */
+  listRooms(): Promise<RoomInfo[]>;
+  /** 링크로 들어온 방 찾기. 비공개 방도 찾아짐 */
+  getRoom(slug: string): Promise<RoomInfo | null>;
+  createRoom(r: NewRoom): Promise<RoomInfo>;
+  /** 공개 방마다 지금 몇 명 있는지 (방 slug → 인원) */
+  watchCounts(cb: (counts: Record<string, number>) => void): void;
+
+  // ── 방 안 ─────────────────────────────────
+  connect(self: PeerState, h: NetHandlers, room: RoomInfo, instance?: number): Promise<void>;
+  /** 다른 방으로 옮기기 (같은 연결에서 채널만 바꿈) */
+  switchRoom(room: RoomInfo): Promise<void>;
   /** 내 상태(자리, 상태 메시지 등)를 방 사람들에게 알림 */
   updateSelf(patch: Partial<PeerState>): void;
   send(e: NetEvent): void;
-  loadCommits(): Promise<Commit[]>;
+  loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
 }

@@ -1,6 +1,8 @@
--- 온라인 모각코: 커밋 방명록 테이블
--- Supabase 대시보드 > SQL Editor 에 붙여넣고 Run 하세요.
+-- 온라인 모각코: 방 목록 + 커밋 방명록
+-- Supabase 대시보드 > SQL Editor 에 붙여넣고 Run 하세요. 여러 번 실행해도 괜찮아요.
 -- (실시간 접속자/이동/이모트는 Realtime 채널만 써서 테이블이 필요 없어요)
+
+-- ── 1. 커밋 방명록 (방마다 따로) ─────────────────────
 
 create table if not exists public.commits (
   id bigint generated always as identity primary key,
@@ -51,3 +53,75 @@ drop trigger if exists commits_guard on public.commits;
 create trigger commits_guard
   before insert on public.commits
   for each row execute function public.commits_guard();
+
+
+-- ── 2. 사람들이 만든 방 ─────────────────────────────
+-- 기본 방(pangyo, frontend, backend, algo, side)은 코드에 들어 있어서 여기 없어요.
+create table if not exists public.rooms (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  slug text not null unique check (slug ~ '^[a-z0-9-]{3,32}$'),
+  name text not null check (char_length(name) between 1 and 24),
+  tags text[] not null default '{}' check (
+    cardinality(tags) <= 3
+    and tags <@ array['free','frontend','backend','mobile','ai','algo','job','side','study']::text[]
+  ),
+  is_public boolean not null default true,
+  creator text check (char_length(creator) <= 20)
+);
+
+create index if not exists rooms_public_created_idx on public.rooms (is_public, created_at desc);
+
+alter table public.rooms enable row level security;
+
+-- 목록에는 공개 방만
+drop policy if exists "public rooms are listed" on public.rooms;
+create policy "public rooms are listed"
+  on public.rooms for select
+  to anon, authenticated
+  using (is_public);
+
+-- 누구나 방을 만들 수 있음 (수정·삭제는 대시보드에서만)
+drop policy if exists "anyone can open a room" on public.rooms;
+create policy "anyone can open a room"
+  on public.rooms for insert
+  to anon, authenticated
+  with check (char_length(name) between 1 and 24);
+
+-- 비공개 방은 목록엔 안 보이고, 링크(slug)를 아는 사람만 찾을 수 있음
+create or replace function public.get_room(p_slug text)
+returns setof public.rooms
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select * from public.rooms where slug = p_slug limit 1;
+$$;
+
+revoke all on function public.get_room(text) from public;
+grant execute on function public.get_room(text) to anon, authenticated;
+
+-- 도배 방지: 전체 1분에 10개까지, 기본 방 주소는 못 씀, 만든 시각은 서버 시간
+create or replace function public.rooms_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.created_at := now();
+  if new.slug in ('pangyo', 'frontend', 'backend', 'algo', 'side', 'lobby') then
+    raise exception 'reserved room slug';
+  end if;
+  if (select count(*) from public.rooms where created_at > now() - interval '1 minute') >= 10 then
+    raise exception 'too many rooms, slow down';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists rooms_guard on public.rooms;
+create trigger rooms_guard
+  before insert on public.rooms
+  for each row execute function public.rooms_guard();
