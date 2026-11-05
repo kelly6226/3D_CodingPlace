@@ -1,6 +1,7 @@
 // Supabase 키가 없을 때: 봇들이 단골손님처럼 드나드는 데모 모드
 import {
   BOT_COMMITS,
+  BUILTIN_ROOMS,
   DEFAULT_NAMES,
   EMOTES,
   HAIR_COLORS,
@@ -8,11 +9,23 @@ import {
   LANGS,
   SKIN_TONES,
   STATUSES,
+  builtinRoom,
+  newRoomSlug,
+  type RoomInfo,
 } from '../config';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
-import { getDemoCommits, randomId, setDemoCommits } from '../store';
-import type { Commit, Net, NetHandlers, PeerState } from './types';
+import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
+import type { Commit, Net, NetHandlers, NewRoom, PeerState } from './types';
+
+type SavedCommit = Commit & { room?: string };
+
+/** 데모용 가짜 인원: 방 이름으로 정해지는 숫자 (새로고침해도 비슷하게) */
+function fakeCount(slug: string) {
+  let h = 0;
+  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  return slug === 'pangyo' ? 7 : 2 + (h % 6);
+}
 
 const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -22,27 +35,78 @@ export const randomHash = () =>
 export class DemoNet implements Net {
   readonly mode = 'demo' as const;
   readonly instance = 1;
+  room = '';
   private bots: PeerState[] = [];
   private self!: PeerState;
   private h!: NetHandlers;
   private commits: Commit[] = [];
   private usedNames = new Set<string>();
   private deployDone = false;
+  private looping = false;
+  private countCbs: ((c: Record<string, number>) => void)[] = [];
 
-  async connect(self: PeerState, h: NetHandlers) {
+  // ── 방 목록 (이 브라우저에만 저장) ────────────────
+  private savedRooms() {
+    return getDemoRooms<RoomInfo>();
+  }
+
+  async listRooms(): Promise<RoomInfo[]> {
+    return [...BUILTIN_ROOMS, ...this.savedRooms().filter((r) => r.isPublic)];
+  }
+
+  async getRoom(slug: string): Promise<RoomInfo | null> {
+    return builtinRoom(slug) ?? this.savedRooms().find((r) => r.slug === slug) ?? null;
+  }
+
+  async createRoom(r: NewRoom): Promise<RoomInfo> {
+    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, creator: r.creator, createdAt: Date.now() };
+    setDemoRooms([room, ...this.savedRooms()]);
+    return room;
+  }
+
+  watchCounts(cb: (counts: Record<string, number>) => void) {
+    this.countCbs.push(cb);
+    this.pushCounts();
+    if (this.countCbs.length === 1) window.setInterval(() => this.pushCounts(), 5000);
+  }
+
+  private pushCounts() {
+    const counts: Record<string, number> = {};
+    for (const r of [...BUILTIN_ROOMS, ...this.savedRooms()]) if (r.isPublic) counts[r.slug] = r.builtin ? fakeCount(r.slug) : 0;
+    if (this.room && this.self) counts[this.room] = this.bots.length + 1;
+    for (const f of this.countCbs) f(counts);
+  }
+
+  // ── 방 안 ─────────────────────────────────────
+  async connect(self: PeerState, h: NetHandlers, room: RoomInfo) {
     this.self = self;
     this.h = h;
     this.usedNames.add(self.name);
-    const n = 7;
+    this.fill(room);
+    h.onStatus?.('online');
+    if (!this.looping) {
+      this.looping = true;
+      this.loop();
+    }
+  }
+
+  async switchRoom(room: RoomInfo) {
+    this.bots = [];
+    this.usedNames = new Set([this.self.name]);
+    this.fill(room);
+  }
+
+  /** 방에 원래 앉아 있던 단골들 채우기 */
+  private fill(room: RoomInfo) {
+    this.room = room.slug;
+    const n = room.builtin ? fakeCount(room.slug) : 2;
     const free = SEATS.slice().sort(() => Math.random() - 0.5);
     for (let i = 0; i < n; i++) {
       const s = free[i];
-      // 처음부터 앉아 있던 단골들
       this.bots.push(this.makeBot({ seat: s.id, x: s.x, z: s.z, joinedAt: Date.now() - rand(60e3, 3600e3) }));
     }
-    h.onStatus?.('online');
-    h.onPeers(this.bots.slice());
-    this.loop();
+    this.h.onPeers(this.bots.slice());
+    this.pushCounts();
   }
 
   private makeBot(over: Partial<PeerState>): PeerState {
@@ -221,9 +285,9 @@ export class DemoNet implements Net {
     /* 데모 모드에선 보낼 곳이 없음 */
   }
 
-  async loadCommits(): Promise<Commit[]> {
-    const saved = getDemoCommits<Commit>();
-    const seed: Commit[] = Array.from({ length: 6 }, (_, i) => ({
+  async loadCommits(room: string): Promise<Commit[]> {
+    const saved = getDemoCommits<SavedCommit>().filter((c) => (c.room ?? 'pangyo') === room);
+    const seed: Commit[] = Array.from({ length: builtinRoom(room) ? 6 : 0 }, (_, i) => ({
       hash: randomHash(),
       name: pick(DEFAULT_NAMES),
       msg: pick(BOT_COMMITS),
@@ -235,8 +299,8 @@ export class DemoNet implements Net {
   }
 
   async postCommit(c: Commit) {
-    const mine = getDemoCommits<Commit>();
-    mine.unshift(c);
+    const mine = getDemoCommits<SavedCommit>();
+    mine.unshift({ ...c, room: this.room });
     setDemoCommits(mine);
     this.commits.unshift(c);
   }

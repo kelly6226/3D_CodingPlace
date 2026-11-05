@@ -459,7 +459,10 @@ export class GitLogScreen {
     this.draw([]);
   }
 
-  draw(commits: Commit[]) {
+  private title = '판교 새벽 카페';
+
+  draw(commits: Commit[], title?: string) {
+    if (title) this.title = title;
     const ctx = this.ctx;
     ctx.fillStyle = '#0f1117';
     ctx.fillRect(0, 0, 1024, 576);
@@ -476,7 +479,7 @@ export class GitLogScreen {
     ctx.font = `500 20px ${FONT_MONO}`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
-    ctx.fillText('mogakco — zsh — 판교 새벽 카페', 512, 22);
+    ctx.fillText(`mogakco — zsh — ${this.title}`, 512, 22);
     ctx.textAlign = 'left';
 
     ctx.font = `500 24px ${FONT_MONO}`;

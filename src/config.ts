@@ -167,3 +167,61 @@ export const COFFEE_LINES = [
   '☕ 커피를 코드로 바꾸는 중…',
   '☕ 오늘도 수혈 완료',
 ];
+
+// ── 방 ───────────────────────────────────────────
+
+export interface RoomTag {
+  id: string;
+  label: string;
+}
+
+/** 방에 붙일 수 있는 주제 태그 (DB 체크 조건과 같아야 함: supabase/schema.sql) */
+export const ROOM_TAGS: RoomTag[] = [
+  { id: 'free', label: '자유' },
+  { id: 'frontend', label: '프론트엔드' },
+  { id: 'backend', label: '백엔드' },
+  { id: 'mobile', label: '앱' },
+  { id: 'ai', label: 'AI·데이터' },
+  { id: 'algo', label: '알고리즘' },
+  { id: 'job', label: '취준·이직' },
+  { id: 'side', label: '사이드 프로젝트' },
+  { id: 'study', label: '공부' },
+];
+
+export const tagLabel = (id: string) => ROOM_TAGS.find((t) => t.id === id)?.label ?? id;
+
+export interface RoomInfo {
+  slug: string;
+  name: string;
+  tags: string[];
+  isPublic: boolean;
+  builtin?: boolean;
+  creator?: string;
+  createdAt?: number;
+}
+
+/** 처음부터 있는 방들. DB에 없어도 늘 목록에 떠요 */
+export const BUILTIN_ROOMS: RoomInfo[] = [
+  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true },
+  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true },
+  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true },
+  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true },
+  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true },
+];
+
+export const DEFAULT_ROOM = 'pangyo';
+export const ROOM_SLUG_RE = /^[a-z0-9-]{3,32}$/;
+
+export const builtinRoom = (slug: string) => BUILTIN_ROOMS.find((r) => r.slug === slug);
+
+export function newRoomSlug(): string {
+  const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let s = '';
+  for (let i = 0; i < 8; i++) s += abc[Math.floor(Math.random() * abc.length)];
+  return s;
+}
+
+/** 방 주소: /r/<slug>. 기본 방은 루트에서도 열림 */
+export function roomUrl(slug: string): string {
+  return `${location.origin}/r/${slug}`;
+}
