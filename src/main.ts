@@ -1,15 +1,15 @@
 import './style.css';
 import {
-  COFFEE_LINES,
   DEFAULT_ROOM,
-  DUCK_LINES,
-  RACK_LINES,
   ROOM_SLUG_RE,
   SPRINT_PRESETS,
   builtinRoom,
   emoteById,
+  isPlaceId,
+  placeMeta,
   roomUrl,
   statusById,
+  type PlaceId,
   type RoomInfo,
 } from './config';
 import { sound } from './audio';
@@ -17,7 +17,8 @@ import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { UI } from './ui/ui';
-import { SEATS, SPAWN, SPOTS, seatById } from './world/layout';
+import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
+import type { InteractData } from './world/places/kit';
 import type { World } from './world/world';
 
 const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
@@ -45,6 +46,7 @@ function roomFromUrl(): { slug: string | null; instance: number } {
 }
 
 let world: World;
+let places: typeof import('./world/places');
 let net: Net;
 let self: PeerState;
 let room: RoomInfo = builtinRoom(DEFAULT_ROOM)!;
@@ -56,8 +58,10 @@ let connWarned = false;
 // ── 1. 폰트 → 3D 장면 준비 ─────────────────────────
 async function boot() {
   ui.setProgress(0.1);
+  const placesP = import('./world/places');
+  const worldP = import('./world/world');
   try {
-    const { CANVAS_TEXT: t } = await import('./world/textures');
+    const { ALL_CANVAS_TEXT: t } = await placesP;
     await Promise.race([
       Promise.all([
         document.fonts.load('700 40px Gaegu', t.hand),
@@ -70,12 +74,8 @@ async function boot() {
   } catch {
     /* 폰트가 없어도 기본 글꼴로 진행 */
   }
+  places = await placesP;
   ui.setProgress(0.35);
-  const { World } = await import('./world/world');
-  ui.setProgress(0.7);
-  world = new World(stage);
-  world.start(onFrame);
-  ui.setProgress(0.9);
 
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
@@ -97,6 +97,15 @@ async function boot() {
   }
   room = found ?? builtinRoom(DEFAULT_ROOM)!;
   startInstance = found ? fromUrl.instance : 1;
+
+  // 방이 정해진 다음에 그 방의 장소로 3D 장면을 만듦
+  ui.setProgress(0.6);
+  const { World } = await worldP;
+  const def = places.placeDef(room.place);
+  world = new World(stage, def);
+  sound.setAmbience(def.ambience);
+  world.start(onFrame);
+  ui.setProgress(0.9);
   ui.setCurrentRoom(room, !!found);
   ui.setRoom(startInstance);
   void refreshRooms();
@@ -164,7 +173,7 @@ async function enter(p: store.Profile) {
     room,
     startInstance,
   );
-  // 연결이 늦어도 카페 구경은 먼저 할 수 있게
+  // 연결이 늦어도 방 구경은 먼저 할 수 있게
   await Promise.race([connecting, wait(8000)]);
   if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', `/r/${room.slug}`);
 
@@ -172,18 +181,29 @@ async function enter(p: store.Profile) {
   autoSeat(true);
 }
 
-/** 빈자리 찾아서 앉기 (창가 바 자리 먼저) */
+/** 장소마다 먼저 앉혀줄 자리 (카페는 창가 바, 서버실은 랙 앞 바닥…) */
+const FIRST_SEAT: Record<PlaceId, SeatKind> = { cafe: 'stool', serverroom: 'floor', studio: 'chair', hackathon: 'chair' };
+
+/** 빈자리 찾아서 앉기 */
 function autoSeat(first: boolean) {
   const taken = takenSeats();
   const free = SEATS.filter((s) => !taken.has(s.id));
-  const seat = free.find((s) => s.kind === 'stool') ?? free[0];
+  const seat = free.find((s) => s.kind === FIRST_SEAT[room.place]) ?? free[0];
   if (seat) {
     sitAt(seat.id);
-    if (first) ui.toast(`${seat.label}에 앉을게요. 다른 의자를 누르면 옮길 수 있어요.`);
+    if (first) ui.toast(`${seat.label}에 앉을게요. 다른 자리를 누르면 옮길 수 있어요.`);
   } else {
     ui.toast('자리가 다 찼어요. 서서 코딩해도 괜찮아요.');
-    meAvatar().goTo(4.6, 0.8);
+    moveTo(SPOTS.idle.x, SPOTS.idle.z);
   }
+}
+
+/** 방의 장소로 3D 장면과 배경 소리를 바꿈 */
+function applyPlace(r: RoomInfo) {
+  const def = places.placeDef(r.place);
+  const changed = world.setPlace(def);
+  sound.setAmbience(def.ambience);
+  return changed;
 }
 
 // ── 방 고르기 · 옮기기 · 만들기 ─────────────────────
@@ -198,6 +218,7 @@ async function pickRoom(slug: string, push = true) {
     // 입장 전: 고르기만
     room = r;
     startInstance = 1;
+    applyPlace(r);
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
     history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
@@ -213,9 +234,12 @@ async function switchRoom(r: RoomInfo, push = true) {
   switching = true;
   room = r;
   // 이전 방 사람들은 조용히 정리 (퇴근 알림 없이)
-  for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
+  for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id, true);
   known.clear();
   ui.setPeers([]);
+  // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
+  applyPlace(r);
+  useBusy = false;
   self.seat = null;
   self.x = SPAWN.x;
   self.z = SPAWN.z;
@@ -235,13 +259,14 @@ async function switchRoom(r: RoomInfo, push = true) {
 }
 
 let lastRoomCreate = 0;
-async function createRoom(name: string, tags: string[], isPublic: boolean): Promise<string | null> {
+async function createRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null> {
   const nm = name.trim().slice(0, 24);
   if (!nm) return '방 이름을 적어주세요.';
+  if (!isPlaceId(place)) return '장소를 골라주세요.';
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
   let r: RoomInfo;
   try {
-    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic, creator: self?.name ?? profile.name });
+    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic, place, creator: self?.name ?? profile.name });
   } catch (e) {
     console.warn(e);
     return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
@@ -283,6 +308,7 @@ function meAvatar() {
 
 // ── 3. 내 행동 ───────────────────────────────────
 function moveTo(x: number, z: number, then?: () => void) {
+  useBusy = false; // 다른 데로 가면 먹으러 가던 건 취소
   self.seat = null;
   self.x = x;
   self.z = z;
@@ -295,6 +321,7 @@ function sitAt(id: string) {
   const s = seatById(id);
   if (!s) return;
   if (self.seat === id) return;
+  useBusy = false;
   self.seat = id;
   self.seatAt = Date.now();
   self.x = s.x;
@@ -319,23 +346,29 @@ function emote(id: string, to?: string) {
   net.send({ type: 'emote', id: self.id, emote: id, to });
 }
 
-let coffeeBusy = false;
-function getCoffee() {
-  if (coffeeBusy) return;
-  coffeeBusy = true;
-  moveTo(SPOTS.coffee.x, SPOTS.coffee.z, async () => {
-    sound.coffee();
-    meAvatar().say('☕ 내리는 중…');
+/** 먹고 마시기: 카페는 커피, 서버실은 자판기, 원룸은 컵라면, 해커톤장은 피자 */
+let useBusy = false;
+function useItem() {
+  if (useBusy) return;
+  const slug = room.slug;
+  const u = placeMeta(room.place).use;
+  const amb = places.placeDef(room.place).ambience;
+  moveTo(SPOTS.use.x, SPOTS.use.z, async () => {
+    if (!useBusy || room.slug !== slug) return;
+    sound.use(amb);
+    meAvatar().say(u.making);
     await wait(2600);
+    if (!useBusy || room.slug !== slug) return;
+    useBusy = false;
     const n = store.addCoffee();
     self.coffee = n;
     meAvatar().sip();
     net.updateSelf({ coffee: n });
     net.send({ type: 'coffee', id: self.id });
-    ui.toast(`${pick(COFFEE_LINES)} · 오늘 ${n}잔째`, 'good');
-    if (n >= 5) window.setTimeout(() => ui.toast('카페인 5잔 넘었어요. 물도 한 잔 마셔요 💧'), 1800);
-    coffeeBusy = false;
+    ui.toast(`${pick(u.lines)} · 오늘 ${n}${u.unit}`, 'good');
+    if (n >= 5) window.setTimeout(() => ui.toast(room.place === 'cafe' ? '카페인 5잔 넘었어요. 물도 한 잔 마셔요 💧' : '오늘 많이 먹었어요. 물도 한 잔 마셔요 💧'), 1800);
   });
+  useBusy = true;
 }
 
 let lastDeploy = 0;
@@ -344,15 +377,17 @@ async function pressDeploy() {
     ui.toast('방금 장애 나서 롤백했어요. 1분만 참아주세요.');
     return;
   }
+  const d = placeMeta(room.place).deploy;
+  const cafe = room.place === 'cafe';
   const fri = isFridayKST();
   const ok = await ui.confirm(
-    fri ? '진짜 금요일인데 배포하시겠어요?' : '정말 배포하시겠어요?',
-    fri ? '오늘은 진짜 금요일이에요. 주말이 위험해요.' : `오늘은 ${weekdayKST()}이지만, 이 버튼은 언제 눌러도 금요일 배포예요. 방에 있는 모두에게 장애 경보가 울려요.`,
-    '배포한다',
-    '참는다',
+    cafe && fri ? '진짜 금요일인데 배포하시겠어요?' : d.confirmTitle,
+    cafe ? (fri ? '오늘은 진짜 금요일이에요. 주말이 위험해요.' : `오늘은 ${weekdayKST()}이지만, 이 버튼은 언제 눌러도 금요일 배포예요. 방에 있는 모두에게 장애 경보가 울려요.`) : d.confirmBody,
+    d.yes,
+    d.no,
   );
   if (!ok) {
-    ui.toast('현명한 선택이에요. 배포는 월요일 오전에.');
+    ui.toast(d.calm);
     return;
   }
   moveTo(SPOTS.deploy.x, SPOTS.deploy.z, () => {
@@ -368,16 +403,17 @@ function triggerDeploy(name: string) {
   if (Date.now() - lastDeploy < 60e3) return;
   lastDeploy = Date.now();
   const sec = 7;
+  const d = placeMeta(room.place).deploy;
   world.room.alarm(sec);
   sound.siren(sec - 0.5);
-  ui.alarm(`🚨 [P1] prod 장애 발생 · ${name}님이 배포 버튼을 눌렀어요`, sec);
+  ui.alarm(d.alarm.replace('{name}', name), sec);
   let i = 0;
   for (const a of world.avatars.values()) {
     const e = pick(['🔥 불났다', '🤯 뭐야', '🙏 롤백 제발', '😱 내 코드 아님']);
     window.setTimeout(() => a.emote(e.split(' ')[0], e.slice(e.indexOf(' ') + 1)), 300 + i++ * 180);
   }
   window.setTimeout(() => {
-    ui.toast('✅ 롤백 완료. 오늘도 평화로운 판교예요.', 'good', 4200);
+    ui.toast(d.done, 'good', 4200);
     sound.chime();
   }, sec * 1000 + 300);
 }
@@ -403,7 +439,7 @@ async function commit(type: string, msg: string): Promise<string | null> {
 function addCommit(c: Commit) {
   if (commits.some((x) => x.hash === c.hash)) return;
   commits = [c, ...commits].slice(0, 30);
-  world.room.gitlog.draw(commits);
+  world.room.gitlog.draw(commits, room.name);
   ui.setCommits(commits);
 }
 
@@ -563,36 +599,9 @@ function bindWorld() {
       }
       sitAt(id);
     },
-    onInteract: (k) => {
+    onInteract: (d) => {
       if (!self) return;
-      switch (k) {
-        case 'coffee':
-          getCoffee();
-          break;
-        case 'duck':
-          sound.quack();
-          world.room.quack();
-          ui.toast(`🦆 ${pick(DUCK_LINES)}`, 'info', 4200);
-          break;
-        case 'deploy':
-          void pressDeploy();
-          break;
-        case 'tv':
-          ui.openSheet('commit');
-          break;
-        case 'rack':
-          ui.toast(pick(RACK_LINES));
-          break;
-        case 'whiteboard':
-          ui.toast('📝 뒷면에는 TODO가 있어요. 리팩토링은 2019년부터 예정이래요.');
-          break;
-        case 'poster':
-          ui.toast('📖 판교 사투리 사전: ASAP = 어제까지, R&R = 네 일');
-          break;
-        case 'menu':
-          ui.toast('☕ 오늘의 메뉴는 NullPointer 라떼예요. 가끔 안 나와요.');
-          break;
-      }
+      interact(d);
     },
     onAvatar: (id, pt) => {
       const a = world.avatars.get(id);
@@ -600,6 +609,41 @@ function bindWorld() {
       ui.showPop(a.isSelf ? self : a.state, pt.x, pt.y, a.isSelf);
     },
   });
+}
+
+/** 3D 물건을 눌렀을 때. 무엇을 할지는 장소 파일(src/world/places/*)이 물건마다 붙여둔 정보로 정해요 */
+function interact(d: InteractData) {
+  switch (d.interact) {
+    case 'use':
+      useItem();
+      break;
+    case 'deploy':
+      void pressDeploy();
+      break;
+    case 'tv':
+      ui.openSheet('commit');
+      break;
+    case 'pet':
+      if (d.sound === 'meow') sound.meow();
+      else sound.quack();
+      if (d.key) world.room.poke(d.key);
+      if (d.lines?.length) ui.toast(d.sound === 'quack' ? `🦆 ${pick(d.lines)}` : pick(d.lines), 'info', 4200);
+      break;
+    case 'note':
+      if (d.lines?.length) ui.toast(fillNote(pick(d.lines)), 'info', 4200);
+      break;
+  }
+}
+
+/** 문구 속 {sleepHours}: 지금 자면 아침 9시(KST)까지 몇 시간 잘 수 있는지 */
+function fillNote(line: string) {
+  if (!line.includes('{sleepHours}')) return line;
+  const kst = new Date(Date.now() + 9 * 3600e3);
+  const nine = new Date(kst);
+  nine.setUTCHours(9, 0, 0, 0);
+  if (nine <= kst) nine.setUTCDate(nine.getUTCDate() + 1);
+  const hours = Math.round(((nine.getTime() - kst.getTime()) / 3600e3) * 2) / 2;
+  return line.replace('{sleepHours}', String(hours));
 }
 
 // ── 7. 매 프레임 / 주기 작업 ───────────────────────
@@ -655,7 +699,7 @@ ui.bind({
   onEmote: (id) => emote(id),
   onSprintStart: startSprint,
   onSprintStop: stopSprint,
-  onCoffee: getCoffee,
+  onCoffee: useItem,
   onCommit: commit,
   onSound: (on) => {
     store.setSound(on);
@@ -707,4 +751,4 @@ boot()
   });
 
 // 디버그용
-Object.assign(window, { __mogakco: { get world() { return world; }, get self() { return self; }, statusById, triggerDeploy, emote } });
+Object.assign(window, { __mogakco: { get world() { return world; }, get self() { return self; }, statusById, triggerDeploy, emote, interact } });

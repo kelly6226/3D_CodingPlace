@@ -4,14 +4,16 @@ import {
   EMOTES,
   HOODIE_COLORS,
   LANGS,
-  PLACE,
+  PLACES,
   ROOM_TAGS,
   SPRINT_PRESETS,
   STATUSES,
   langById,
+  placeMeta,
   roomUrl,
   statusById,
   tagLabel,
+  type PlaceId,
   type RoomInfo,
 } from '../config';
 import type { Commit, PeerState } from '../net/types';
@@ -37,7 +39,6 @@ function h<K extends keyof HTMLElementTagNameMap>(
     if (v === undefined || v === false) continue;
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v as EventListener);
     else if (k === 'class') el.className = String(v);
-    else if (k === 'html') el.innerHTML = String(v);
     else el.setAttribute(k, v === true ? '' : String(v));
   }
   for (const c of children) if (c !== null && c !== undefined && c !== false) el.append(c);
@@ -64,7 +65,7 @@ export interface UIHandlers {
   /** 방 고르기: 입장 전이면 선택만, 입장 후면 그 방으로 이동 */
   onPickRoom(slug: string): void;
   /** 새 방 만들기. 실패하면 이유를 돌려줌 */
-  onCreateRoom(name: string, tags: string[], isPublic: boolean): Promise<string | null>;
+  onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null>;
 }
 
 export interface SprintView {
@@ -100,7 +101,7 @@ export class UI {
           'button',
           { class: 'place-name', id: 'room-btn', onclick: () => this.toggleSheet('rooms'), 'aria-label': '방 고르기' },
           h('span', { id: 'room-lock', hidden: true }, '🔒'),
-          h('span', { id: 'room-name' }, PLACE.name),
+          h('span', { id: 'room-name' }, placeMeta('cafe').name),
           h('span', { class: 'room', id: 'room', hidden: true }, ''),
           h('span', { class: 'caret' }, '▾'),
         ),
@@ -139,11 +140,11 @@ export class UI {
         this.action('sprint', '🎯', '스프린트'),
         this.action('status', '💻', '상태', 'status-icon'),
         this.action('emote', '👍', '이모트'),
-        h('button', { class: 'act', id: 'act-coffee', onclick: () => this.h.onCoffee() }, h('span', { class: 'ai' }, '☕'), h('span', { class: 'al' }, '커피')),
+        h('button', { class: 'act', id: 'act-coffee', onclick: () => this.h.onCoffee() }, h('span', { class: 'ai', id: 'use-icon' }, '☕'), h('span', { class: 'al', id: 'use-label' }, '커피')),
         this.action('commit', '⎇', '커밋'),
         this.action('grass', '🌱', '잔디'),
       ),
-      h('div', { class: 'hint', id: 'hint' }, '바닥을 눌러 걷고, 빈 의자를 눌러 앉아요 · 드래그로 둘러보기'),
+      h('div', { class: 'hint', id: 'hint' }, '바닥을 눌러 걷고, 빈자리를 눌러 앉아요 · 드래그로 둘러보기'),
       h('section', { class: 'sheet', id: 'sheet', hidden: true, role: 'dialog' }),
       h('div', { class: 'pop', id: 'pop', hidden: true }),
       h('div', { class: 'alarm', id: 'alarm', hidden: true }, h('div', { class: 'alarm-banner', id: 'alarm-text' }, '')),
@@ -206,7 +207,7 @@ export class UI {
     };
     paintSw();
     const glasses = h('input', { type: 'checkbox', id: 'glasses', checked: p.glasses });
-    const btn = h('button', { class: 'enter', id: 'enter', disabled: true }, '카페 문 여는 중…');
+    const btn = h('button', { class: 'enter', id: 'enter', disabled: true }, '문 여는 중…');
     const bar = h('i');
 
     const form = h(
@@ -226,7 +227,7 @@ export class UI {
           this.h.onEnter(p);
         },
       },
-      h('div', { class: 'intro-kicker' }, `${PLACE.name} · 24시간 영업`),
+      h('div', { class: 'intro-kicker', id: 'intro-kicker' }, placeMeta(this.room?.place).tagline),
       h('h1', {}, '온라인 모각코'),
       h('p', { class: 'intro-lead' }, '모여서 각자 코딩해요. 빈자리에 앉아 할 일을 하면 돼요.', h('br'), '말은 안 해도 괜찮아요.'),
       h('div', { class: 'intro-room', id: 'intro-room' }),
@@ -243,7 +244,7 @@ export class UI {
       ),
       h('div', { class: 'progress' }, bar),
       btn,
-      h('p', { class: 'intro-foot' }, '창 하나 켜두면 같이 있는 거예요. 빗소리가 나와요.'),
+      h('p', { class: 'intro-foot' }, '창 하나 켜두면 같이 있는 거예요. 장소마다 배경 소리가 달라요.'),
     );
     this.root.append(h('div', { class: 'intro', id: 'intro' }, form));
     this.introBtn = btn;
@@ -272,7 +273,13 @@ export class UI {
           'div',
           { class: 'ir-main' },
           h('b', {}, r.isPublic ? '' : '🔒 ', r.name),
-          h('span', { class: 'ir-meta' }, ...this.tagChips(r.tags), r.isPublic && n !== undefined ? h('span', { class: 'cnt' + (n ? ' on' : '') }, n ? `● ${n}명` : '비어 있음') : null),
+          h(
+            'span',
+            { class: 'ir-meta' },
+            r.name === placeMeta(r.place).name ? null : this.placeChip(r.place),
+            ...this.tagChips(r.tags),
+            r.isPublic && n !== undefined ? h('span', { class: 'cnt' + (n ? ' on' : '') }, n ? `● ${n}명` : '비어 있음') : null,
+          ),
         ),
         h(
           'button',
@@ -289,6 +296,19 @@ export class UI {
 
   private tagChips(tags: string[]) {
     return tags.map((t) => h('span', { class: 'tag' }, tagLabel(t)));
+  }
+
+  private placeChip(id: PlaceId) {
+    const pm = placeMeta(id);
+    return h('span', { class: 'tag place' }, `${pm.emoji} ${pm.name}`);
+  }
+
+  /** 하단 먹고 마시기 버튼 (커피, 음료, 컵라면, 피자) */
+  private paintUse() {
+    const u = placeMeta(this.room?.place).use;
+    $('#use-icon').textContent = u.emoji;
+    $('#use-label').textContent = u.label;
+    $('#act-coffee').setAttribute('aria-label', u.label);
   }
 
   // ── 방 ─────────────────────────────────────────
@@ -310,6 +330,9 @@ export class UI {
     if (invited !== undefined) this.invited = invited;
     $('#room-name').textContent = r.name;
     $('#room-lock').hidden = r.isPublic;
+    const kicker = document.getElementById('intro-kicker');
+    if (kicker) kicker.textContent = placeMeta(r.place).tagline;
+    this.paintUse();
     if (!r.isPublic && !this.rooms.some((x) => x.slug === r.slug)) this.rooms = [r, ...this.rooms];
     this.renderIntroRoom();
     if ((this.sheet === 'rooms' && this.roomsView === 'list') || this.sheet === 'people') this.renderSheet();
@@ -615,7 +638,7 @@ export class UI {
             stat(String(grass[today] ?? 0), '오늘 스프린트'),
             stat(`${Math.round((mins[today] ?? 0) / 6) / 10}h`, '오늘 집중'),
             stat(`${getStreak()}일`, '연속 기록'),
-            stat(`${getCoffeeToday()}잔`, '오늘 커피'),
+            stat(`${getCoffeeToday()}${placeMeta(this.room?.place).use.unit.replace('째', '')}`, `오늘 ${placeMeta(this.room?.place).use.label}`),
           ),
           h('div', { class: 'grass', style: `--w:${weeks}` }, ...cells),
           h('p', { class: 'note' }, `최근 ${weeks}주 동안 스프린트 ${total}개 · ${Math.round(totalMin / 6) / 10}시간 집중`),
@@ -625,7 +648,7 @@ export class UI {
       case 'people': {
         const list = [this.self, ...this.peers].filter(Boolean);
         el.append(
-          head(`지금 ${list.length}명 모각코 중`, this.room?.name ?? PLACE.name),
+          head(`지금 ${list.length}명 모각코 중`, this.room?.name ?? placeMeta('cafe').name),
           h(
             'ul',
             { class: 'people' },
@@ -735,6 +758,32 @@ export class UI {
         }
       };
       paint();
+      let place: PlaceId = 'cafe';
+      const placeBox = h('div', { class: 'place-pick', role: 'radiogroup', 'aria-label': '장소' });
+      const paintPlaces = () => {
+        placeBox.replaceChildren(
+          ...PLACES.map((pm) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String(pm.id === place),
+                class: 'place-opt' + (pm.id === place ? ' on' : ''),
+                onclick: () => {
+                  place = pm.id;
+                  paintPlaces();
+                },
+              },
+              h('span', { class: 'po-emoji' }, pm.emoji),
+              h('b', {}, pm.name),
+              h('small', {}, pm.desc),
+              h('i', {}, `최대 ${pm.cap}명`),
+            ),
+          ),
+        );
+      };
+      paintPlaces();
       const pub = h('input', { type: 'radio', name: 'vis', id: 'vis-pub', value: 'pub', checked: true });
       const priv = h('input', { type: 'radio', name: 'vis', id: 'vis-priv', value: 'priv' });
       const err = h('p', { class: 'err', hidden: true });
@@ -753,7 +802,7 @@ export class UI {
                 return;
               }
               submit.disabled = true;
-              const problem = await this.h.onCreateRoom(n, [...picked], pub.checked);
+              const problem = await this.h.onCreateRoom(n, [...picked], pub.checked, place);
               submit.disabled = false;
               if (problem) {
                 err.hidden = false;
@@ -765,6 +814,8 @@ export class UI {
           },
           h('label', { for: 'room-name-input' }, '방 이름'),
           name,
+          h('span', { class: 'lbl' }, '장소'),
+          placeBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
           h('span', { class: 'lbl' }, '공개 여부'),
@@ -812,6 +863,7 @@ export class UI {
           'div',
           { class: 'cur-room' },
           h('div', { class: 'cr-top' }, h('b', {}, cur.isPublic ? '' : '🔒 ', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
+          h('div', { class: 'cr-place' }, this.placeChip(cur.place), h('span', {}, placeMeta(cur.place).desc)),
           h('code', { class: 'cr-link' }, roomUrl(cur.slug)),
           h('button', { class: 'primary', type: 'button', onclick: () => this.h.onShare() }, '링크 복사'),
         ),
@@ -868,8 +920,8 @@ export class UI {
                     class: 'room-item' + (here ? ' here' : ''),
                     onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
                   },
-                  h('span', { class: 'ri-name' }, r.isPublic ? '' : '🔒 ', r.name),
-                  h('span', { class: 'ri-tags' }, ...this.tagChips(r.tags)),
+                  h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.isPublic ? '' : '🔒 ', r.name),
+                  h('span', { class: 'ri-tags' }, h('span', { class: 'tag place' }, placeMeta(r.place).name), ...this.tagChips(r.tags)),
                   h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
                 ),
               );
@@ -909,7 +961,7 @@ export class UI {
       h('div', { class: 'pop-row' }, `${st.emoji} ${st.label}`),
       focusing ? h('div', { class: 'pop-row' }, `🎧 집중 중 · ${Math.ceil((p.focusUntil! - Date.now()) / 60e3)}분 남음`) : null,
       h('div', { class: 'pop-row' }, h('i', { class: 'dot', style: `background:${lang.color}` }), lang.label),
-      h('div', { class: 'pop-row muted' }, `${sinceText} · ☕ ${p.coffee}잔`),
+      h('div', { class: 'pop-row muted' }, `${sinceText} · ${placeMeta(this.room?.place).use.emoji} ${p.coffee}${placeMeta(this.room?.place).use.unit.replace('째', '')}`),
       isSelf
         ? null
         : h(

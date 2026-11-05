@@ -7,7 +7,7 @@ export const FONT_HAND = '"Gaegu", "Nanum Pen Script", "Comic Sans MS", cursive'
 export const FONT_MONO = '"JetBrains Mono", "D2Coding", Pretendard, ui-monospace, monospace';
 export const FONT_UI = 'Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif';
 
-function canvas(w: number, h: number) {
+export function canvas(w: number, h: number) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -15,7 +15,7 @@ function canvas(w: number, h: number) {
   return { c, ctx };
 }
 
-function tex(c: HTMLCanvasElement, srgb = true) {
+export function tex(c: HTMLCanvasElement, srgb = true) {
   const t = new THREE.CanvasTexture(c);
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;

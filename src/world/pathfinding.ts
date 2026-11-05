@@ -1,25 +1,31 @@
-// 격자 A* 길찾기. 방이 작아서 0.2m 칸이면 충분해요.
-import { OBSTACLES, ROOM } from './layout';
+// 격자 A* 길찾기. 장소가 바뀌면 buildGrid()로 다시 만들어요. 0.2m 칸이면 충분해요.
+import type { Box, RoomBounds } from './layout';
 
 const CELL = 0.2;
 const MARGIN = 0.22; // 아바타 반지름
-const W = Math.round((ROOM.x1 - ROOM.x0) / CELL);
-const H = Math.round((ROOM.z1 - ROOM.z0) / CELL);
-const blocked = new Uint8Array(W * H);
 
-const cx = (x: number) => Math.min(W - 1, Math.max(0, Math.floor((x - ROOM.x0) / CELL)));
-const cz = (z: number) => Math.min(H - 1, Math.max(0, Math.floor((z - ROOM.z0) / CELL)));
-const wx = (i: number) => ROOM.x0 + (i + 0.5) * CELL;
-const wz = (j: number) => ROOM.z0 + (j + 0.5) * CELL;
+let room: RoomBounds = { x0: -1, x1: 1, z0: -1, z1: 1, wallH: 3 };
+let W = 1;
+let H = 1;
+let blocked = new Uint8Array(1);
 
-(function build() {
+const cx = (x: number) => Math.min(W - 1, Math.max(0, Math.floor((x - room.x0) / CELL)));
+const cz = (z: number) => Math.min(H - 1, Math.max(0, Math.floor((z - room.z0) / CELL)));
+const wx = (i: number) => room.x0 + (i + 0.5) * CELL;
+const wz = (j: number) => room.z0 + (j + 0.5) * CELL;
+
+export function buildGrid(bounds: RoomBounds, obstacles: Box[]) {
+  room = bounds;
+  W = Math.round((room.x1 - room.x0) / CELL);
+  H = Math.round((room.z1 - room.z0) / CELL);
+  blocked = new Uint8Array(W * H);
   for (let j = 0; j < H; j++) {
     for (let i = 0; i < W; i++) {
       const x = wx(i);
       const z = wz(j);
-      let b = x < ROOM.x0 + 0.25 || x > ROOM.x1 - 0.25 || z < ROOM.z0 + 0.25 || z > ROOM.z1 - 0.25;
+      let b = x < room.x0 + 0.25 || x > room.x1 - 0.25 || z < room.z0 + 0.25 || z > room.z1 - 0.25;
       if (!b) {
-        for (const o of OBSTACLES) {
+        for (const o of obstacles) {
           if (x > o.x0 - MARGIN && x < o.x1 + MARGIN && z > o.z0 - MARGIN && z < o.z1 + MARGIN) {
             b = true;
             break;
@@ -29,19 +35,21 @@ const wz = (j: number) => ROOM.z0 + (j + 0.5) * CELL;
       blocked[j * W + i] = b ? 1 : 0;
     }
   }
-})();
+}
 
 export function isWalkable(x: number, z: number): boolean {
-  if (x < ROOM.x0 || x > ROOM.x1 || z < ROOM.z0 || z > ROOM.z1) return false;
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+  if (x < room.x0 || x > room.x1 || z < room.z0 || z > room.z1) return false;
   return !blocked[cz(z) * W + cx(x)];
 }
 
 /** 막힌 곳을 눌렀으면 가장 가까운 걸을 수 있는 칸으로 */
 export function nearestWalkable(x: number, z: number): [number, number] {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return [wx(Math.floor(W / 2)), wz(Math.floor(H / 2))];
   const i0 = cx(x);
   const j0 = cz(z);
   if (!blocked[j0 * W + i0]) return [x, z];
-  for (let r = 1; r < 25; r++) {
+  for (let r = 1; r < 40; r++) {
     let best: [number, number] | null = null;
     let bestD = Infinity;
     for (let dj = -r; dj <= r; dj++) {
@@ -99,8 +107,8 @@ export function findPath(sx: number, sz: number, tx: number, tz: number): [numbe
 
   let found = false;
   let guard = 0;
-  while (open.length && guard++ < 20000) {
-    // 칸이 3500개라 단순 선형 탐색으로도 충분히 빠름
+  while (open.length && guard++ < 40000) {
+    // 칸이 수천 개라 단순 선형 탐색으로도 충분히 빠름
     let bi = 0;
     for (let k = 1; k < open.length; k++) if (f[open[k]] < f[open[bi]]) bi = k;
     const cur = open[bi];
@@ -139,6 +147,7 @@ export function findPath(sx: number, sz: number, tx: number, tz: number): [numbe
   const cells: [number, number][] = [];
   for (let n = goal; n !== -1 && n !== start; n = from[n]) cells.push([wx(n % W), wz(Math.floor(n / W))]);
   cells.reverse();
+  if (!cells.length) return [[tx, tz]];
   cells[cells.length - 1] = [tx, tz];
 
   // 시야가 트이는 점은 건너뛰어서 매끈하게

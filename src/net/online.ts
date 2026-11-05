@@ -3,33 +3,47 @@
 //   Presence: 누가 방에 있고 어디 앉아 있는지 / Broadcast: 이동, 이모트, 배포 버튼
 // - 로비 채널 (mogakco:lobby): 공개 방마다 몇 명 있는지 세는 용도
 // - Postgres: rooms(사람들이 만든 방), commits(커밋 방명록)
+//
+// 보안: 채널은 공개라서 받은 값은 전부 validate.ts로 검사하고, 보낸 사람별로 속도를 제한해요.
+// 커밋 알림은 Broadcast 내용을 믿지 않고 DB에서 다시 읽어서 진짜 저장된 것만 보여줘요.
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
-import { BUILTIN_ROOMS, MAX_INSTANCE, ROOM_CAP, builtinRoom, newRoomSlug, type RoomInfo } from '../config';
+import { BUILTIN_ROOMS, MAX_INSTANCE, ROOM_SLUG_RE, builtinRoom, isPlaceId, newRoomSlug, placeMeta, type RoomInfo } from '../config';
 import type { Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
+import { RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
 interface RoomRow {
   slug: string;
   name: string;
   tags: string[] | null;
   is_public: boolean;
+  place: string | null;
   creator: string | null;
   created_at: string;
 }
 
-const toRoom = (r: RoomRow): RoomInfo => ({
-  slug: r.slug,
-  name: r.name,
-  tags: r.tags ?? [],
-  isPublic: r.is_public,
-  creator: r.creator ?? undefined,
-  createdAt: new Date(r.created_at).getTime(),
-});
+const ROOM_COLUMNS = 'slug,name,tags,is_public,place,creator,created_at';
+/** 한 방에서 받아들이는 최대 인원 (가짜 Presence를 잔뜩 띄우는 공격 대비) */
+const MAX_PEERS = 60;
+
+const toRoom = (r: RoomRow): RoomInfo | null => {
+  if (!r || typeof r.slug !== 'string' || !ROOM_SLUG_RE.test(r.slug)) return null;
+  return {
+    slug: r.slug,
+    name: text(r.name, 24) || r.slug,
+    tags: Array.isArray(r.tags) ? r.tags.filter((t) => typeof t === 'string').slice(0, 3) : [],
+    isPublic: r.is_public === true,
+    place: isPlaceId(r.place) ? r.place : 'cafe',
+    creator: text(r.creator, 20) || undefined,
+    createdAt: new Date(r.created_at).getTime() || undefined,
+  };
+};
 
 export class OnlineNet implements Net {
   readonly mode = 'online' as const;
   instance = 1;
   room = '';
   private roomPublic = true;
+  private cap = 20;
   private sb: SupabaseClient;
   private ch: RealtimeChannel | null = null;
   private lobby: RealtimeChannel | null = null;
@@ -39,6 +53,11 @@ export class OnlineNet implements Net {
   private h!: NetHandlers;
   private trackTimer = 0;
   private checkedCap = false;
+  /** 지금 방에 Presence로 들어와 있는 사람들. 여기 없는 id가 보낸 이벤트는 버려요 */
+  private present = new Set<string>();
+  private limiter = new RateLimiter();
+  private pendingCommits = new Set<string>();
+  private commitTimer = 0;
 
   constructor(
     url: string,
@@ -56,16 +75,17 @@ export class OnlineNet implements Net {
   async listRooms(): Promise<RoomInfo[]> {
     const { data, error } = await this.sb
       .from('rooms')
-      .select('slug,name,tags,is_public,creator,created_at')
+      .select(ROOM_COLUMNS)
       .eq('is_public', true)
       .order('created_at', { ascending: false })
       .limit(60);
     if (error) console.warn('[rooms] 불러오기 실패', error.message);
-    const made = (data as RoomRow[] | null)?.map(toRoom) ?? [];
+    const made = ((data as RoomRow[] | null) ?? []).map(toRoom).filter((r): r is RoomInfo => !!r);
     return [...BUILTIN_ROOMS, ...made.filter((r) => !builtinRoom(r.slug))];
   }
 
   async getRoom(slug: string): Promise<RoomInfo | null> {
+    if (!ROOM_SLUG_RE.test(slug)) return null;
     const b = builtinRoom(slug);
     if (b) return b;
     // 비공개 방은 목록 조회로는 안 보여서 slug로 찾는 함수를 따로 씀
@@ -84,8 +104,8 @@ export class OnlineNet implements Net {
       // 비공개 방은 select 권한이 없어서 insert 결과를 돌려받지 않음
       const { error } = await this.sb
         .from('rooms')
-        .insert({ slug, name: r.name, tags: r.tags, is_public: r.isPublic, creator: r.creator });
-      if (!error) return { slug, name: r.name, tags: r.tags, isPublic: r.isPublic, creator: r.creator, createdAt: Date.now() };
+        .insert({ slug, name: r.name, tags: r.tags, is_public: r.isPublic, place: r.place, creator: r.creator });
+      if (!error) return { slug, name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, creator: r.creator, createdAt: Date.now() };
       if (error.code !== '23505') throw new Error(error.message); // 23505 = slug 겹침 → 다시
     }
     throw new Error('방 주소를 만들지 못했어요');
@@ -106,8 +126,8 @@ export class OnlineNet implements Net {
       lobby.on('presence', { event: 'sync' }, () => {
         const counts: Record<string, number> = {};
         for (const metas of Object.values(lobby.presenceState<{ room: string }>())) {
-          const m = metas[metas.length - 1] as unknown as { room?: string };
-          if (m?.room) counts[m.room] = (counts[m.room] ?? 0) + 1;
+          const m = metas[metas.length - 1] as unknown as { room?: unknown };
+          if (typeof m?.room === 'string' && ROOM_SLUG_RE.test(m.room)) counts[m.room] = (counts[m.room] ?? 0) + 1;
         }
         for (const f of this.countCbs) f(counts);
       });
@@ -130,8 +150,7 @@ export class OnlineNet implements Net {
   async connect(self: PeerState, h: NetHandlers, room: RoomInfo, instance = 1) {
     this.self = self;
     this.h = h;
-    this.room = room.slug;
-    this.roomPublic = room.isPublic;
+    this.setRoom(room);
     this.instance = Math.max(1, Math.min(MAX_INSTANCE, instance));
     void this.announce();
     await this.join();
@@ -141,11 +160,19 @@ export class OnlineNet implements Net {
     const old = this.ch;
     this.ch = null;
     if (old) await this.sb.removeChannel(old);
-    this.room = room.slug;
-    this.roomPublic = room.isPublic;
+    this.setRoom(room);
     this.instance = 1;
     void this.announce();
     await this.join();
+  }
+
+  private setRoom(room: RoomInfo) {
+    this.room = room.slug;
+    this.roomPublic = room.isPublic;
+    this.cap = placeMeta(room.place).cap;
+    this.present.clear();
+    this.limiter.clear();
+    this.pendingCommits.clear();
   }
 
   private join(): Promise<void> {
@@ -159,13 +186,16 @@ export class OnlineNet implements Net {
 
       ch.on('presence', { event: 'sync' }, () => {
         if (this.ch !== ch) return;
-        const state = ch.presenceState<PeerState>();
+        const state = ch.presenceState<Record<string, unknown>>();
         const peers: PeerState[] = [];
         for (const [key, metas] of Object.entries(state)) {
           if (key === this.self.id || !metas.length) continue;
-          // 같은 사람이 탭을 여러 개 열었으면 마지막 것만
-          peers.push(metas[metas.length - 1] as unknown as PeerState);
+          // 같은 사람이 탭을 여러 개 열었으면 마지막 것만. 검사를 통과한 것만 받아요
+          const p = cleanPeer(metas[metas.length - 1], key);
+          if (p) peers.push(p);
+          if (peers.length >= MAX_PEERS) break;
         }
+        this.present = new Set(peers.map((p) => p.id));
         if (!this.checkedCap) {
           this.checkedCap = true;
           if (this.overCapacity(peers)) return;
@@ -174,7 +204,7 @@ export class OnlineNet implements Net {
       });
 
       ch.on('broadcast', { event: 'ev' }, ({ payload }) => {
-        if (this.ch === ch) this.h.onEvent(payload as NetEvent);
+        if (this.ch === ch) this.receive(payload, ch);
       });
 
       ch.subscribe(async (status) => {
@@ -192,11 +222,36 @@ export class OnlineNet implements Net {
     });
   }
 
+  /** Broadcast 하나 받기: 검사 → 방에 있는 사람인지 → 속도 제한 */
+  private receive(payload: unknown, ch: RealtimeChannel) {
+    const e = cleanEvent(payload);
+    if (!e) return;
+    if (e.type === 'commit') {
+      if (!this.limiter.allow('*', 'commit') && this.pendingCommits.size > 0) return;
+      if (this.pendingCommits.size < 10) this.pendingCommits.add(e.commit.hash);
+      if (!this.commitTimer) this.commitTimer = window.setTimeout(() => void this.flushCommits(ch), 800);
+      return;
+    }
+    if (!this.present.has(e.id) || e.id === this.self.id) return;
+    if (!this.limiter.allow(e.id, e.type)) return;
+    this.h.onEvent(e);
+  }
+
+  /** 알림 받은 커밋을 DB에서 다시 읽어서, 실제로 저장된 것만 화면에 */
+  private async flushCommits(ch: RealtimeChannel) {
+    this.commitTimer = 0;
+    const want = new Set(this.pendingCommits);
+    this.pendingCommits.clear();
+    const list = await this.loadCommits(this.room);
+    if (this.ch !== ch) return;
+    for (const c of list.filter((x) => want.has(x.hash)).reverse()) this.h.onEvent({ type: 'commit', commit: c });
+  }
+
   /** 정원이 넘쳤고 내가 늦게 들어온 쪽이면 다음 호점으로 이동 */
   private overCapacity(peers: PeerState[]): boolean {
-    if (peers.length < ROOM_CAP || this.instance >= MAX_INSTANCE) return false;
+    if (peers.length < this.cap || this.instance >= MAX_INSTANCE) return false;
     const earlier = peers.filter((p) => p.joinedAt < this.self.joinedAt).length;
-    if (earlier < ROOM_CAP) return false;
+    if (earlier < this.cap) return false;
     const old = this.ch;
     this.ch = null;
     void (async () => {
@@ -222,6 +277,7 @@ export class OnlineNet implements Net {
   }
 
   async loadCommits(room: string): Promise<Commit[]> {
+    if (!ROOM_SLUG_RE.test(room)) return [];
     const { data, error } = await this.sb
       .from('commits')
       .select('hash,name,msg,lang,created_at')
@@ -232,13 +288,9 @@ export class OnlineNet implements Net {
       console.warn('[commits] 불러오기 실패', error?.message);
       return [];
     }
-    return data.map((r) => ({
-      hash: r.hash as string,
-      name: r.name as string,
-      msg: r.msg as string,
-      lang: (r.lang as string) ?? '',
-      at: new Date(r.created_at as string).getTime(),
-    }));
+    return data
+      .map((r) => cleanCommit({ hash: r.hash, name: r.name, msg: r.msg, lang: r.lang ?? '', at: new Date(r.created_at as string).getTime() }))
+      .filter((c): c is Commit => !!c);
   }
 
   async postCommit(c: Commit) {
