@@ -5,7 +5,7 @@ export const SITE = {
   name: '온라인 모각코',
   title: '온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코',
   /** 개인정보 문의·계정 삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
-  contact: 'jisooshin6226@gmail.com',
+  contact: 'code_alone_together@naver.com',
 };
 
 /** 브라우저 탭 제목: 기본 방은 사이트 제목, 다른 방은 방 이름을 앞에 */
