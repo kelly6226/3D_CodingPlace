@@ -652,26 +652,31 @@ button {
   white-space: nowrap;
 }
 
-/* 커밋 방명록: 벽 TV를 크게 본 것처럼 화면 가운데에 넓게 (모바일은 아래 시트 그대로, 높이만 늘림) */
+/* 방 고르기·커밋 방명록: 화면 정가운데 모달 (.wide는 방명록처럼 더 넓게). 모바일은 아래 시트 그대로, 높이만 늘림
+   높이를 고정해서, 주제 칩으로 목록이 짧아지거나 길어져도 모달 위치가 그대로예요 (넘치면 안에서 스크롤) */
 @media (min-width: 641px) {
-  .sheet.board {
+  .sheet.center {
     top: 50%;
     bottom: auto;
     translate: -50% -50%;
-    width: min(720px, calc(100vw - 48px));
-    max-height: min(80vh, 760px);
-    animation-name: board-in;
+    width: min(560px, calc(100vw - 48px));
+    height: min(80vh, 720px);
+    max-height: none;
+    animation-name: center-in;
   }
-  .sheet.board .log {
+  .sheet.center.wide {
+    width: min(720px, calc(100vw - 48px));
+  }
+  .sheet.wide .log {
     font-size: 14px;
   }
 }
 @media (max-width: 640px) {
-  .sheet.board {
+  .sheet.center {
     max-height: 85vh;
   }
 }
-@keyframes board-in {
+@keyframes center-in {
   from {
     opacity: 0;
     translate: -50% calc(-50% + 10px);
@@ -1366,6 +1371,17 @@ button.place-name {
 .tag-filter::-webkit-scrollbar {
   display: none;
 }
+/* 마우스로 끌어서 넘길 수 있다는 표시 (src/ui/dragScroll.ts) */
+@media (hover: hover) and (pointer: fine) {
+  .tag-filter {
+    cursor: grab;
+    user-select: none;
+  }
+  .tag-filter.dragging,
+  .tag-filter.dragging .chip-sm {
+    cursor: grabbing;
+  }
+}
 .chip-sm {
   flex: none;
   padding: 6px 11px;
@@ -1518,8 +1534,16 @@ button.place-name {
   color: var(--muted);
 }
 .account small a,
+.sheet-note {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
 .intro-foot a,
-.account-note a {
+.account-note a,
+.sheet-note a {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
