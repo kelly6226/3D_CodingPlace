@@ -1,10 +1,12 @@
 # 온라인 모각코
 
+> 혼자 하면 야근, 같이 하면 모각코
+
 모여서 각자 코딩하는 3D 웹 공간이에요. 판교 어딘가 밤새 불이 안 꺼지는 카페, 18°C 서버실, 새벽 2시 원룸, 마감 직전 해커톤장 중에 골라 앉아서 같이 코딩해요. 말은 안 해도 괜찮아요.
 
 ![판교 새벽 카페: 긴 테이블과 창가 바에 개발자들이 앉아 코딩하고 있다](docs/screenshot.jpg)
 
-[온라인 순례길](https://online-camino.com)과 [산사](https://sansatemple.com) 같은 "말없이 같이 있기" 장르를 개발자 버전으로 만들었어요. 설치도 로그인도 없이 링크 하나로 들어와서, 탭 하나 켜두면 같이 있는 거예요.
+[온라인 순례길](https://online-camino.com)과 [산사](https://sansatemple.com) 같은 "말없이 같이 있기" 장르를 개발자 버전으로 만들었어요. 설치 없이 링크 하나로 들어와서, 탭 하나 켜두면 같이 있는 거예요. 로그인은 선택이에요.
 
 스터디나 팀끼리 쓰고 싶으면 방을 하나 만들어서 링크를 보내면 돼요. 받은 사람은 링크를 누르는 순간 그 방으로 들어와요.
 
@@ -119,6 +121,16 @@
 - 앉아 있는 사람 수만큼 멀리서 키보드 소리가 들려요.
 - 장소마다 배경 소리가 달라요. 카페는 빗소리와 웅성임, 서버실은 팬 소리, 원룸은 조용한 빗소리, 해커톤장은 사람들 소리. 오른쪽 위 🔊로 끌 수 있어요.
 
+### GitHub 로그인 (선택)
+
+입장 화면이나 ⚙️ 내 프로필에서 **GitHub로 로그인**을 누를 수 있어요. 안 해도 지금처럼 다 쓸 수 있어요.
+
+- 로그인하면 프로필에 GitHub 아이디와 사진이 보이고, 닉네임을 GitHub 아이디로 바로 바꿀 수 있어요.
+- 다른 사람에게는 지금처럼 내가 정한 닉네임만 보여요. GitHub 아이디나 이메일은 보내지 않아요.
+- 로그아웃은 프로필에서 언제든 할 수 있고, 계정 삭제는 **계정 삭제 요청** 버튼으로 운영자에게 메일을 보내요.
+- 만 14세 이상만 로그인할 수 있어요. 받는 정보와 보관 기간은 [개인정보 처리방침](public/privacy.html)(`/privacy.html`)에 있어요.
+- 실시간 모드에서만 보여요. 데모 모드엔 서버가 없어서 로그인 버튼이 안 나와요.
+
 ### 데모 모드와 실시간 모드
 
 - **데모 모드** (Supabase 키가 없을 때): 봇 손님 7명 정도가 자리를 옮기고, 커피를 마시고, 오리한테 상담하고, 커밋을 남겨요. 한참 있다 보면 누군가 배포 버튼도 눌러요. 화면 왼쪽 위에 "데모 모드" 표시가 떠요.
@@ -137,6 +149,8 @@
 | 커밋 메시지 (닉네임, 메시지, 언어, 시각, 방) | Supabase `commits` 테이블에 저장되고 그 방에 들어온 누구나 볼 수 있어요 |
 | 만든 방 (이름, 장소, 태그, 공개 여부, 만든 사람 닉네임) | Supabase `rooms` 테이블. 비공개 방은 목록 조회로는 안 보이고 링크로만 찾아져요 |
 | 지금 어느 공개 방에 있는지 | 방 인원을 세려고 로비 채널에 실시간으로만 공유돼요 |
+| GitHub 로그인 정보 (아이디, 이름, 프로필 사진, 이메일) | 로그인한 사람만. Supabase Auth에 저장되고 다른 방문자는 볼 수 없어요. 화면엔 아이디와 사진만 써요 |
+| 로그인 상태 (토큰) | 내 브라우저(localStorage)에만 |
 | 키보드 입력 내용 | 수집하지 않아요 |
 
 ---
@@ -153,6 +167,7 @@
 | 화면 | 다른 사람이 보낸 글자는 HTML이 아니라 글자로만 넣어요 (`textContent`) |
 | Vercel 헤더 (`vercel.json`) | CSP로 우리 사이트, Supabase, 웹폰트 말고는 스크립트와 연결을 막아요. 다른 사이트가 iframe으로 감싸는 것(클릭재킹)도 막아요 |
 | 키 | 브라우저엔 공개용 publishable 키만 들어가요. 모든 권한이 있는 secret 키는 코드에도 Vercel에도 넣지 않아요. `.env*` 파일은 git에 안 올라가요 |
+| 로그인 | GitHub 로그인은 PKCE 방식이라, 돌아오는 주소에 붙는 일회용 code를 가로채도 이 브라우저가 만든 비밀값 없이는 토큰으로 못 바꿔요. GitHub의 Client Secret은 Supabase 대시보드에만 넣어요. 로그인 후 돌아오는 주소는 Supabase **Redirect URLs**에 등록한 곳만 허용돼요 |
 
 Supabase 대시보드의 **Advisors → Security Advisor**를 가끔 열어보면, RLS가 꺼진 테이블 같은 문제를 알려줘요.
 
@@ -181,6 +196,18 @@ http://localhost:5173 을 열면 데모 모드로 떠요. 주소 뒤에 `?demo=1
 
 연결이 안 되면 왼쪽 위 점이 빨갛게 바뀌어요. Supabase 대시보드의 **Realtime → Settings**에서 public 채널 접근이 허용돼 있는지 확인해요.
 
+### GitHub 로그인 켜기 (선택)
+
+1. GitHub **Settings → Developer settings → OAuth Apps → New OAuth App**에서 앱을 만들어요.
+   - Homepage URL: 사이트 주소 (예: `https://online-mogakco.vercel.app`)
+   - Authorization callback URL: `https://<프로젝트 ref>.supabase.co/auth/v1/callback` (Supabase **Authentication → Sign In / Providers → GitHub** 화면에 나와요)
+2. 만든 앱의 **Client ID**와 새로 만든 **Client Secret**을 Supabase **Authentication → Sign In / Providers → GitHub**에 넣고 켜요. Client Secret은 코드나 Vercel에 넣지 않아요.
+3. 같은 **Sign In / Providers** 목록에서 **Email**은 꺼요. GitHub 로그인만 쓰는데, 켜두면 공개 키만으로 누구나 이메일 계정을 만들 수 있어요. 위쪽 **Allow new users to sign up**은 켜둬요 (끄면 GitHub으로 처음 오는 사람도 못 들어와요).
+4. Supabase **Authentication → URL Configuration**에서
+   - Site URL: 사이트 주소 (처음엔 `http://localhost:3000`이라 꼭 바꿔요)
+   - Redirect URLs: `https://<사이트 주소>/**`, 로컬 테스트용 `http://localhost:5173/**`
+5. 끝. 코드나 SQL은 따로 바꿀 게 없어요. 계정 삭제 요청이 메일로 오면 **Authentication → Users**에서 그 계정을 지우고 10일 안에 답장해요.
+
 ## Vercel 배포
 
 1. 이 저장소를 GitHub에 push 해요.
@@ -191,6 +218,14 @@ http://localhost:5173 을 열면 데모 모드로 떠요. 주소 뒤에 `?demo=1
 키를 안 넣고 배포하면 데모 모드로 올라가요.
 
 방 링크(`/r/<방>`)는 `vercel.json`의 rewrite가 `index.html`로 연결해줘요. Vercel이 아닌 곳에 올릴 땐 모든 경로를 `index.html`로 보내는 SPA 설정이 필요해요.
+
+### 검색과 링크 미리보기
+
+- 제목·설명·미리보기 이미지(`public/og.jpg`, 1200×630)는 `index.html`에 있어요. 카톡·슬랙에 링크를 붙이면 이 이미지와 제목이 떠요.
+- 미리보기 이미지는 절대 주소여야 해서, 빌드할 때 Vercel이 주는 대표 도메인(`VERCEL_PROJECT_PRODUCTION_URL`)을 채워 넣어요. Vercel **Settings → Environment Variables**의 **Enable access to System Environment Variables**가 켜져 있어야 해요 (기본으로 켜짐). 다른 도메인을 쓰려면 `VITE_SITE_URL=https://...`을 넣어요.
+- `robots.txt`와 `sitemap.xml`도 빌드할 때 만들어요.
+- 방 주소(`/r/<방>`)는 `X-Robots-Tag: noindex`로 검색에 안 나오게 했어요. 비공개 방 링크가 어딘가에 올라가도 검색 결과엔 안 떠요.
+- 검색에 빨리 나오게 하려면 [Google Search Console](https://search.google.com/search-console)과 [네이버 서치어드바이저](https://searchadvisor.naver.com)에 사이트를 등록하고 sitemap 주소를 제출해요.
 
 ## 비용
 
@@ -240,8 +275,12 @@ src/
       tex2.ts        새 장소용 캔버스 텍스처 (대시보드, 카운트다운, 자판기…)
       index.ts       장소 목록
   ui/ui.ts           HUD, 하단 액션바, 시트, 토스트
+public/
+  privacy.html       개인정보 처리방침
+  og.jpg             링크 미리보기 이미지 (1200×630)
 supabase/schema.sql  방명록·방 테이블 + RLS + 비공개 방 찾기 함수 + 도배 방지
-vercel.json          방 주소 rewrite + 보안 헤더(CSP)
+vercel.json          방 주소 rewrite + 보안 헤더(CSP) + 방 주소 noindex
+vite.config.ts       빌드할 때 사이트 주소를 메타 태그에 채우고 robots.txt·sitemap.xml 만들기
 ```
 
 ## 직접 바꿔보기
@@ -259,7 +298,8 @@ vercel.json          방 주소 rewrite + 보안 헤더(CSP)
 ## 아직 없는 것
 
 - 닉네임·커밋 메시지·방 이름 욕설 필터
-- 기기 간 잔디 동기화 (로그인이 필요해요)
+- 기기 간 잔디 동기화 (로그인은 생겼고, 잔디를 계정에 저장하는 건 아직이에요)
+- 사이트 안에서 바로 계정 삭제 (지금은 메일로 요청하면 운영자가 지워요)
 - 방장 기능 (방 이름 바꾸기, 방 닫기). 지금은 Supabase 대시보드 Table Editor에서만 고칠 수 있어요
 - 같이 집중한 시간 랭킹
-- 로그인 (지금은 누구나 아무 닉네임으로 들어와요. 그래서 닉네임 사칭은 막을 수 없어요)
+- 닉네임 사칭 막기 (로그인해도 다른 사람에게 보이는 건 내가 정한 닉네임이라, 같은 닉네임을 쓰는 걸 막을 수는 없어요)

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>개인정보 처리방침 · 온라인 모각코</title>
+    <meta name="description" content="온라인 모각코가 어떤 정보를 왜 받고, 어디에 얼마나 보관하고, 어떻게 지우는지 적어둔 문서예요." />
+    <meta name="theme-color" content="#0c1020" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        --bg: #0c1020;
+        --fg: #efe9de;
+        --muted: #a2a6b4;
+        --line: rgba(255, 255, 255, 0.12);
+        --amber: #f2b45a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+        line-height: 1.75;
+        font-size: 15px;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 40px 16px 80px;
+      }
+      a {
+        color: var(--amber);
+      }
+      h1 {
+        font-size: 28px;
+        margin: 16px 0 4px;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 36px 0 8px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+      .meta,
+      small {
+        color: var(--muted);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+      }
+      th {
+        background: rgba(255, 255, 255, 0.05);
+        white-space: nowrap;
+      }
+      .wrap {
+        overflow-x: auto;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      .back {
+        display: inline-block;
+        font-size: 14px;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="/">← 온라인 모각코로 돌아가기</a>
+      <h1>개인정보 처리방침</h1>
+      <p class="meta">시행일: 2026년 11월 5일</p>
+      <p>
+        온라인 모각코(이하 "서비스")는 개인 개발자 kelly6226이 운영하는 비상업 웹 서비스예요. 이 문서는 「개인정보 보호법」 제30조에 따라 서비스가 어떤 정보를 왜 받고, 어디에 얼마나 보관하고, 어떻게 지우는지 알려드려요.
+      </p>
+
+      <h2>1. 처리하는 개인정보와 목적</h2>
+      <div class="wrap">
+        <table>
+          <tr>
+            <th>언제</th>
+            <th>항목</th>
+            <th>목적</th>
+          </tr>
+          <tr>
+            <td>로그인하지 않고 이용할 때</td>
+            <td>서버에 저장하는 개인정보는 없어요. 닉네임, 아바타 모양, 상태, 앉은 자리는 같은 방 사람들에게 실시간으로만 전달되고 저장하지 않아요.</td>
+            <td>같은 방에 누가 있는지 보여주기</td>
+          </tr>
+          <tr>
+            <td>커밋 방명록을 남길 때</td>
+            <td>닉네임, 메시지, 주력 언어, 남긴 시각, 방</td>
+            <td>방명록을 그 방에 들어온 누구나 볼 수 있게 보여주기. 실명이나 연락처는 적지 마세요.</td>
+          </tr>
+          <tr>
+            <td>GitHub로 로그인할 때 (선택)</td>
+            <td>GitHub 아이디, GitHub에 공개한 이름, 프로필 사진 주소, 이메일 주소, GitHub 사용자 번호</td>
+            <td>로그인 상태 유지와 본인 확인. 이메일은 GitHub 로그인 과정에서 함께 전달되어 저장되지만 화면에 보여주거나 다른 이용자에게 보내지 않아요.</td>
+          </tr>
+          <tr>
+            <td>사이트에 접속할 때 (자동)</td>
+            <td>IP 주소, 브라우저 정보, 접속 시각 같은 접속 기록</td>
+            <td>보안과 장애 대응. 아래 4번의 호스팅·데이터베이스 업체 서버에 남아요.</td>
+          </tr>
+        </table>
+      </div>
+      <p>
+        프로필, 잔디(스프린트 기록), 소리 설정, 로그인 상태는 이용자 기기의 브라우저 저장소(localStorage)에만 저장돼요. 브라우저 설정에서 사이트 데이터를 지우면 함께 지워져요. 광고나 분석용 쿠키는 쓰지 않아요.
+      </p>
+      <p>키보드를 누르면 아바타가 타자를 치는데, 몇 번 눌렀는지만 반응하고 어떤 키를 눌렀는지는 보거나 보내지 않아요.</p>
+
+      <h2>2. 보유 기간</h2>
+      <ul>
+        <li>GitHub 로그인 정보: 계정 삭제를 요청할 때까지. 요청하면 지체 없이 지워요.</li>
+        <li>커밋 방명록: 운영자가 지우거나 서비스를 끝낼 때까지. 본인이 남긴 커밋을 지워달라고 요청하면 지워요.</li>
+        <li>접속 기록: 4번 업체들이 정한 보관 기간 동안</li>
+      </ul>
+
+      <h2>3. 제3자 제공</h2>
+      <p>이용자의 개인정보를 다른 사람이나 회사에 제공하지 않아요.</p>
+
+      <h2>4. 처리 위탁과 국외 이전</h2>
+      <p>
+        서비스는 직접 서버를 두지 않고 아래 업체의 서비스를 써요. 업체들은 모두 미국 회사여서, 「개인정보 보호법」 제28조의8 제1항 제3호에 따라 이전 내용을 여기에 공개해요. 서비스를 이용하는 동안 인터넷으로 수시로 전송돼요.
+      </p>
+      <div class="wrap">
+        <table>
+          <tr>
+            <th>업체 (국가)</th>
+            <th>하는 일</th>
+            <th>이전되는 항목</th>
+            <th>보관 위치·기간</th>
+          </tr>
+          <tr>
+            <td>Supabase, Inc. (미국)<br /><small><a href="https://supabase.com/privacy" rel="noopener">개인정보 정책</a></small></td>
+            <td>데이터베이스(방, 커밋 방명록), GitHub 로그인, 실시간 통신</td>
+            <td>1번의 커밋 방명록, GitHub 로그인 정보, 접속 기록</td>
+            <td>대한민국(서울 리전) 데이터센터. 2번의 보유 기간 동안</td>
+          </tr>
+          <tr>
+            <td>Vercel Inc. (미국)<br /><small><a href="https://vercel.com/legal/privacy-policy" rel="noopener">개인정보 정책</a></small></td>
+            <td>웹사이트 호스팅</td>
+            <td>접속 기록</td>
+            <td>이용자와 가까운 Vercel 서버. Vercel이 정한 기간 동안</td>
+          </tr>
+        </table>
+      </div>
+      <p>
+        국외 이전을 원하지 않으면 GitHub로 로그인하지 않고 이용하면 돼요. 그래도 사이트를 여는 순간 접속 기록은 남아서, 이것까지 원하지 않으면 서비스를 이용하지 않는 수밖에 없어요.
+      </p>
+      <p>
+        <small>
+          함께 알아두면 좋은 것: GitHub 로그인은 이용자가 GitHub(GitHub, Inc., 미국) 화면에서 직접 하고, 그 과정은
+          <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">GitHub 개인정보 처리방침</a>을 따라요. 글꼴은 Google Fonts와 jsDelivr에서 불러와서, 이때 접속 IP가 두 업체에 전달될 수 있어요.
+        </small>
+      </p>
+
+      <h2>5. 파기 방법</h2>
+      <p>
+        삭제 요청을 받으면 Supabase 관리 화면에서 해당 계정과 로그인 정보, 요청한 커밋을 지워요. 지운 정보는 되살릴 수 없어요.
+      </p>
+
+      <h2>6. 이용자의 권리와 행사 방법</h2>
+      <ul>
+        <li>언제든 내 정보를 보여달라고(열람), 고치거나 지워달라고(정정·삭제), 처리를 멈춰달라고 요청할 수 있어요.</li>
+        <li>아래 7번 메일로 요청해 주세요. 로그인한 상태라면 사이트의 ⚙️ 내 프로필 → <b>계정 삭제 요청</b>을 누르면 필요한 내용이 채워진 메일이 열려요.</li>
+        <li>요청을 받은 날부터 10일 안에 처리하고 결과를 알려드려요.</li>
+        <li>로그아웃은 ⚙️ 내 프로필에서 언제든 할 수 있어요. GitHub 쪽 연결은 GitHub <b>Settings → Applications → Authorized OAuth Apps</b>에서 끊을 수 있어요.</li>
+      </ul>
+
+      <h2>7. 개인정보 보호책임자</h2>
+      <p>운영자 kelly6226 · 이메일 <a href="mailto:kelly6226@naver.com">kelly6226@naver.com</a></p>
+
+      <h2>8. 만 14세 미만 아동</h2>
+      <p>GitHub 로그인은 만 14세 이상만 이용할 수 있어요. 로그인하지 않고 둘러보는 건 누구나 할 수 있어요.</p>
+
+      <h2>9. 안전하게 지키기 위한 조치</h2>
+      <ul>
+        <li>모든 통신은 HTTPS로 암호화돼요.</li>
+        <li>데이터베이스는 권한 규칙(RLS)으로 막혀 있어서, 사이트 방문자는 방과 커밋 방명록을 읽고 쓰기만 할 수 있고 고치거나 지울 수 없어요. 로그인 정보는 방문자가 볼 수 없어요.</li>
+        <li>꼭 필요한 정보만 받고, 이메일은 화면이나 다른 이용자에게 쓰지 않아요.</li>
+      </ul>
+
+      <h2>10. 권익 침해 구제</h2>
+      <p>개인정보 침해에 대한 상담이나 신고가 필요하면 아래 기관에 문의할 수 있어요.</p>
+      <ul>
+        <li>개인정보침해 신고센터: 국번 없이 118 (privacy.kisa.or.kr)</li>
+        <li>개인정보 분쟁조정위원회: 1833-6972 (www.kopico.go.kr)</li>
+        <li>대검찰청: 국번 없이 1301 (www.spo.go.kr)</li>
+        <li>경찰청: 국번 없이 182 (ecrm.police.go.kr)</li>
+      </ul>
+
+      <h2>11. 바뀔 때</h2>
+      <p>이 방침이 바뀌면 시행 7일 전부터 이 페이지에 알려드려요. 위 시행일이 가장 최근 버전이에요.</p>
+    </main>
+  </body>
+</html>

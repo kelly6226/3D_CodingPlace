@@ -6,6 +6,7 @@ import {
   LANGS,
   PLACES,
   ROOM_TAGS,
+  SITE,
   SPRINT_PRESETS,
   STATUSES,
   langById,
@@ -16,7 +17,7 @@ import {
   type PlaceId,
   type RoomInfo,
 } from '../config';
-import type { Commit, PeerState } from '../net/types';
+import type { AuthUser, Commit, PeerState } from '../net/types';
 import {
   getCoffeeToday,
   getFocusMin,
@@ -66,6 +67,9 @@ export interface UIHandlers {
   onPickRoom(slug: string): void;
   /** 새 방 만들기. 실패하면 이유를 돌려줌 */
   onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null>;
+  /** GitHub 로그인 (선택) */
+  onSignIn(): void;
+  onSignOut(): void;
 }
 
 export interface SprintView {
@@ -90,6 +94,8 @@ export class UI {
   private entered = false;
   private tagFilter = '';
   private roomsView: 'list' | 'create' = 'list';
+  private account: AuthUser | null = null;
+  private canLogin = false;
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -242,9 +248,15 @@ export class UI {
         sw,
         h('label', { class: 'check', for: 'glasses' }, glasses, h('span', {}, '안경 쓰기')),
       ),
+      h('div', { class: 'intro-account', id: 'intro-account', hidden: true }),
       h('div', { class: 'progress' }, bar),
       btn,
-      h('p', { class: 'intro-foot' }, '창 하나 켜두면 같이 있는 거예요. 장소마다 배경 소리가 달라요.'),
+      h(
+        'p',
+        { class: 'intro-foot' },
+        '창 하나 켜두면 같이 있는 거예요. 장소마다 배경 소리가 달라요. · ',
+        h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침'),
+      ),
     );
     this.root.append(h('div', { class: 'intro', id: 'intro' }, form));
     this.introBtn = btn;
@@ -291,6 +303,43 @@ export class UI {
           '다른 방',
         ),
       ),
+    );
+  }
+
+  // ── GitHub 로그인 (선택) ────────────────────────
+  setAccount(u: AuthUser | null, canLogin: boolean) {
+    this.account = u;
+    this.canLogin = canLogin;
+    const el = document.getElementById('intro-account');
+    if (el) {
+      el.hidden = !canLogin;
+      el.replaceChildren(...(canLogin ? [this.accountRow()] : []));
+    }
+    if (this.sheet === 'profile') this.renderSheet();
+  }
+
+  /** 아직 저장한 프로필이 없으면 입장 화면 닉네임을 GitHub 아이디로 채워줌 */
+  suggestNick(name: string) {
+    const nick = document.getElementById('nick') as HTMLInputElement | null;
+    if (nick && !this.returning) nick.value = name.slice(0, 12);
+  }
+
+  private accountRow(): HTMLElement {
+    const u = this.account;
+    if (!u) {
+      return h(
+        'div',
+        { class: 'account' },
+        h('button', { type: 'button', class: 'gh-btn', onclick: () => this.h.onSignIn() }, 'GitHub로 로그인'),
+        h('small', {}, '선택이에요 · 만 14세 이상만 · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
+      );
+    }
+    return h(
+      'div',
+      { class: 'account in' },
+      u.avatar ? h('img', { class: 'gh-avatar', src: u.avatar + (u.avatar.includes('?') ? '&' : '?') + 's=64', alt: '', width: 28, height: 28, referrerpolicy: 'no-referrer' }) : null,
+      h('span', { class: 'gh-login' }, '@' + u.login),
+      h('button', { type: 'button', class: 'ghost-sm', onclick: () => this.h.onSignOut() }, '로그아웃'),
     );
   }
 
@@ -699,8 +748,45 @@ export class UI {
           );
         }
         const glasses = h('input', { type: 'checkbox', id: 'p-glasses', checked: p.glasses });
+        const acct = this.account;
+        const accountBox = this.canLogin
+            ? h(
+                'div',
+                { class: 'account-box' },
+                h('span', { class: 'lbl' }, 'GitHub 계정'),
+                this.accountRow(),
+                acct
+                  ? h(
+                      'div',
+                      { class: 'account-more' },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          class: 'ghost-sm',
+                          onclick: () => {
+                            nick.value = acct.login.slice(0, 12);
+                            nick.focus();
+                          },
+                        },
+                        `닉네임을 ${acct.login.slice(0, 12)}로`,
+                      ),
+                      h(
+                        'a',
+                        {
+                          class: 'danger-link',
+                          href: `mailto:${SITE.contact}?subject=${encodeURIComponent('[온라인 모각코] 계정 삭제 요청')}&body=${encodeURIComponent(`GitHub 아이디: @${acct.login}\n계정 번호: ${acct.id}\n\n위 계정과 로그인 정보의 삭제를 요청합니다.`)}`,
+                        },
+                        '계정 삭제 요청',
+                      ),
+                    )
+                  : null,
+                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.'),
+              )
+            : null;
         el.append(
           head('내 프로필'),
+          ...(accountBox ? [accountBox] : []),
           h(
             'form',
             {
@@ -863,7 +949,13 @@ export class UI {
           'div',
           { class: 'cur-room' },
           h('div', { class: 'cr-top' }, h('b', {}, cur.isPublic ? '' : '🔒 ', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
-          h('div', { class: 'cr-place' }, this.placeChip(cur.place), h('span', {}, placeMeta(cur.place).desc)),
+          h(
+            'div',
+            { class: 'cr-place' },
+            // 방 이름이 곧 장소 이름이면(판교 새벽 카페) 칩은 빼고 이모지만
+            cur.name === placeMeta(cur.place).name ? h('span', { 'aria-hidden': 'true' }, placeMeta(cur.place).emoji) : this.placeChip(cur.place),
+            h('span', {}, placeMeta(cur.place).desc),
+          ),
           h('code', { class: 'cr-link' }, roomUrl(cur.slug)),
           h('button', { class: 'primary', type: 'button', onclick: () => this.h.onShare() }, '링크 복사'),
         ),

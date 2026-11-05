@@ -1,5 +1,16 @@
 // 서비스 전체에서 쓰는 상수와 밈 데이터
 
+/** 사이트 이름과 소개 (index.html의 메타 태그와 같게) */
+export const SITE = {
+  name: '온라인 모각코',
+  title: '온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코',
+  /** 개인정보 문의·계정 삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
+  contact: 'kelly6226@naver.com',
+};
+
+/** 브라우저 탭 제목: 기본 방은 사이트 제목, 다른 방은 방 이름을 앞에 */
+export const pageTitle = (room: { slug: string; name: string }) => (room.slug === DEFAULT_ROOM ? SITE.title : `${room.name} · ${SITE.name}`);
+
 /** 방 하나가 꽉 차면 2호점, 3호점… 으로 나눠요. 몇 호점까지 열지 (한 호점 정원은 장소마다 PLACES의 cap) */
 export const MAX_INSTANCE = 9;
 

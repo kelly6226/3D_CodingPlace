@@ -6,6 +6,7 @@ import {
   builtinRoom,
   emoteById,
   isPlaceId,
+  pageTitle,
   placeMeta,
   roomUrl,
   statusById,
@@ -14,7 +15,7 @@ import {
 } from './config';
 import { sound } from './audio';
 import { DemoNet, randomHash } from './net/demo';
-import type { Commit, Net, NetEvent, PeerState } from './net/types';
+import type { AuthUser, Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { UI } from './ui/ui';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
@@ -34,6 +35,9 @@ ui.setSound(store.getSound());
 sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
+// GitHub 로그인에서 막 돌아왔는지 (supabase-js가 곧 주소에서 code를 지워서 미리 봐둠)
+const oauthReturn = params.has('code');
+const oauthError = params.get('error_description') ?? new URLSearchParams(location.hash.slice(1)).get('error_description');
 
 /** 주소에서 방 찾기: /r/<방>, 예전 형식 ?room=pangyo-2 도 받아줌 */
 function roomFromUrl(): { slug: string | null; instance: number } {
@@ -86,6 +90,7 @@ async function boot() {
     net = new DemoNet();
   }
   ui.setMode(net.mode);
+  if (net.canLogin) watchAccount();
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
   const fromUrl = roomFromUrl();
@@ -128,7 +133,7 @@ async function loadRoomCommits() {
   commits = list;
   world.room.gitlog.draw(commits, room.name);
   ui.setCommits(commits);
-  document.title = `${room.name} · 온라인 모각코`;
+  document.title = pageTitle(room);
 }
 
 // ── 2. 입장 ──────────────────────────────────────
@@ -306,6 +311,54 @@ function meAvatar() {
   return world.avatars.get(self.id)!;
 }
 
+// ── 로그인 (선택) ─────────────────────────────────
+let account: AuthUser | null = null;
+
+function watchAccount() {
+  if (oauthError) {
+    // 로그인 취소 등으로 돌아오면 주소에 붙은 오류 표시를 지움
+    const url = new URL(location.href);
+    for (const k of ['error', 'error_code', 'error_description']) url.searchParams.delete(k);
+    history.replaceState(history.state, '', url.pathname + url.search);
+    ui.toast('GitHub 로그인을 마치지 못했어요. 다시 해볼 수 있어요.', 'bad', 5000);
+  }
+  net.onAuthChange(setAccount);
+  void Promise.race([net.currentUser(), wait(6000).then(() => null)]).then((u) => {
+    setAccount(u);
+    if (u && oauthReturn) ui.toast(`👋 @${u.login} 계정으로 로그인했어요`, 'good');
+  });
+}
+
+function setAccount(u: AuthUser | null) {
+  const first = !account && u;
+  account = u;
+  ui.setAccount(u, net.canLogin);
+  if (first && u && !store.hasSavedProfile()) ui.suggestNick(u.login);
+}
+
+async function signIn() {
+  if (self) {
+    const ok = await ui.confirm('GitHub로 로그인할까요?', 'GitHub 화면으로 갔다가 지금 방으로 돌아와요. 잠깐 방에서 나갔다 들어오게 돼요.', '로그인', '나중에');
+    if (!ok) return;
+  }
+  try {
+    await net.signIn();
+  } catch (e) {
+    console.warn(e);
+    ui.toast('GitHub 로그인을 시작하지 못했어요. 잠시 후 다시 해주세요.', 'bad');
+  }
+}
+
+async function signOut() {
+  try {
+    await net.signOut();
+    ui.toast('로그아웃했어요');
+  } catch (e) {
+    console.warn(e);
+    ui.toast('로그아웃하지 못했어요. 새로고침 후 다시 해주세요.', 'bad');
+  }
+}
+
 // ── 3. 내 행동 ───────────────────────────────────
 function moveTo(x: number, z: number, then?: () => void) {
   useBusy = false; // 다른 데로 가면 먹으러 가던 건 취소
@@ -465,7 +518,7 @@ function stopSprint() {
   meAvatar().apply(self);
   net.updateSelf({ focusUntil: null });
   ui.setSprint(sprint);
-  document.title = `${room.name} · 온라인 모각코`;
+  document.title = pageTitle(room);
   if (wasFocus) ui.toast('스프린트를 멈췄어요. 괜찮아요, 회고 때 말하면 돼요.');
 }
 
@@ -487,7 +540,7 @@ function tickSprint() {
     } else {
       ui.toast('휴식 끝! 다음 스프린트 시작해볼까요?', 'info', 5000);
       sprint = { ...sprint, phase: 'idle' };
-      document.title = `${room.name} · 온라인 모각코`;
+      document.title = pageTitle(room);
     }
   }
   ui.setSprint(sprint);
@@ -721,6 +774,8 @@ ui.bind({
   },
   onPickRoom: (slug) => void pickRoom(slug),
   onCreateRoom: createRoom,
+  onSignIn: () => void signIn(),
+  onSignOut: () => void signOut(),
   onProfileSave: (p) => {
     store.saveProfile(p);
     Object.assign(self, p);
