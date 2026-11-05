@@ -8,6 +8,13 @@ export const SITE = {
   contact: 'code_alone_together@naver.com',
 };
 
+/**
+ * GitHub 로그인 버튼을 보여줄지.
+ * 지금은 로그인해도 다른 사람에게 보내는 게 없어서 숨겨 둠 (2026-11-05).
+ * 잔디 동기화·랭킹처럼 계정이 필요한 기능을 만들 때 true로 바꾸고 privacy.html도 같이 확인해요.
+ */
+export const LOGIN_ENABLED = false;
+
 /** 브라우저 탭 제목: 기본 방은 사이트 제목, 다른 방은 방 이름을 앞에 */
 export const pageTitle = (room: { slug: string; name: string }) => (room.slug === DEFAULT_ROOM ? SITE.title : `${room.name} · ${SITE.name}`);
 
