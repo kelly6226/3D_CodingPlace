@@ -27,8 +27,22 @@ function siteMeta(): Plugin {
   };
 }
 
+/**
+ * 방문 통계(Vercel Web Analytics) 스크립트는 배포용 빌드에만 넣어요.
+ * 이 주소는 Vercel에 올라간 뒤에야 생겨서, 로컬 개발(npm run dev)에 넣으면 콘솔에 오류만 떠요.
+ */
+function injectAnalyticsScriptOnBuild(): Plugin {
+  return {
+    name: 'vercel-analytics',
+    transformIndexHtml(_html, ctx) {
+      if (ctx.server) return;
+      return [{ tag: 'script', attrs: { defer: true, src: '/_vercel/insights/script.js' }, injectTo: 'head' }];
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [siteMeta()],
+  plugins: [siteMeta(), injectAnalyticsScriptOnBuild()],
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 900,
