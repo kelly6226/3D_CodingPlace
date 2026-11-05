@@ -8,12 +8,22 @@ export const SITE = {
   contact: 'code_alone_together@naver.com',
 };
 
+/** 피드백 받는 곳. 구글폼 같은 걸 만들면 이 주소만 바꾸면 돼요 */
+export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent('[온라인 모각코] 피드백')}`;
+
 /**
  * GitHub 로그인 버튼을 보여줄지.
  * 지금은 로그인해도 다른 사람에게 보내는 게 없어서 숨겨 둠 (2026-11-05).
  * 잔디 동기화·랭킹처럼 계정이 필요한 기능을 만들 때 true로 바꾸고 privacy.html도 같이 확인해요.
  */
 export const LOGIN_ENABLED = false;
+
+/**
+ * 비공개 방을 만들 수 있게 할지.
+ * 지금은 commits 테이블을 누구나 읽을 수 있어서 비공개 방 주소가 방명록으로 새어 나가요. 그래서 숨겨 둠 (2026-11-05).
+ * 다시 켜기 전에 schema.sql에서 commits를 직접 읽지 못하게 하고, 방 주소를 받는 함수로 읽도록 바꿔야 해요.
+ */
+export const PRIVATE_ROOMS_ENABLED = false;
 
 /** 브라우저 탭 제목: 기본 방은 사이트 제목, 다른 방은 방 이름을 앞에 */
 export const pageTitle = (room: { slug: string; name: string }) => (room.slug === DEFAULT_ROOM ? SITE.title : `${room.name} · ${SITE.name}`);

@@ -314,7 +314,8 @@ function build(scene: THREE.Scene, mobile: boolean) {
   const bread = std('#c98a45', 0.7);
   for (let i = 0; i < 3; i++) coffee.add(mesh(new THREE.SphereGeometry(0.06, 10, 8), bread, [-6.6, 1.11, 0.15 + i * 0.18]));
   click(coffee, { interact: 'use' });
-  click(plane(0.8, 0.4, T.smallSign('COFFEE → CODE', '커피를 코드로 바꾸는 곳'), [-6.13, 0.65, -1.0], Math.PI / 2, false), { interact: 'use' });
+  // 간판은 카운터 앞판(x -6.14 ± 0.01) 앞면보다 1cm 앞에 둠. 같은 면에 겹치면 두 면이 번갈아 그려져서 지지직거려요(z-fighting)
+  click(plane(0.8, 0.4, T.smallSign('COFFEE → CODE', '커피를 코드로 바꾸는 곳'), [-6.12, 0.65, -1.0], Math.PI / 2, false), { interact: 'use' });
 
   // 책장
   const shelf = new THREE.Group();
