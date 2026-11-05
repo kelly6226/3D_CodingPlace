@@ -489,6 +489,8 @@ export class UI {
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
     this.renderSheet();
+    // 커밋 방명록은 벽 TV를 크게 보는 화면이라 가운데에 넓게 띄움 (style.css .sheet.board)
+    $('#sheet').classList.toggle('board', kind === 'commit');
     $('#sheet').hidden = false;
   }
 
@@ -632,7 +634,13 @@ export class UI {
               }
             },
           },
-          h('div', { class: 'term' }, h('span', { class: 'prompt' }, '$ git commit -m "'), type, h('span', { class: 'colon' }, ':'), msg, h('span', { class: 'prompt' }, '"')),
+          // 패널이 좁아도 메시지 칸이 한 줄을 다 쓰도록 명령어와 입력 칸을 두 줄로 나눔
+          h(
+            'div',
+            { class: 'term' },
+            h('div', { class: 'term-line' }, h('span', { class: 'prompt' }, '$ git commit -m "'), type, h('span', { class: 'colon' }, ':')),
+            h('div', { class: 'term-line' }, msg, h('span', { class: 'prompt' }, '"')),
+          ),
           submit,
         );
         el.append(
