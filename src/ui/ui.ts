@@ -331,7 +331,7 @@ export class UI {
         'div',
         { class: 'account' },
         h('button', { type: 'button', class: 'gh-btn', onclick: () => this.h.onSignIn() }, 'GitHub로 로그인'),
-        h('small', {}, '선택이에요 · 만 14세 이상만 · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
+        h('small', {}, '선택이에요 · 만 14세 이상만'),
       );
     }
     return h(
@@ -781,7 +781,7 @@ export class UI {
                       ),
                     )
                   : null,
-                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.'),
+                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.', ' · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
               )
             : null;
         el.append(

@@ -1477,7 +1477,7 @@ button.place-name {
 }
 /* GitHub 로그인 (선택) */
 .intro-account {
-  margin: 4px 0 2px;
+  margin: 18px 0 2px;
 }
 .account {
   display: flex;
