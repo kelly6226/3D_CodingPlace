@@ -1256,16 +1256,6 @@ button.place-name {
   background: var(--amber);
   color: var(--amber-ink);
 }
-.cr-link {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted);
-  user-select: all;
-}
 .cur-room .primary {
   font-family: var(--font);
   min-height: 36px;

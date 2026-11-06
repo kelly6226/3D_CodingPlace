@@ -11,12 +11,13 @@ import {
   isPlaceId,
   pageTitle,
   placeMeta,
-  roomUrl,
+  roomAddress,
   statusById,
   type ActionId,
   type PlaceId,
   type RoomInfo,
 } from './config';
+import { entryRoomParam, shareRoom } from './toss';
 import type { Look } from './look';
 import { sound } from './audio';
 import { hasBadWord } from './net/badwords';
@@ -45,14 +46,19 @@ const params = new URLSearchParams(location.search);
 const oauthReturn = params.has('code');
 const oauthError = params.get('error_description') ?? new URLSearchParams(location.hash.slice(1)).get('error_description');
 
-/** 주소에서 방 찾기: /r/<방>, 예전 형식 ?room=pangyo-2 도 받아줌 */
+/** ?room= 값에서 방 찾기. 호점 표기(pangyo-2)는 기본 제공 방에서만 받아줌: 사용자가 만든 방 이름이 -숫자로 끝나도 한 방으로 읽기 위해서 */
+function roomFromParam(param: string): { slug: string | null; instance: number } {
+  const withInstance = param.match(/^([a-z0-9-]+)-(\d)$/);
+  if (withInstance && builtinRoom(withInstance[1])) return { slug: withInstance[1], instance: Number(withInstance[2]) };
+  if (ROOM_SLUG_RE.test(param)) return { slug: param, instance: 1 };
+  return { slug: null, instance: 1 };
+}
+
+/** 주소에서 방 찾기: ?room=<방>. 웹에서 공유한 예전 /r/<방> 링크도 받아줌 */
 function roomFromUrl(): { slug: string | null; instance: number } {
   const m = location.pathname.match(/^\/r\/([a-z0-9-]{3,32})\/?$/);
   if (m) return { slug: m[1], instance: Number(new URLSearchParams(location.search).get('n')) || 1 };
-  const legacy = new URLSearchParams(location.search).get('room');
-  const mm = legacy?.match(/^([a-z0-9-]+?)(?:-(\d))?$/);
-  if (mm && ROOM_SLUG_RE.test(mm[1])) return { slug: mm[1], instance: Number(mm[2]) || 1 };
-  return { slug: null, instance: 1 };
+  return roomFromParam(new URLSearchParams(location.search).get('room') ?? '');
 }
 
 let world: World;
@@ -99,12 +105,13 @@ async function boot() {
   if (net.canLogin) watchAccount();
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
-  const fromUrl = roomFromUrl();
+  const fromAddress = roomFromUrl();
+  const fromUrl = fromAddress.slug ? fromAddress : roomFromParam(entryRoomParam());
   let found: RoomInfo | null = null;
   if (fromUrl.slug) found = await Promise.race([net.getRoom(fromUrl.slug), wait(5000).then(() => null)]);
   if (fromUrl.slug && !found) {
     ui.toast('링크의 방을 찾을 수 없어요. 판교 새벽 카페로 안내할게요.', 'bad', 5000);
-    history.replaceState(null, '', '/');
+    history.replaceState(null, '', roomAddress(DEFAULT_ROOM));
   }
   room = found ?? builtinRoom(DEFAULT_ROOM)!;
   startInstance = found ? fromUrl.instance : 1;
@@ -187,7 +194,7 @@ async function enter(p: store.Profile) {
   );
   // 연결이 늦어도 방 구경은 먼저 할 수 있게
   await Promise.race([connecting, wait(8000)]);
-  if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', `/r/${room.slug}`);
+  if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', roomAddress(room.slug));
 
   await wait(700);
   autoSeat(true);
@@ -233,7 +240,7 @@ async function pickRoom(slug: string, push = true) {
     applyPlace(r);
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
-    history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
+    history.replaceState(null, '', roomAddress(r.slug));
     await loadRoomCommits();
     return;
   }
@@ -263,7 +270,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   lastDeploy = 0;
   ui.setCurrentRoom(r, false);
   ui.setRoom(1);
-  if (push) history.pushState(null, '', `/r/${r.slug}`);
+  if (push) history.pushState(null, '', roomAddress(r.slug));
   void loadRoomCommits();
   await Promise.race([net.switchRoom(r), wait(8000)]);
   switching = false;
@@ -290,21 +297,11 @@ async function createRoom(name: string, tags: string[], isPublic: boolean, place
   lastRoomCreate = Date.now();
   roomsCache = [r, ...roomsCache];
   ui.setRooms(roomsCache);
-  const copied = await copyText(roomUrl(r.slug));
   ui.closeSheet();
   if (self) await switchRoom(r);
   else await pickRoom(r.slug);
-  ui.toast(copied ? `"${r.name}" 방을 만들고 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.` : `"${r.name}" 방을 만들었어요 · ${roomUrl(r.slug)}`, 'good', 6000);
+  ui.toast(`"${r.name}" 방을 만들었어요. 🔗 버튼으로 친구에게 보내면 바로 이 방으로 들어와요.`, 'good', 6000);
   return null;
-}
-
-/** 클립보드 복사. 브라우저가 권한을 묻느라 멈추는 경우가 있어서 1.5초만 기다림 */
-async function copyText(text: string) {
-  try {
-    return await Promise.race([navigator.clipboard.writeText(text).then(() => true), wait(1500).then(() => false)]);
-  } catch {
-    return false;
-  }
 }
 
 addEventListener('popstate', () => {
@@ -802,17 +799,12 @@ ui.bind({
     if (on) sound.start();
   },
   onShare: async () => {
-    const link = roomUrl(room.slug);
-    if (!(await copyText(link))) {
-      ui.toast(link, 'info', 8000);
-      return;
+    try {
+      await shareRoom(room.slug, room.name);
+    } catch (e) {
+      console.warn(e);
+      ui.toast('공유 링크를 만들지 못했어요. 잠시 후 다시 해주세요.', 'bad');
     }
-    ui.toast(
-      room.isPublic
-        ? `"${room.name}" 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.`
-        : `🔒 비공개 방 링크를 복사했어요. 받은 사람만 들어올 수 있어요.`,
-      'good',
-    );
   },
   onPickRoom: (slug) => void pickRoom(slug),
   onCreateRoom: createRoom,

@@ -312,9 +312,14 @@ export function newRoomSlug(): string {
   return s;
 }
 
-/** 방 주소: /r/<slug>. 기본 방은 루트에서도 열림 */
-export function roomUrl(slug: string): string {
-  return `${location.origin}/r/${slug}`;
+/**
+ * 주소창에 남길 방 위치: 현재 경로 + ?room=<slug>. 기본 방은 쿼리 없이 경로만.
+ * 서버가 /r/<slug>를 index.html로 연결해 주지 않는 곳(앱인토스 번들)에서도 새로고침하면 같은 방이 열려요.
+ */
+export function roomAddress(slug: string): string {
+  // 웹에서 /r/<방>으로 들어온 경우 경로의 방이 ?room= 보다 먼저 읽히므로, 경로는 루트로 되돌림
+  const base = location.pathname.replace(/^\/r\/[^/]+\/?$/, '/');
+  return slug === DEFAULT_ROOM ? base : `${base}?room=${slug}`;
 }
 
 // ── 장소 ─────────────────────────────────────────
