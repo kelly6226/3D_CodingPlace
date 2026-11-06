@@ -10,6 +10,18 @@ const MIX: Record<Ambience, { rain: number; hum: number; fan: number; drip: numb
   hackathon: { rain: 0, hum: 0.22, fan: 0.04, drip: 0 },
 };
 
+type NavigatorWithAudioSession = Navigator & { audioSession?: { type: string } };
+
+/**
+ * iOS 사파리는 오디오 세션 기본값이 ambient라서, 무음 스위치가 켜져 있으면 Web Audio가 안 들린다.
+ * 'playback'으로 바꾸면 무음 스위치와 상관없이 난다 (iOS 16.4+, 없으면 아무것도 안 함).
+ * 부작용: 다른 앱에서 재생 중인 음악이 멈출 수 있다.
+ */
+function playEvenWhenSilentSwitchOn() {
+  const nav = navigator as NavigatorWithAudioSession;
+  if (nav.audioSession) nav.audioSession.type = 'playback';
+}
+
 class Sound {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -21,6 +33,7 @@ class Sound {
 
   /** 사용자가 버튼을 누른 뒤에만 호출 (브라우저 자동재생 정책) */
   start() {
+    playEvenWhenSilentSwitchOn();
     if (this.ctx) {
       void this.ctx.resume();
       return;
