@@ -5,16 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build && ait build",
+    "preview": "vite preview",
+    "deploy": "ait deploy"
   },
   "dependencies": {
+    "@apps-in-toss/web-framework": "^3.10.0",
     "@supabase/supabase-js": "^2.118.0",
     "three": "0.186.1"
   },
   "devDependencies": {
     "@types/three": "0.186.0",
     "typescript": "~5.9.3",
-    "vite": "^7.3.7"
+    "vite": "^7.3.7",
+    "@apps-in-toss/devtools": "^3.10.0"
   }
 }
