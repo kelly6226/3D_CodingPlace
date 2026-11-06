@@ -19,8 +19,6 @@ export interface PeerState {
   seatAt: number;
   x: number;
   z: number;
-  /** 스프린트 집중이 끝나는 시각(ms). 집중 중이 아니면 null */
-  focusUntil: number | null;
   coffee: number;
   joinedAt: number;
   bot?: boolean;

@@ -118,15 +118,6 @@ button {
   border-color: var(--amber);
   color: #fff3dc;
 }
-.av-focus {
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--amber);
-  color: var(--amber-ink);
-  white-space: nowrap;
-}
 .av-bubble-wrap {
   pointer-events: none;
 }
@@ -231,9 +222,10 @@ button {
 .place-meta .sep {
   opacity: 0.5;
 }
-#clock {
+#since {
   font-family: var(--mono);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .live {
   width: 8px;
@@ -275,46 +267,6 @@ button {
 }
 .icon-btn:hover {
   background: rgba(30, 36, 54, 0.9);
-}
-
-/* ── 스프린트 ─────────────────────────────────── */
-.sprint-pill {
-  position: absolute;
-  top: calc(14px + var(--safe-t));
-  left: 50%;
-  translate: -50% 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px 8px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(242, 180, 90, 0.5);
-  background: var(--panel);
-  backdrop-filter: blur(10px);
-  font-size: 13px;
-}
-.sprint-pill b {
-  font-family: var(--mono);
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  color: var(--amber);
-}
-.sprint-pill.rest {
-  border-color: rgba(126, 231, 135, 0.45);
-}
-.sprint-pill.rest b {
-  color: var(--mint);
-}
-.sp-ring {
-  --p: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: conic-gradient(var(--amber) calc(var(--p) * 360deg), rgba(255, 255, 255, 0.12) 0);
-  mask: radial-gradient(circle, transparent 6px, #000 7px);
-}
-.sprint-pill.rest .sp-ring {
-  background: conic-gradient(var(--mint) calc(var(--p) * 360deg), rgba(255, 255, 255, 0.12) 0);
 }
 
 /* ── 하단 액션바 ───────────────────────────────── */
@@ -518,15 +470,6 @@ button {
   color: inherit;
   flex: none;
 }
-.big-timer {
-  font-family: var(--mono);
-  font-size: 52px;
-  font-weight: 700;
-  text-align: center;
-  color: var(--amber);
-  margin: 8px 0 16px;
-  font-variant-numeric: tabular-nums;
-}
 .note {
   margin: 12px 0 0;
   font-size: 12.5px;
@@ -682,65 +625,6 @@ button {
     opacity: 0;
     translate: -50% calc(-50% + 10px);
   }
-}
-
-/* 잔디 */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 14px;
-}
-.stat {
-  padding: 10px 8px;
-  border-radius: 12px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.stat b {
-  font-family: var(--mono);
-  font-size: 18px;
-  color: var(--g4);
-}
-.stat span {
-  font-size: 11px;
-  color: var(--muted);
-}
-.grass {
-  display: grid;
-  grid-template-rows: repeat(7, 1fr);
-  grid-auto-flow: column;
-  gap: 3px;
-  overflow-x: auto;
-}
-.g {
-  width: 100%;
-  aspect-ratio: 1;
-  min-width: 12px;
-  border-radius: 3px;
-  background: var(--g0);
-}
-.g1 {
-  background: var(--g1);
-}
-.g2 {
-  background: var(--g2);
-}
-.g3 {
-  background: var(--g3);
-}
-.g4 {
-  background: var(--g4);
-}
-.g.f {
-  opacity: 0.25;
-}
-.g.today {
-  outline: 1.5px solid var(--amber);
-  outline-offset: 1px;
 }
 
 /* 사람 목록 */
@@ -1026,6 +910,41 @@ button {
 .intro-form .lbl {
   color: var(--muted);
 }
+.intro-dress {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.intro-dress-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.intro-dress-head .lbl {
+  font-weight: 700;
+}
+.intro-dress-head small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+/* 옷장이 길어져도 들어가기 버튼은 늘 보이게 */
+.intro-card .enter {
+  position: sticky;
+  bottom: 8px;
+  z-index: 1;
+  box-shadow: 0 -10px 18px rgba(15, 19, 31, 0.9);
+}
+/* 비활성일 때도 투명하면 아래로 지나가는 옷장 내용이 비쳐 보인다 */
+.intro-card .enter:disabled {
+  background: var(--panel-solid);
+}
+/* 입장 카드는 안쪽 여백이 넓어 동작 미리보기 4칸이 좁은 폰에서 찌그러진다 */
+@media (max-width: 380px) {
+  .intro-dress .wd-acts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .intro-form input:not([type='checkbox']),
 .intro-form select {
   width: 100%;
@@ -1125,10 +1044,6 @@ button {
   .hud-tools {
     gap: 6px;
   }
-  .sprint-pill {
-    top: auto;
-    bottom: calc(88px + var(--safe-b));
-  }
   .actions {
     left: max(10px, var(--safe-l));
     right: max(10px, var(--safe-r));
@@ -1185,14 +1100,8 @@ button {
     padding: 2px 6px 2px 5px;
     gap: 4px;
   }
-  .av-focus {
-    display: none;
-  }
-  .grid-4 {
+    .grid-4 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-  .stats b {
-    font-size: 15px;
   }
 }
 
@@ -1837,7 +1746,7 @@ button.place-name {
   margin: 0;
 }
 @media (max-width: 640px) {
-  /* 하단 바 버튼이 8개라서, 360px 폭에서도 '스프린트' 라벨이 칸에 들어가도록 여백과 글자를 줄임 */
+  /* 하단 바 버튼이 8개라서, 360px 폭에서도 라벨이 칸에 들어가도록 여백과 글자를 줄임 */
   .actions {
     padding: 4px 2px;
   }
@@ -1865,11 +1774,46 @@ button.place-name {
   align-items: center;
   gap: 8px;
 }
-.icon-btn.hud-wardrobe {
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  font-size: 15px;
+/* 꾸미기 버튼: 아래 덱에서 한 번도 안 열어본 사람에게만 호박색으로 반짝여요 */
+.act.fresh {
+  color: var(--amber);
+  animation: act-pulse 1.8s ease-out infinite;
+}
+.act.fresh .ai {
+  display: inline-block;
+  animation: act-wiggle 2.4s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
+@keyframes act-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(247, 197, 111, 0.6);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 10px rgba(247, 197, 111, 0);
+  }
+}
+@keyframes act-wiggle {
+  0%,
+  60%,
+  100% {
+    transform: rotate(0);
+  }
+  70% {
+    transform: rotate(-16deg);
+  }
+  80% {
+    transform: rotate(14deg);
+  }
+  90% {
+    transform: rotate(-8deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .act.fresh,
+  .act.fresh .ai {
+    animation: none;
+  }
 }
 .sheet-sub {
   margin: 14px 0 6px;
@@ -1931,6 +1875,7 @@ button.place-name {
 }
 .wd-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
 }

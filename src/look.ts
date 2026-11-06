@@ -77,6 +77,7 @@ export interface Look {
   color: string;
   hair: string;
   skin: string;
+  glasses: boolean;
   outfit: Outfit;
 }
 
@@ -127,6 +128,9 @@ export function randomOutfit(): Outfit {
   };
 }
 
+/** 🎲 랜덤으로 안경을 쓰게 될 확률 */
+const RANDOM_GLASSES_RATE = 0.4;
+
 export function randomLook(): Look {
-  return { color: pick(HOODIE_COLORS), hair: pick(HAIR_COLORS), skin: pick(SKIN_TONES), outfit: randomOutfit() };
+  return { color: pick(HOODIE_COLORS), hair: pick(HAIR_COLORS), skin: pick(SKIN_TONES), glasses: Math.random() < RANDOM_GLASSES_RATE, outfit: randomOutfit() };
 }

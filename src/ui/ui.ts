@@ -5,13 +5,11 @@ import {
   COMMIT_TYPES,
   EMOTES,
   FEEDBACK_URL,
-  HOODIE_COLORS,
   LANGS,
   PLACES,
   PRIVATE_ROOMS_ENABLED,
   ROOM_TAGS,
   SITE,
-  SPRINT_PRESETS,
   STATUSES,
   langById,
   placeMeta,
@@ -21,19 +19,16 @@ import {
   type ActionId,
   type PlaceId,
   type RoomInfo,
+  type ViewCommand,
+  type ViewState,
 } from '../config';
 import type { Look } from '../look';
 import type { AuthUser, Commit, PeerState } from '../net/types';
+import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
-  getCoffeeToday,
-  getFocusMin,
-  getGrass,
-  getSprintPreset,
-  getStreak,
-  kstDate,
   type Profile,
 } from '../store';
 
@@ -49,7 +44,7 @@ export interface ChatLine {
   mine: boolean;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'sprint' | 'commit' | 'grass' | 'people' | 'profile' | 'wardrobe';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe';
 
 export interface UIHandlers {
   onEnter(p: Profile): void;
@@ -60,9 +55,7 @@ export interface UIHandlers {
   /** 옷장에서 고를 때마다. 저장하고 방 사람들에게 알리는 건 받는 쪽 몫 */
   onLook(look: Look): void;
   /** 옷장 안에 보여줄 3D 미리보기. 만들 수 없으면 null */
-  onLookPreview(): Promise<LookPreviewHandle | null>;
-  onSprintStart(presetId: string): void;
-  onSprintStop(): void;
+  onLookPreview(look: Look): Promise<LookPreviewHandle | null>;
   onCoffee(): void;
   onCommit(type: string, msg: string): Promise<string | null>;
   /** 방 사람들에게 한마디. 보낼 수 없으면 이유를 돌려줌 */
@@ -71,6 +64,8 @@ export interface UIHandlers {
   onChatPin(text: string): Promise<string | null>;
   onSound(on: boolean): void;
   onShare(): void;
+  /** 시점 버튼: 내 캐릭터 따라 보기 / 방 전체 보기 */
+  onView(cmd: ViewCommand): void;
   onProfileSave(p: Profile): void;
   onWave(id: string): void;
   onFocusPeer(id: string): void;
@@ -83,19 +78,12 @@ export interface UIHandlers {
   onSignOut(): void;
 }
 
-export interface SprintView {
-  phase: 'idle' | 'focus' | 'rest';
-  endsAt: number;
-  total: number;
-}
-
 export class UI {
   private h!: UIHandlers;
   private sheet = '' as SheetKind | '';
   private commits: Commit[] = [];
   private peers: PeerState[] = [];
   private self!: PeerState;
-  private sprint: SprintView = { phase: 'idle', endsAt: 0, total: 0 };
   private toastBox: HTMLElement;
   private soundOn = true;
   private rooms: RoomInfo[] = [];
@@ -114,7 +102,11 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
-  private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: () => this.h.onLookPreview() });
+  private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
+  /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
+  private introWardrobe: Wardrobe | null = null;
+  /** 시점이 처음에서 벗어났거나 내 캐릭터를 따라가는 중이면 true (시점 버튼이 어느 쪽으로 가는지) */
+  private viewAway = false;
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -140,10 +132,8 @@ export class UI {
             h('b', { id: 'count' }, '1'),
             '명 모각코 중',
             h('span', { class: 'sep' }, '·'),
-            h('span', { id: 'clock' }, ''),
+            h('span', { id: 'since', title: '이 방에 들어온 뒤 지난 시간' }, ''),
           ),
-          // 오른쪽 위 도구 줄은 좁은 화면에서 방 이름과 겹쳐서, 옷장 버튼은 인원 표시 옆에 둠
-          h('button', { class: 'icon-btn hud-wardrobe', id: 'wardrobe-btn', onclick: () => this.toggleSheet('wardrobe'), 'aria-label': '옷장' }, '👕'),
         ),
         h('div', { class: 'mode-pill', id: 'mode', hidden: true }, ''),
       ),
@@ -155,28 +145,21 @@ export class UI {
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
         h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '⚙️'),
       ),
-      // 스프린트 타이머
-      h(
-        'button',
-        { class: 'sprint-pill', id: 'sprint-pill', hidden: true, onclick: () => this.toggleSheet('sprint') },
-        h('span', { class: 'sp-ring', id: 'sp-ring' }),
-        h('span', { id: 'sp-label' }, ''),
-        h('b', { id: 'sp-time' }, ''),
-      ),
       // 하단 액션바
       h(
         'nav',
         { class: 'actions', id: 'actions' },
         this.action('rooms', '🚪', '방'),
-        this.action('sprint', '🎯', '스프린트'),
         this.action('status', '💻', '상태', 'status-icon'),
         this.action('emote', '👍', '이모트'),
+        this.action('wardrobe', '👕', '꾸미기'),
         (this.chatBtn = h('button', { class: 'act', id: 'act-chat', onclick: () => this.toggleChat(), 'aria-label': '채팅' }, h('span', { class: 'ai' }, '💬'), h('span', { class: 'al' }, '채팅'))),
         h('button', { class: 'act', id: 'act-coffee', onclick: () => this.h.onCoffee() }, h('span', { class: 'ai', id: 'use-icon' }, '☕'), h('span', { class: 'al', id: 'use-label' }, '커피')),
         this.action('commit', '⎇', '커밋'),
-        this.action('grass', '🌱', '잔디'),
+        // 시점: 평소엔 내 캐릭터를 따라 보고, 이미 시점을 옮긴 뒤엔 방 전체로 돌아가요
+        h('button', { class: 'act', id: 'act-view', title: '내 캐릭터 따라 보기', 'aria-label': '내 캐릭터 따라 보기', onclick: () => this.h.onView(this.viewAway ? 'home' : 'follow') }, h('span', { class: 'ai', id: 'view-icon' }, '🎯'), h('span', { class: 'al' }, '시점')),
       ),
-      h('div', { class: 'hint', id: 'hint' }, '바닥을 눌러 걷고, 빈자리를 눌러 앉아요 · 드래그로 둘러보기'),
+      h('div', { class: 'hint', id: 'hint' }, '바닥을 눌러 걷고, 빈자리를 눌러 앉아요 · 휠·핀치로 확대하고 드래그로 돌려 봐요'),
       h('section', { class: 'sheet', id: 'sheet', hidden: true, role: 'dialog' }),
       this.buildChat(),
       h('div', { class: 'pop', id: 'pop', hidden: true }),
@@ -185,10 +168,13 @@ export class UI {
       (this.toastBox = h('div', { class: 'toasts', id: 'toasts', 'aria-live': 'polite' })),
     );
 
+    // 꾸미기 버튼은 한 번도 안 열어본 사람에게만 반짝여요
+    if (!hasOpenedWardrobe()) $('#act-wardrobe').classList.add('fresh');
+
     document.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
       if (!this.sheet) return;
-      if (t.closest('#sheet') || t.closest('.actions') || t.closest('.hud') || t.closest('.sprint-pill') || t.closest('.modal') || t.closest('.intro-room')) return;
+      if (t.closest('#sheet') || t.closest('.actions') || t.closest('.hud') || t.closest('.modal') || t.closest('.intro-room')) return;
       this.closeSheet();
     });
     document.addEventListener('keydown', (e) => {
@@ -223,28 +209,18 @@ export class UI {
     const p = { ...profile };
     const nick = h('input', { id: 'nick', maxlength: 12, value: p.name, autocomplete: 'off', spellcheck: 'false' });
     const lang = h('select', { id: 'lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
-    const sw = h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': '후드티 색' });
-    const paintSw = () => {
-      sw.innerHTML = '';
-      for (const c of HOODIE_COLORS) {
-        sw.append(
-          h('button', {
-            class: 'sw' + (c === p.color ? ' on' : ''),
-            style: `--c:${c}`,
-            'aria-label': `후드티 색 ${c}`,
-            role: 'radio',
-            'aria-checked': String(c === p.color),
-            onclick: (e: Event) => {
-              e.preventDefault();
-              p.color = c;
-              paintSw();
-            },
-          }),
-        );
-      }
-    };
-    paintSw();
-    const glasses = h('input', { type: 'checkbox', id: 'glasses', checked: p.glasses });
+    // 처음부터 옷장으로 꾸미고 들어가요. 고르는 값은 p에만 쌓고, 입장할 때 저장해요
+    const dress = h('div', { class: 'intro-dress' });
+    this.introWardrobe = new Wardrobe({
+      onLook: (look) => Object.assign(p, look),
+      // 이 화면은 ui.bind보다 먼저 그려져서, 핸들러가 붙은 뒤에 미리보기를 요청해요
+      onPreview: (look) => Promise.resolve().then(() => this.h.onLookPreview(look)),
+    });
+    this.introWardrobe.render(
+      dress,
+      h('div', { class: 'intro-dress-head' }, h('span', { class: 'lbl' }, '내 캐릭터'), h('small', {}, '입고 들어가요 · 나중에 아래 👕 꾸미기에서 또 바꿀 수 있어요')),
+      { color: p.color, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit },
+    );
     const btn = h('button', { class: 'enter', id: 'enter', disabled: true }, '문 여는 중…');
     const bar = h('i');
 
@@ -257,7 +233,7 @@ export class UI {
           if (btn.disabled) return;
           p.name = nick.value.trim().slice(0, 12) || p.name;
           p.lang = lang.value;
-          p.glasses = glasses.checked;
+          this.introWardrobe?.close();
           $('#intro').classList.add('out');
           window.setTimeout(() => $('#intro').remove(), 600);
           this.entered = true;
@@ -276,10 +252,8 @@ export class UI {
         nick,
         h('label', { for: 'lang' }, '주력 언어'),
         lang,
-        h('span', { class: 'lbl' }, '후드티'),
-        sw,
-        h('label', { class: 'check', for: 'glasses' }, glasses, h('span', {}, '안경 쓰기')),
       ),
+      dress,
       h('div', { class: 'intro-account', id: 'intro-account', hidden: true }),
       h('div', { class: 'progress' }, bar),
       btn,
@@ -468,9 +442,20 @@ export class UI {
     if (this.sheet === 'people') this.renderSheet();
   }
 
-  tickClock() {
-    const t = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date());
-    $('#clock').textContent = t;
+  /** 위쪽 인원 표시 옆에 내가 이 방에 있은 시간 (1초마다 불러요) */
+  tickSince() {
+    if (!this.self) return;
+    $('#since').textContent = `⏱ ${elapsedText(Date.now() - this.self.joinedAt)}`;
+  }
+
+  setViewState({ moved, following }: ViewState) {
+    this.viewAway = moved || following;
+    const btn = $('#act-view');
+    $('#view-icon').textContent = this.viewAway ? '🏠' : '🎯';
+    const tip = this.viewAway ? '방 전체 보기' : '내 캐릭터 따라 보기';
+    btn.title = tip;
+    btn.setAttribute('aria-label', tip);
+    btn.classList.toggle('on', following);
   }
 
   setSound(on: boolean) {
@@ -483,25 +468,6 @@ export class UI {
   private toggleSound() {
     this.setSound(!this.soundOn);
     this.h.onSound(this.soundOn);
-  }
-
-  // ── 스프린트 ───────────────────────────────────
-  setSprint(v: SprintView) {
-    this.sprint = v;
-    const pill = $('#sprint-pill');
-    pill.hidden = v.phase === 'idle';
-    $('#act-sprint').classList.toggle('on', v.phase !== 'idle');
-    if (v.phase !== 'idle') {
-      const left = Math.max(0, v.endsAt - Date.now());
-      const m = Math.floor(left / 60e3);
-      const s = Math.floor((left % 60e3) / 1000);
-      $('#sp-label').textContent = v.phase === 'focus' ? '🎧 집중' : '☕ 휴식';
-      $('#sp-time').textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-      const pct = 1 - left / v.total;
-      $('#sp-ring').style.setProperty('--p', String(pct));
-      pill.classList.toggle('rest', v.phase === 'rest');
-    }
-    if (this.sheet === 'sprint') this.renderSheet();
   }
 
   // ── 커밋 ───────────────────────────────────────
@@ -639,6 +605,11 @@ export class UI {
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
     this.sheet = kind;
+    // 옷장을 한 번 열어보면 반짝임은 멈춰요
+    if (kind === 'wardrobe') {
+      markWardrobeOpened();
+      $('#act-wardrobe').classList.remove('fresh');
+    }
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
     this.renderSheet();
@@ -738,53 +709,7 @@ export class UI {
       }
       case 'wardrobe': {
         const s = this.self;
-        this.wardrobe.render(el, head('옷장', '고르면 바로 입어 봐요'), { color: s.color, hair: s.hair, skin: s.skin, outfit: s.outfit });
-        break;
-      }
-      case 'sprint': {
-        const v = this.sprint;
-        if (v.phase === 'idle') {
-          const cur = getSprintPreset();
-          el.append(
-            head('스프린트', '집중이 끝날 때마다 잔디가 한 칸 심어져요'),
-            h(
-              'div',
-              { class: 'stack' },
-              ...SPRINT_PRESETS.map((p) =>
-                h(
-                  'button',
-                  {
-                    class: 'row-btn' + (p.id === cur ? ' on' : ''),
-                    onclick: () => {
-                      this.h.onSprintStart(p.id);
-                      this.closeSheet();
-                    },
-                  },
-                  h('b', {}, `${p.focus}분`),
-                  h('span', {}, p.label),
-                  h('i', {}, '시작 ▶'),
-                ),
-              ),
-            ),
-            h('p', { class: 'note' }, '집중하는 동안 헤드폰을 써요. 다른 사람들 화면에도 보여요.'),
-          );
-        } else {
-          el.append(
-            head(v.phase === 'focus' ? '집중하는 중' : '쉬는 중', v.phase === 'focus' ? '알림은 잠시 꺼두세요' : '스트레칭 한 번 해요'),
-            h('div', { class: 'big-timer' }, $('#sp-time').textContent ?? ''),
-            h(
-              'button',
-              {
-                class: 'row-btn danger',
-                onclick: () => {
-                  this.h.onSprintStop();
-                  this.closeSheet();
-                },
-              },
-              h('span', {}, v.phase === 'focus' ? '스프린트 중단 (잔디 없음)' : '휴식 끝내기'),
-            ),
-          );
-        }
+        this.wardrobe.render(el, head('옷장', '고르면 바로 입어 봐요'), { color: s.color, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit });
         break;
       }
       case 'commit': {
@@ -846,43 +771,6 @@ export class UI {
         window.setTimeout(() => msg.focus({ preventScroll: true }), 30);
         break;
       }
-      case 'grass': {
-        const grass = getGrass();
-        const mins = getFocusMin();
-        const today = kstDate();
-        const weeks = 18;
-        const end = new Date();
-        const start = new Date(end);
-        start.setDate(end.getDate() - (weeks * 7 - 1) - ((end.getDay() + 6) % 7 === 6 ? 0 : 6 - ((end.getDay() + 6) % 7)));
-        const cells: HTMLElement[] = [];
-        let total = 0;
-        let totalMin = 0;
-        for (let i = 0; i < weeks * 7; i++) {
-          const d = new Date(start);
-          d.setDate(start.getDate() + i);
-          const key = kstDate(d);
-          const n = grass[key] ?? 0;
-          total += n;
-          totalMin += mins[key] ?? 0;
-          const lvl = n === 0 ? 0 : n === 1 ? 1 : n <= 3 ? 2 : n <= 5 ? 3 : 4;
-          const future = key > today;
-          cells.push(h('i', { class: `g g${lvl}` + (future ? ' f' : '') + (key === today ? ' today' : ''), title: `${key} · 스프린트 ${n}개` }));
-        }
-        el.append(
-          head('내 잔디', '이 브라우저에만 저장돼요'),
-          h(
-            'div',
-            { class: 'stats' },
-            stat(String(grass[today] ?? 0), '오늘 스프린트'),
-            stat(`${Math.round((mins[today] ?? 0) / 6) / 10}h`, '오늘 집중'),
-            stat(`${getStreak()}일`, '연속 기록'),
-            stat(`${getCoffeeToday()}${placeMeta(this.room?.place).use.unit.replace('째', '')}`, `오늘 ${placeMeta(this.room?.place).use.label}`),
-          ),
-          h('div', { class: 'grass', style: `--w:${weeks}` }, ...cells),
-          h('p', { class: 'note' }, `최근 ${weeks}주 동안 스프린트 ${total}개 · ${Math.round(totalMin / 6) / 10}시간 집중`),
-        );
-        break;
-      }
       case 'people': {
         const list = [this.self, ...this.peers].filter(Boolean);
         el.append(
@@ -892,7 +780,6 @@ export class UI {
             { class: 'people' },
             ...list.map((p) => {
               const st = statusById(p.status);
-              const focusing = p.focusUntil && p.focusUntil > Date.now();
               return h(
                 'li',
                 {},
@@ -906,7 +793,7 @@ export class UI {
                   },
                   h('span', { class: 'e' }, st.emoji),
                   h('span', { class: 'n' }, p.name, p.id === this.self.id ? h('em', {}, ' (나)') : null),
-                  h('span', { class: 's' }, focusing ? '🎧 집중 중' : st.label),
+                  h('span', { class: 's' }, st.label),
                   h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
                 ),
               );
@@ -920,7 +807,6 @@ export class UI {
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
-        const glasses = h('input', { type: 'checkbox', id: 'p-glasses', checked: p.glasses });
         const acct = this.account;
         const accountBox = this.canLogin
             ? h(
@@ -968,7 +854,6 @@ export class UI {
                 e.preventDefault();
                 p.name = nick.value.trim().slice(0, 12) || p.name;
                 p.lang = lang.value;
-                p.glasses = glasses.checked;
                 this.h.onProfileSave(p);
                 this.closeSheet();
               },
@@ -977,13 +862,12 @@ export class UI {
             nick,
             h('label', { for: 'p-lang' }, '주력 언어'),
             lang,
-            h('label', { class: 'check', for: 'p-glasses' }, glasses, h('span', {}, '안경 쓰기')),
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
           ),
           h(
             'small',
             { class: 'sheet-note' },
-            '프로필과 잔디는 이 브라우저에만 저장돼요. 다른 기기나 시크릿 창에서는 처음부터 시작해요. · ',
+            '프로필은 이 브라우저에만 저장돼요. 다른 기기나 시크릿 창에서는 처음부터 시작해요. · ',
             h('a', { href: FEEDBACK_URL }, '피드백 보내기'),
           ),
         );
@@ -1226,14 +1110,12 @@ export class UI {
     const el = $('#pop');
     const st = statusById(p.status);
     const lang = langById(p.lang);
-    const focusing = p.focusUntil && p.focusUntil > Date.now();
     el.innerHTML = '';
-    const since = Math.floor((Date.now() - p.joinedAt) / 60e3);
-    const sinceText = since < 1 ? '방금 들어왔어요' : since < 60 ? `${since}분째 모각코 중` : `${Math.floor(since / 60)}시간째 모각코 중`;
+    const since = Date.now() - p.joinedAt;
+    const sinceText = since < 60e3 ? '방금 들어왔어요' : `${elapsedText(since)}째 모각코 중`;
     const rows = [
       h('div', { class: 'pop-name' }, p.name, isSelf ? h('em', {}, ' (나)') : null),
       h('div', { class: 'pop-row' }, `${st.emoji} ${st.label}`),
-      focusing ? h('div', { class: 'pop-row' }, `🎧 집중 중 · ${Math.ceil((p.focusUntil! - Date.now()) / 60e3)}분 남음`) : null,
       h('div', { class: 'pop-row' }, h('i', { class: 'dot', style: `background:${lang.color}` }), lang.label),
       h('div', { class: 'pop-row muted' }, `${sinceText} · ${placeMeta(this.room?.place).use.emoji} ${p.coffee}${placeMeta(this.room?.place).use.unit.replace('째', '')}`),
       isSelf
@@ -1314,8 +1196,13 @@ export class UI {
   }
 }
 
-function stat(v: string, label: string) {
-  return h('div', { class: 'stat' }, h('b', {}, v), h('span', {}, label));
+/** 얼마나 오래 있었는지: 방금 / 23분 / 1시간 / 1시간 23분 */
+export function elapsedText(ms: number) {
+  const min = Math.floor(Math.max(0, ms) / 60e3);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분`;
+  const rest = min % 60;
+  return rest === 0 ? `${Math.floor(min / 60)}시간` : `${Math.floor(min / 60)}시간 ${rest}분`;
 }
 
 export function ago(at: number) {

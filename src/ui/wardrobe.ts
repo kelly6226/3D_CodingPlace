@@ -26,17 +26,23 @@ export interface LookPreviewHandle {
 export interface WardrobeCallbacks {
   /** 고를 때마다 불러요. 저장과 방 사람들에게 알리는 건 받는 쪽이 해요 */
   onLook(look: Look): void;
-  /** 미리보기를 만들어 줘요. 3D를 쓸 수 없으면 null */
-  onPreview(): Promise<LookPreviewHandle | null>;
+  /** 지금 모습으로 미리보기를 만들어 줘요. 3D를 쓸 수 없으면 null */
+  onPreview(look: Look): Promise<LookPreviewHandle | null>;
 }
 
-type TabId = 'hair' | 'hat' | 'acc' | 'color';
+type TabId = 'hair' | 'hat' | 'back' | 'neck' | 'color';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'hair', label: '머리' },
   { id: 'hat', label: '모자' },
-  { id: 'acc', label: '등·목' },
+  { id: 'back', label: '등' },
+  { id: 'neck', label: '목' },
   { id: 'color', label: '색' },
+];
+
+const GLASSES: LookOption[] = [
+  { id: 'off', emoji: '👀', label: '안 써요' },
+  { id: 'on', emoji: '🤓', label: '안경' },
 ];
 
 const cloneLook = (l: Look): Look => ({ ...l, outfit: { ...l.outfit } });
@@ -59,7 +65,7 @@ export class Wardrobe {
     this.look = cloneLook(look);
 
     const stage = h('div', { class: 'wd-preview', 'aria-hidden': 'true' });
-    void this.cb.onPreview().then(
+    void this.cb.onPreview(cloneLook(this.look)).then(
       (p) => {
         if (!p) return;
         if (session !== this.session) {
@@ -142,7 +148,7 @@ export class Wardrobe {
   }
 
   private paintPane() {
-    const { outfit: o, hair, color, skin } = this.look;
+    const { outfit: o, hair, color, skin, glasses } = this.look;
     // 고르면 this.look을 고치고 화면을 다시 그리니까, 고치는 함수는 그때의 look을 받아서 써요
     const setAccent = (c: string) => this.change((l) => (l.outfit.accent = c));
     switch (this.tab) {
@@ -150,6 +156,7 @@ export class Wardrobe {
         this.pane.replaceChildren(
           this.options('머리 모양', HAIR_STYLES, o.hairStyle, (id) => this.change((l) => (l.outfit.hairStyle = id))),
           this.swatches('머리색', HAIR_COLORS, hair, (c) => this.change((l) => (l.hair = c))),
+          this.options('안경', GLASSES, glasses ? 'on' : 'off', (id) => this.change((l) => (l.glasses = id === 'on'))),
         );
         break;
       case 'hat':
@@ -158,9 +165,14 @@ export class Wardrobe {
           this.swatches('포인트 색', ACCENT_COLORS, o.accent, setAccent),
         );
         break;
-      case 'acc':
+      case 'back':
         this.pane.replaceChildren(
           this.options('등', BACKS, o.back, (id) => this.change((l) => (l.outfit.back = id))),
+          this.swatches('포인트 색', ACCENT_COLORS, o.accent, setAccent),
+        );
+        break;
+      case 'neck':
+        this.pane.replaceChildren(
           this.options('목', NECKS, o.neck, (id) => this.change((l) => (l.outfit.neck = id))),
           this.swatches('포인트 색', ACCENT_COLORS, o.accent, setAccent),
         );

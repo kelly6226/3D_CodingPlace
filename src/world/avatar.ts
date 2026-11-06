@@ -34,10 +34,8 @@ const geo = {
   bridge: new THREE.CylinderGeometry(0.006, 0.006, 0.06, 6),
   arm: new THREE.CapsuleGeometry(0.06, 0.16, 4, 10),
   hand: new THREE.SphereGeometry(0.065, 12, 10),
-  band: new THREE.TorusGeometry(0.265, 0.022, 8, 24, Math.PI),
   cup: new THREE.CylinderGeometry(0.045, 0.038, 0.1, 14),
   string: new THREE.CylinderGeometry(0.008, 0.008, 0.12, 6),
-  ear: new THREE.CylinderGeometry(0.075, 0.075, 0.05, 16),
   ring: new THREE.RingGeometry(0.34, 0.42, 40),
   // 노트북
   lapBase: new THREE.BoxGeometry(0.34, 0.016, 0.23),
@@ -51,7 +49,6 @@ const mat = {
   eye: new THREE.MeshBasicMaterial({ color: '#1b1714' }),
   blush: new THREE.MeshBasicMaterial({ color: '#f29b9b', transparent: true, opacity: 0.55 }),
   glasses: new THREE.MeshStandardMaterial({ color: '#1e1e22', roughness: 0.4, metalness: 0.4 }),
-  phones: new THREE.MeshStandardMaterial({ color: '#25262c', roughness: 0.5 }),
   cup: new THREE.MeshStandardMaterial({ color: '#f3efe6', roughness: 0.5 }),
   string: new THREE.MeshStandardMaterial({ color: '#f3efe6' }),
   lap: new THREE.MeshStandardMaterial({ color: '#b9bec8', roughness: 0.35, metalness: 0.7 }),
@@ -87,7 +84,6 @@ export class Avatar {
   private torso: THREE.Mesh;
   private eyes: THREE.Mesh[] = [];
   private glasses = new THREE.Group();
-  private phones = new THREE.Group();
   private cup: THREE.Mesh;
   private ring?: THREE.Mesh;
   private hoodieMat: THREE.MeshStandardMaterial;
@@ -225,18 +221,7 @@ export class Avatar {
     this.glasses.add(bridge);
     this.glasses.visible = state.glasses;
     this.headG.add(this.glasses);
-    // 헤드폰 (집중 모드)
-    const band = new THREE.Mesh(geo.band, mat.phones);
-    band.position.set(0, 0.22, 0);
-    this.phones.add(band);
-    for (const x of [-0.262, 0.262]) {
-      const ear = new THREE.Mesh(geo.ear, mat.phones);
-      ear.rotation.z = Math.PI / 2;
-      ear.position.set(x, 0.2, 0);
-      this.phones.add(ear);
-    }
-    this.phones.visible = false;
-    this.headG.add(this.phones, this.hatSlot, this.hairSlot);
+    this.headG.add(this.hatSlot, this.hairSlot);
     this.body.add(this.headG, this.backSlot, this.neckSlot);
     this.applyOutfit(state.outfit);
 
@@ -416,9 +401,6 @@ export class Avatar {
     const s = this.state;
     const st = statusById(s.status);
     const lang = langById(s.lang);
-    const focusing = !!s.focusUntil && s.focusUntil > Date.now();
-    this.phones.visible = focusing;
-    const left = focusing ? Math.max(1, Math.ceil((s.focusUntil! - Date.now()) / 60e3)) : 0;
     this.tagEl.innerHTML = '';
     const name = document.createElement('div');
     name.className = 'av-name';
@@ -426,12 +408,6 @@ export class Avatar {
     dot.style.background = lang.color;
     name.append(dot, document.createTextNode(`${st.emoji} ${s.name}`));
     this.tagEl.append(name);
-    if (focusing) {
-      const f = document.createElement('div');
-      f.className = 'av-focus';
-      f.textContent = `🎧 집중 ${left}분`;
-      this.tagEl.append(f);
-    }
     this.tagEl.title = `${s.name} · ${st.label} · ${lang.label}`;
   }
 
@@ -750,7 +726,7 @@ export class Avatar {
     const standingDesk = this.seat?.kind === 'stand';
     const walking = this.mode === 'walking' && !this.act;
     const away = s.status === 'away' || s.status === 'meal';
-    const stretching = !walking && !away && seated && s.focusUntil === null && Math.sin(t * 0.23) > 0.985;
+    const stretching = !walking && !away && seated && Math.sin(t * 0.23) > 0.985;
 
     // 기본 타자 세기: 앉아 있으면 조금씩 계속 침
     const baseTyping = seated && !away ? 0.35 : 0;
