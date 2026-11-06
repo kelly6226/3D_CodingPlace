@@ -31,6 +31,22 @@ export const pageTitle = (room: { slug: string; name: string }) => (room.slug ==
 /** 방 하나가 꽉 차면 2호점, 3호점… 으로 나눠요. 몇 호점까지 열지 (한 호점 정원은 장소마다 PLACES의 cap) */
 export const MAX_INSTANCE = 9;
 
+/**
+ * Presence track 호출 사이 최소 간격.
+ * Supabase는 클라이언트당 Presence 호출을 30초에 5번까지만 받아요(Realtime Rate Limits).
+ * 입장할 때 로비·방 track이 먼저 2번 나가는 것까지 합쳐도 넘지 않게 8초(30초에 최대 4번)로 잡았어요.
+ */
+export const PRESENCE_MIN_GAP_MS = 8000;
+
+/** 보내는 쪽이 모아둔 시간 말고, 네트워크로 도착하는 데 더 걸릴 수 있는 시간 */
+const PRESENCE_ARRIVAL_MARGIN_MS = 2000;
+
+/** Presence는 최대 이만큼 늦게 도착해요. 이 시간 안에 Broadcast로 받은 이동은 Presence보다 새로운 정보로 봐요 */
+export const PRESENCE_LAG_MS = PRESENCE_MIN_GAP_MS + PRESENCE_ARRIVAL_MARGIN_MS;
+
+/** 서버가 채널을 닫았을 때 다시 들어가기 전에 기다리는 시간 */
+export const REJOIN_DELAY_MS = 5000;
+
 export const SPRINT_PRESETS = [
   { id: '25', label: '25분 집중 · 5분 휴식', focus: 25, rest: 5 },
   { id: '50', label: '50분 집중 · 10분 휴식', focus: 50, rest: 10 },

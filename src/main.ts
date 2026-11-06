@@ -1,6 +1,7 @@
 import './style.css';
 import {
   DEFAULT_ROOM,
+  PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
   ROOM_SLUG_RE,
   SPRINT_PRESETS,
@@ -174,6 +175,7 @@ async function enter(p: store.Profile) {
         ui.setRoom(n);
         for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
         known.clear();
+        lastMoves.clear();
         ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
     },
@@ -243,6 +245,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   // 이전 방 사람들은 조용히 정리 (퇴근 알림 없이)
   for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id, true);
   known.clear();
+  lastMoves.clear();
   ui.setPeers([]);
   // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
   applyPlace(r);
@@ -560,8 +563,22 @@ function tickSprint() {
 // ── 5. 다른 사람들 ───────────────────────────────
 const known = new Map<string, PeerState>();
 
-function onPeers(peers: PeerState[]) {
+/** Broadcast로 받은 가장 최근 이동. Presence는 PRESENCE_LAG_MS까지 늦을 수 있어서, 그 안에는 이쪽이 더 새로워요 */
+const lastMoves = new Map<string, { at: number; x: number; z: number; seat: string | null }>();
+
+/** Presence가 최근 이동을 아직 못 따라왔을 수 있어서, 그 사이엔 Broadcast로 받은 위치·자리로 덮어써요 */
+function withLatestMove(p: PeerState): PeerState {
+  const m = lastMoves.get(p.id);
+  if (!m || Date.now() - m.at > PRESENCE_LAG_MS) return p;
+  // 자리가 바뀌었으면 Presence의 seatAt은 옛 자리 것이라, 이동 이벤트를 받은 시각으로 대신해요
+  let seatAt = p.seatAt;
+  if (m.seat !== p.seat) seatAt = m.seat ? m.at : 0;
+  return { ...p, x: m.x, z: m.z, seat: m.seat, seatAt };
+}
+
+function onPeers(presencePeers: PeerState[]) {
   if (!world || !self) return;
+  const peers = presencePeers.map(withLatestMove);
   const ids = new Set(peers.map((p) => p.id));
   for (const p of peers) {
     const prev = known.get(p.id);
@@ -598,6 +615,7 @@ function onPeers(peers: PeerState[]) {
     const name = known.get(id)?.name;
     world.removeAvatar(id);
     known.delete(id);
+    lastMoves.delete(id);
     if (name) ui.toast(`${name}님이 퇴근했어요`);
   }
   ui.setPeers(peers);
@@ -613,6 +631,7 @@ function onEvent(e: NetEvent) {
       a.state.x = e.x;
       a.state.z = e.z;
       a.goTo(e.x, e.z, e.seat);
+      lastMoves.set(e.id, { at: Date.now(), x: e.x, z: e.z, seat: e.seat });
       const k = known.get(e.id);
       if (k) Object.assign(k, { seat: e.seat, x: e.x, z: e.z });
       break;
