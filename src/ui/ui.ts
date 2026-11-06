@@ -26,6 +26,7 @@ import type { AuthUser, Commit, PeerState } from '../net/types';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
+import { loadPrivacyPolicy } from './privacy';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
   type Profile,
@@ -43,7 +44,7 @@ export interface ChatLine {
   mine: boolean;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'privacy';
 
 export interface UIHandlers {
   onEnter(p: Profile): void;
@@ -262,7 +263,7 @@ export class UI {
         '창 하나 켜두면 같이 있는 거예요. 장소마다 배경 소리가 달라요. · ',
         h('a', { href: FEEDBACK_URL }, '피드백 보내기'),
         ' · ',
-        h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침'),
+        this.privacyLink(),
       ),
     );
     this.root.append(h('div', { class: 'intro', id: 'intro' }, form));
@@ -638,7 +639,7 @@ export class UI {
     el.innerHTML = '';
     // 다시 그릴 때마다 클래스를 새로 정하니, 모양을 정하는 클래스는 모두 여기서 붙여요
     // 방 고르기와 커밋 방명록은 화면 가운데에 크게 (style.css .sheet.center, 방명록은 .wide로 더 넓게)
-    const centered = this.sheet === 'rooms' || this.sheet === 'commit';
+    const centered = this.sheet === 'rooms' || this.sheet === 'commit' || this.sheet === 'privacy';
     el.className = `sheet sheet-${this.sheet}` + (centered ? ' center' : '') + (this.sheet === 'commit' ? ' wide' : '');
     const head = (title: string, sub?: string) =>
       h('header', {}, h('h2', {}, title), sub ? h('p', {}, sub) : null, h('button', { class: 'x', onclick: () => this.closeSheet(), 'aria-label': '닫기' }, '✕'));
@@ -784,6 +785,20 @@ export class UI {
         if (!keptDraft || keptDraft.focused) window.setTimeout(() => msg.focus({ preventScroll: true }), 30);
         break;
       }
+      case 'privacy': {
+        const policy = h('article', { class: 'policy' }, h('p', { class: 'policy-note' }, '불러오는 중이에요…'));
+        el.append(head('개인정보 처리방침', '어떤 정보를 받고, 어디에 얼마나 보관하는지 적어뒀어요'), policy);
+        // 그 사이 다른 시트로 바뀌었으면(policy가 화면에서 빠졌으면) 그리지 않아요
+        void loadPrivacyPolicy().then(
+          (doc) => {
+            if (policy.isConnected) policy.replaceChildren(doc);
+          },
+          () => {
+            if (policy.isConnected) policy.replaceChildren(h('p', { class: 'policy-note' }, `처방침을 불러오지 못했어요. ${SITE.contact}로 문의해 주세요.`));
+          },
+        );
+        break;
+      }
       case 'people': {
         const list = [this.self, ...this.peers].filter(Boolean);
         el.append(
@@ -853,7 +868,7 @@ export class UI {
                       ),
                     )
                   : null,
-                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.', ' · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
+                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.', ' · ', this.privacyLink()),
               )
             : null;
         el.append(
@@ -888,6 +903,11 @@ export class UI {
       }
     }
     this.fixSheetHeader(el, keptScroll);
+  }
+
+  /** 개인정보 처리방침 링크. 앱인토스는 밖으로 나가는 링크를 막아서, 새 창이 아니라 앱 안 시트로 열어요 */
+  private privacyLink() {
+    return h('button', { class: 'link-btn', type: 'button', onclick: () => this.openSheet('privacy') }, '개인정보 처리방침');
   }
 
   /**
