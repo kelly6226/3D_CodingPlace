@@ -6,6 +6,7 @@
 // (DB에 저장되는 값은 supabase/schema.sql의 제약조건이 서버에서 한 번 더 막아요)
 import { EMOTES, LANGS, STATUSES } from '../config';
 import { ROOM, SPAWN, seatById } from '../world/layout';
+import { maskBadWords } from './badwords';
 import type { Commit, NetEvent, PeerState } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
@@ -53,7 +54,7 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
   const focus = num(raw.focusUntil, 0);
   return {
     id: pid,
-    name: text(raw.name, 20) || '익명의 개발자',
+    name: maskBadWords(text(raw.name, 20)) || '익명의 개발자',
     color: hex(raw.color, '#3b4a6b'),
     hair: hex(raw.hair, '#1d1a18'),
     skin: hex(raw.skin, '#eac3a3'),
@@ -92,7 +93,7 @@ export function cleanEvent(raw: unknown): NetEvent | null {
     case 'deploy': {
       const pid = id(raw.id);
       if (!pid) return null;
-      return { type: 'deploy', id: pid, name: text(raw.name, 20) || '누군가' };
+      return { type: 'deploy', id: pid, name: maskBadWords(text(raw.name, 20)) || '누군가' };
     }
     case 'commit': {
       const c = cleanCommit(raw.commit);
@@ -114,8 +115,8 @@ export function cleanCommit(raw: unknown): Commit | null {
   if (!name || !msg) return null;
   return {
     hash: raw.hash,
-    name,
-    msg,
+    name: maskBadWords(name),
+    msg: maskBadWords(msg),
     lang: LANGS.some((l) => l.id === raw.lang) ? (raw.lang as string) : '',
     at: clamp(num(raw.at, Date.now()), 0, Date.now() + 60e3),
   };
