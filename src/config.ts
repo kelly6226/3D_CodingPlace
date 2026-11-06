@@ -95,6 +95,34 @@ export const EMOTES: EmoteDef[] = [
 
 export const emoteById = (id: string): EmoteDef | undefined => EMOTES.find((e) => e.id === id);
 
+export type ActionId = 'dance' | 'throw' | 'flip' | 'faint';
+
+export interface ActionDef {
+  id: ActionId;
+  emoji: string;
+  label: string;
+  /** 머리 위 말풍선에 뜨는 글자 */
+  line: string;
+  /** 동작이 이어지는 시간(초). 아바타 애니메이션과 다음 동작 가능 시점이 모두 이 값을 써요 */
+  seconds: number;
+}
+
+/** 이모트보다 큰 동작. 아바타 몸이 움직이고, 던지는 노트북 같은 소품이 나와요 */
+export const ACTIONS: ActionDef[] = [
+  { id: 'dance', emoji: '💃', label: '춤추기', line: '춤춘다!', seconds: 6 },
+  { id: 'throw', emoji: '💥', label: '노트북 던지기', line: '이 노트북 진짜…', seconds: 3.4 },
+  { id: 'flip', emoji: '💢', label: '책상 뒤집기', line: '(╯°□°)╯︵ ┻━┻', seconds: 3.6 },
+  { id: 'faint', emoji: '😵', label: '번아웃 기절', line: '번아웃…', seconds: 5 },
+];
+
+export const actionById = (id: unknown): ActionDef | undefined => ACTIONS.find((a) => a.id === id);
+
+/**
+ * 받는 쪽은 같은 사람의 동작을 이 간격보다 빨리 받으면 버려요.
+ * 보내는 쪽은 동작이 끝나야 다음 동작을 할 수 있으니, 가장 짧은 동작의 절반이면 정상 전송은 안 막혀요.
+ */
+export const ACT_RECEIVE_GAP_MS = (Math.min(...ACTIONS.map((a) => a.seconds)) * 1000) / 2;
+
 /** 채팅 한 번에 보낼 수 있는 글자 수 (입력 칸·받은 값 검사·자르기가 모두 이 값을 써요) */
 export const CHAT_MAX_LENGTH = 50;
 /** 한 사람이 채팅을 보낼 수 있는 최소 간격 */
@@ -146,6 +174,9 @@ export const HOODIE_COLORS = [
   '#5b7fa6', // 스카이
   '#7a5a8c', // 보라
 ];
+
+/** #rrggbb 색 (저장된 값·실시간으로 받은 값을 검사할 때 같이 씀) */
+export const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 export const HAIR_COLORS = ['#1d1a18', '#2b2220', '#4a3426', '#6b4a2e', '#262a33', '#3a2e2a'];
 export const SKIN_TONES = ['#f3d2b8', '#eac3a3', '#d9a988', '#c68f6c', '#f6dcc6'];

@@ -1858,3 +1858,106 @@ button.place-name {
     animation-name: rise-m;
   }
 }
+
+/* ── 옷장 · 큰 동작 ─────────────────────────────── */
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.icon-btn.hud-wardrobe {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  font-size: 15px;
+}
+.sheet-sub {
+  margin: 14px 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.sheet-wardrobe {
+  max-height: min(70vh, 640px);
+}
+.wd-stage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.wd-preview {
+  flex: none;
+  width: 150px;
+  height: 180px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: radial-gradient(ellipse at 50% 88%, rgba(242, 180, 90, 0.18), rgba(0, 0, 0, 0.28) 70%);
+  overflow: hidden;
+}
+.look-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+.look-canvas:active {
+  cursor: grabbing;
+}
+.wd-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wd-acts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.wd-act {
+  padding: 6px 0;
+}
+.wd-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wd-hint {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.wd-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.wd-title {
+  margin: 12px 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.wd-pane > section:first-child > .wd-title {
+  margin-top: 0;
+}
+.wd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.wd-label {
+  flex: none;
+  width: 56px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+@media (max-width: 640px) {
+  .wd-preview {
+    width: 112px;
+    height: 134px;
+  }
+}

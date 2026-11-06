@@ -1,14 +1,25 @@
 // 귀여운 개발자 아바타 (후드티 + 노트북)
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { langById, statusById } from '../config';
+import { actionById, langById, statusById, type ActionDef, type ActionId } from '../config';
+import { sameOutfit, type Outfit } from '../look';
 import type { PeerState } from '../net/types';
+import { FlippedTable, ThrownLaptop, makeLaptopMesh, makeStars, type Prop } from './actionProps';
+import { FLIP_RELEASE_S, THROW_RELEASE_S, applyActionPose, emptyPose, faintStarsAt } from './actions';
 import { seatById, type Seat } from './layout';
+import { HALO_Y, buildBack, buildHair, buildHat, buildNeck, hatCoversHair } from './outfit';
 import { findPath } from './pathfinding';
 
 const SCALE = 1.2;
 const HIP = 0.32 * SCALE;
 const SPEED = 1.6;
+/** 서서 노트북을 던질 때 손에서 떠나는 높이 (머리 위) */
+const THROW_HAND_Y = 1.45;
+/** 서서 책상을 뒤집을 때, 몸에서 책상 가운데까지 거리와 높이 */
+const FLIP_TABLE_REACH = 0.7;
+const FLIP_TABLE_WAIST_Y = 0.55;
+/** 앉아서 뒤집을 때 진짜 책상 윗면과 겹쳐 깜빡이지 않게 띄우는 높이 */
+const FLIP_TABLE_LIFT = 0.06;
 
 const geo = {
   leg: new THREE.CapsuleGeometry(0.075, 0.17, 4, 10),
@@ -37,8 +48,6 @@ const geo = {
 };
 
 const mat = {
-  pants: new THREE.MeshStandardMaterial({ color: '#2b2f3a', roughness: 0.9 }),
-  shoe: new THREE.MeshStandardMaterial({ color: '#efeae0', roughness: 0.7 }),
   eye: new THREE.MeshBasicMaterial({ color: '#1b1714' }),
   blush: new THREE.MeshBasicMaterial({ color: '#f29b9b', transparent: true, opacity: 0.55 }),
   glasses: new THREE.MeshStandardMaterial({ color: '#1e1e22', roughness: 0.4, metalness: 0.4 }),
@@ -50,6 +59,11 @@ const mat = {
 };
 
 export type AvatarMode = 'idle' | 'walking' | 'seating' | 'seated' | 'unseating';
+
+/** outfit 객체까지 복사해서 둠. 바깥에서 outfit을 고쳐도 "이전 옷"이 같이 바뀌어 변화를 못 알아보는 일이 없게 */
+function copyState(s: PeerState): PeerState {
+  return { ...s, outfit: { ...s.outfit } };
+}
 
 function shade(hex: string, k: number) {
   const c = new THREE.Color(hex);
@@ -80,6 +94,27 @@ export class Avatar {
   private hoodMat: THREE.MeshStandardMaterial;
   private skinMat: THREE.MeshStandardMaterial;
   private hairMat: THREE.MeshStandardMaterial;
+  // 바지·신발·포인트 색은 사람마다 달라서 아바타마다 하나씩 가져요
+  private pantsMat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
+  private shoeMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
+  private accentMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  // 꾸미기 장식이 놓이는 자리 (모양은 world/outfit.ts)
+  private hatSlot = new THREE.Group();
+  private hairSlot = new THREE.Group();
+  private backSlot = new THREE.Group();
+  private neckSlot = new THREE.Group();
+  private propeller: THREE.Object3D | null = null;
+  private halo: THREE.Object3D | null = null;
+  private cape: THREE.Object3D | null = null;
+  private wings: THREE.Object3D[] = [];
+
+  // 큰 동작 (춤, 던지기, 뒤집기, 기절)
+  private act: { def: ActionDef; start: number; released: boolean } | null = null;
+  private props: Prop[] = [];
+  private stars: THREE.Group | null = null;
+  private heldLaptop: THREE.Group | null = null;
+  /** 이 시각(this.t 기준)까지는 책상 위 노트북을 숨김 (던지거나 뒤집는 중) */
+  private laptopHiddenUntil = 0;
 
   private tagEl: HTMLDivElement;
   private bubbleEl: HTMLDivElement;
@@ -115,7 +150,7 @@ export class Avatar {
     private codeTex: THREE.Texture,
   ) {
     this.id = state.id;
-    this.state = { ...state };
+    this.state = copyState(state);
     this.isSelf = isSelf;
 
     this.hoodieMat = new THREE.MeshStandardMaterial({ color: state.color, roughness: 0.85 });
@@ -139,8 +174,8 @@ export class Avatar {
       [this.legR, 0.085],
     ] as const) {
       leg.position.set(x, 0.32, 0);
-      add(leg, geo.leg, mat.pants, 0, -0.16, 0);
-      add(leg, geo.shoe, mat.shoe, 0, -0.3, 0.03);
+      add(leg, geo.leg, this.pantsMat, 0, -0.16, 0);
+      add(leg, geo.shoe, this.shoeMat, 0, -0.3, 0.03);
       this.body.add(leg);
     }
 
@@ -201,8 +236,9 @@ export class Avatar {
       this.phones.add(ear);
     }
     this.phones.visible = false;
-    this.headG.add(this.phones);
-    this.body.add(this.headG);
+    this.headG.add(this.phones, this.hatSlot, this.hairSlot);
+    this.body.add(this.headG, this.backSlot, this.neckSlot);
+    this.applyOutfit(state.outfit);
 
     this.body.scale.setScalar(SCALE);
     this.root.add(this.body);
@@ -248,16 +284,132 @@ export class Avatar {
   // ── 외형/상태 ────────────────────────────────────
   apply(next: PeerState) {
     const prev = this.state;
-    this.state = { ...next };
+    this.state = copyState(next);
     if (prev.color !== next.color) {
       this.hoodieMat.color.set(next.color);
       this.hoodMat.color.copy(shade(next.color, 0.8));
     }
     if (prev.skin !== next.skin) this.skinMat.color.set(next.skin);
     if (prev.hair !== next.hair) this.hairMat.color.set(next.hair);
+    if (!sameOutfit(prev.outfit, next.outfit)) this.applyOutfit(next.outfit);
     this.glasses.visible = next.glasses;
     if (prev.lang !== next.lang && this.laptop) this.paintSticker();
     this.renderTag();
+  }
+
+  /** 바지·신발 색을 바꾸고 모자·머리 모양·등/목 장식을 새로 입힘 */
+  private applyOutfit(o: Outfit) {
+    this.pantsMat.color.set(o.pants);
+    this.shoeMat.color.set(o.shoes);
+    this.accentMat.color.set(o.accent);
+    const dress = (slot: THREE.Group, item: THREE.Group | null) => {
+      slot.clear();
+      if (item) slot.add(item);
+    };
+    dress(this.hatSlot, buildHat(o.hat, this.accentMat));
+    dress(this.hairSlot, buildHair(o.hairStyle, this.hairMat, this.accentMat, hatCoversHair(o.hat)));
+    dress(this.backSlot, buildBack(o.back, this.accentMat));
+    dress(this.neckSlot, buildNeck(o.neck, this.accentMat));
+    // 매 프레임 움직이는 장식은 이름으로 찾아 둠
+    this.propeller = this.hatSlot.getObjectByName('spin') ?? null;
+    this.halo = this.hatSlot.getObjectByName('halo') ?? null;
+    this.cape = this.backSlot.getObjectByName('cape') ?? null;
+    this.wings = ['wingL', 'wingR'].flatMap((n) => this.backSlot.getObjectByName(n) ?? []);
+  }
+
+  /** 큰 동작을 시작함. 머리 위에 말풍선(이모지+한마디)도 같이 띄우고, 하는 동안은 걷지 않고 제자리에 있어요 */
+  perform(id: ActionId) {
+    const def = actionById(id);
+    if (!def) return;
+    this.endAct();
+    this.act = { def, start: this.t, released: false };
+    this.emote(def.emoji, def.line);
+    // 서 있는 채로 노트북을 던질 때는 손에 노트북을 듦
+    if (id === 'throw' && !this.laptop) {
+      this.heldLaptop = makeLaptopMesh();
+      this.heldLaptop.position.set(0, -0.36, 0.05);
+      this.armR.add(this.heldLaptop);
+    }
+    if (id === 'faint') {
+      this.stars = makeStars();
+      this.stars.position.set(0, 0.62, 0);
+      this.stars.visible = false;
+      this.headG.add(this.stars);
+    }
+  }
+
+  get acting() {
+    return this.act !== null;
+  }
+
+  /** 보는 방향을 바꿈 (옷장 미리보기에서 돌려 볼 때) */
+  face(yaw: number) {
+    this.yaw = yaw;
+  }
+
+  private endAct() {
+    this.act = null;
+    if (this.heldLaptop) {
+      this.armR.remove(this.heldLaptop);
+      this.heldLaptop = null;
+    }
+    if (this.stars) {
+      this.headG.remove(this.stars);
+      this.stars = null;
+    }
+  }
+
+  /** 동작 도중 한 번만 일어나는 일: 노트북을 놓는 순간, 책상을 뒤집는 순간, 별이 도는 구간 */
+  private stepAct(elapsed: number) {
+    const act = this.act;
+    if (!act) return;
+    if (act.def.id === 'throw' && !act.released && elapsed >= THROW_RELEASE_S) {
+      act.released = true;
+      this.throwLaptop(act.def.seconds - elapsed);
+    }
+    if (act.def.id === 'flip' && !act.released && elapsed >= FLIP_RELEASE_S) {
+      act.released = true;
+      this.flipTable(act.def.seconds - elapsed);
+    }
+    if (this.stars) this.stars.visible = faintStarsAt(elapsed, act.def.seconds);
+  }
+
+  private addProp(p: Prop) {
+    this.props.push(p);
+    this.scene.add(p.group);
+  }
+
+  private throwLaptop(hideFor: number) {
+    const p = this.root.position;
+    const yaw = this.yaw + (Math.random() - 0.5) * 0.8;
+    const start = new THREE.Vector3();
+    let distance = 2 + Math.random();
+    if (this.laptop) {
+      // 책상 위 노트북이 날아감
+      this.laptop.getWorldPosition(start);
+      distance = 1.6 + Math.random() * 0.6;
+      this.laptopHiddenUntil = this.t + hideFor;
+    } else {
+      start.set(p.x + Math.sin(this.yaw) * 0.25, p.y + THROW_HAND_Y, p.z + Math.cos(this.yaw) * 0.25);
+      if (this.heldLaptop) {
+        this.armR.remove(this.heldLaptop);
+        this.heldLaptop = null;
+      }
+    }
+    this.addProp(new ThrownLaptop(start, yaw, distance));
+  }
+
+  private flipTable(hideFor: number) {
+    const p = this.root.position;
+    const origin = new THREE.Vector3();
+    if (this.seat) {
+      // 책상 위에서 뒤집힘 (진짜 책상은 그대로 있고, 노트북은 잠깐 사라졌다가 돌아와요)
+      origin.set(this.seat.lx, this.seat.ly + FLIP_TABLE_LIFT, this.seat.lz);
+      this.laptopHiddenUntil = this.t + hideFor;
+    } else {
+      origin.set(p.x + Math.sin(this.yaw) * FLIP_TABLE_REACH, FLIP_TABLE_WAIST_Y, p.z + Math.cos(this.yaw) * FLIP_TABLE_REACH);
+    }
+    this.addProp(new FlippedTable(origin, this.yaw));
   }
 
   renderTag() {
@@ -490,6 +642,8 @@ export class Avatar {
 
   dispose() {
     this.removeLaptop();
+    for (const p of this.props) this.scene.remove(p.group);
+    this.props = [];
     this.scene.remove(this.root);
     this.tag.element.remove();
     this.bubble.element.remove();
@@ -497,6 +651,9 @@ export class Avatar {
     this.hoodMat.dispose();
     this.skinMat.dispose();
     this.hairMat.dispose();
+    this.pantsMat.dispose();
+    this.shoeMat.dispose();
+    this.accentMat.dispose();
   }
 
   // ── 매 프레임 ───────────────────────────────────
@@ -504,7 +661,8 @@ export class Avatar {
     this.t += dt;
     const p = this.root.position;
 
-    if (this.mode === 'walking') {
+    // 동작 중에는 걸음을 잠깐 멈춰요 (동작이 끝나면 하던 길을 이어서 가요)
+    if (this.mode === 'walking' && !this.act) {
       const next = this.path[0];
       if (!next) {
         this.mode = 'idle';
@@ -552,6 +710,13 @@ export class Avatar {
 
     this.animate(dt);
 
+    this.props = this.props.filter((prop) => {
+      const alive = prop.update(dt);
+      if (!alive) this.scene.remove(prop.group);
+      return alive;
+    });
+    if (this.laptop) this.laptop.visible = this.t >= this.laptopHiddenUntil;
+
     if (this.bubbleTimer > 0) {
       this.bubbleTimer -= dt;
       if (this.bubbleTimer <= 0) this.bubble.visible = false;
@@ -583,7 +748,7 @@ export class Avatar {
     const s = this.state;
     const seated = this.mode === 'seated' || this.mode === 'seating';
     const standingDesk = this.seat?.kind === 'stand';
-    const walking = this.mode === 'walking';
+    const walking = this.mode === 'walking' && !this.act;
     const away = s.status === 'away' || s.status === 'meal';
     const stretching = !walking && !away && seated && s.focusUntil === null && Math.sin(t * 0.23) > 0.985;
 
@@ -591,76 +756,116 @@ export class Avatar {
     const baseTyping = seated && !away ? 0.35 : 0;
     this.typing = Math.max(baseTyping, this.typing - dt * 0.6);
 
-    let legX = 0;
-    let armLX = 0;
-    let armRX = 0;
-    let armZ = 0.08;
-    let bob = 0;
-    let headX = 0;
-    let headY = Math.sin(t * 0.4) * 0.15;
+    const pose = emptyPose();
+    // 팔을 벌리는 정도: 왼팔은 음수가 바깥, 오른팔은 양수가 바깥이라 부호만 반대
+    const setArmSpread = (spread: number) => {
+      pose.armLZ = -spread;
+      pose.armRZ = spread;
+    };
+    setArmSpread(0.08);
+    pose.headY = Math.sin(t * 0.4) * 0.15;
 
     if (walking) {
       const w = Math.sin(t * 11);
-      legX = w * 0.55;
-      armLX = -w * 0.5;
-      armRX = w * 0.5;
-      bob = Math.abs(Math.cos(t * 11)) * 0.035;
-      headY = 0;
+      pose.legL = w * 0.55;
+      pose.legR = -w * 0.55;
+      pose.armLX = -w * 0.5;
+      pose.armRX = w * 0.5;
+      pose.bob = Math.abs(Math.cos(t * 11)) * 0.035;
+      pose.headY = 0;
     } else if (seated) {
       const sitLegs = standingDesk ? 0 : -Math.PI / 2 + (this.seat?.kind === 'beanbag' ? 0.25 : 0);
-      legX = this.mode === 'seating' ? sitLegs * easeInOut(this.trans) : sitLegs;
+      pose.legL = pose.legR = this.mode === 'seating' ? sitLegs * easeInOut(this.trans) : sitLegs;
       if (away) {
-        armLX = armRX = -0.4;
-        headX = 0.55;
-        headY = 0;
+        pose.armLX = pose.armRX = -0.4;
+        pose.headX = 0.55;
+        pose.headY = 0;
       } else {
         const k = this.typing;
-        armLX = -1.15 + Math.sin(t * 15) * 0.07 * k;
-        armRX = -1.15 + Math.sin(t * 15 + 1.7) * 0.07 * k;
-        armZ = -0.12;
-        headX = 0.16 + Math.sin(t * 0.7) * 0.03;
-        headY = Math.sin(t * 0.3) * 0.08;
+        pose.armLX = -1.15 + Math.sin(t * 15) * 0.07 * k;
+        pose.armRX = -1.15 + Math.sin(t * 15 + 1.7) * 0.07 * k;
+        setArmSpread(-0.12);
+        pose.headX = 0.16 + Math.sin(t * 0.7) * 0.03;
+        pose.headY = Math.sin(t * 0.3) * 0.08;
       }
       if (stretching) {
-        armLX = armRX = -2.9;
-        armZ = 0.05;
-        headX = -0.25;
+        pose.armLX = pose.armRX = -2.9;
+        setArmSpread(0.05);
+        pose.headX = -0.25;
       }
     } else {
       // 서서 숨쉬기
-      bob = Math.sin(t * 2) * 0.006;
+      pose.bob = Math.sin(t * 2) * 0.006;
     }
 
     if (this.sipT > 0) {
       this.sipT -= dt;
       this.cup.visible = true;
-      armRX = -2.1;
-      headX = -0.12;
+      pose.armRX = -2.1;
+      pose.headX = -0.12;
       if (this.sipT <= 0) this.cup.visible = false;
     }
     if (this.pressT > 0) {
       this.pressT -= dt;
-      armRX = -1.4 - Math.sin((1 - this.pressT / 0.8) * Math.PI) * 0.5;
+      pose.armRX = -1.4 - Math.sin((1 - this.pressT / 0.8) * Math.PI) * 0.5;
+    }
+
+    // 큰 동작은 바탕 자세 위에 덧씌움
+    let fainted = false;
+    if (this.act) {
+      const elapsed = t - this.act.start;
+      if (elapsed >= this.act.def.seconds) {
+        this.endAct();
+      } else {
+        this.stepAct(elapsed);
+        applyActionPose(this.act.def.id, elapsed, this.act.def.seconds, seated, pose);
+        fainted = this.act.def.id === 'faint' && faintStarsAt(elapsed, this.act.def.seconds);
+      }
     }
 
     const lerp = Math.min(1, dt * 12);
-    this.legL.rotation.x += (legX - this.legL.rotation.x) * lerp;
-    this.legR.rotation.x += ((walking ? -legX : legX) - this.legR.rotation.x) * lerp;
-    this.armL.rotation.x += (armLX - this.armL.rotation.x) * lerp;
-    this.armR.rotation.x += (armRX - this.armR.rotation.x) * lerp;
-    this.armL.rotation.z = -armZ;
-    this.armR.rotation.z = armZ;
-    this.headG.rotation.x += (headX - this.headG.rotation.x) * lerp;
-    this.headG.rotation.y += (headY - this.headG.rotation.y) * lerp;
-    this.body.position.y = bob;
+    const follow = (obj: THREE.Object3D, axis: 'x' | 'y' | 'z', to: number) => {
+      obj.rotation[axis] += (to - obj.rotation[axis]) * lerp;
+    };
+    follow(this.legL, 'x', pose.legL);
+    follow(this.legR, 'x', pose.legR);
+    follow(this.armL, 'x', pose.armLX);
+    follow(this.armR, 'x', pose.armRX);
+    follow(this.armL, 'z', pose.armLZ);
+    follow(this.armR, 'z', pose.armRZ);
+    follow(this.headG, 'x', pose.headX);
+    follow(this.headG, 'y', pose.headY);
+    follow(this.headG, 'z', pose.headZ);
+    this.body.position.set(pose.sway, pose.bob, 0);
+    follow(this.body, 'x', pose.pitch);
+    follow(this.body, 'z', pose.roll);
+    this.body.rotation.y = pose.spin;
     this.torso.scale.y = 1 + Math.sin(t * 2.2) * 0.012;
+
+    this.animateAccessories(dt, walking);
 
     // 눈 깜빡
     this.blinkT -= dt;
     const blink = this.blinkT < 0.12 ? 0.15 : 1;
     if (this.blinkT < 0) this.blinkT = 2 + Math.random() * 4;
-    const sleepy = seated && away ? 0.2 : blink;
-    for (const e of this.eyes) e.scale.y = sleepy;
+    const closed = (seated && away) || fainted;
+    for (const e of this.eyes) e.scale.y = closed ? 0.2 : blink;
+  }
+
+  /** 프로펠러, 천사 고리, 망토, 날개처럼 스스로 움직이는 장식 */
+  private animateAccessories(dt: number, walking: boolean) {
+    const t = this.t;
+    const dancing = this.act?.def.id === 'dance';
+    if (this.propeller) this.propeller.rotation.y += dt * (walking || dancing ? 26 : 9);
+    if (this.halo) this.halo.position.y = HALO_Y + Math.sin(t * 2.5) * 0.012;
+    if (this.cape) {
+      const billow = walking ? 0.22 + Math.sin(t * 11) * 0.1 : 0.06 + Math.sin(t * 1.5) * 0.03;
+      this.cape.rotation.x = billow;
+    }
+    const flap = walking || dancing ? 12 : 2;
+    const open = 0.45 + Math.sin(t * flap) * 0.2;
+    // 왼쪽 날개는 음수, 오른쪽은 양수로 돌려야 둘 다 뒤로 접힘
+    this.wings.forEach((w, i) => (w.rotation.y = (i === 0 ? -1 : 1) * open));
   }
 }
 
