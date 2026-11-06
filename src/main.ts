@@ -6,7 +6,6 @@ import {
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
   ROOM_SLUG_RE,
-  SPRINT_PRESETS,
   builtinRoom,
   emoteById,
   isPlaceId,
@@ -155,7 +154,6 @@ async function enter(p: store.Profile) {
     seatAt: 0,
     x: SPAWN.x,
     z: SPAWN.z,
-    focusUntil: null,
     coffee: store.getCoffeeToday(),
     joinedAt: Date.now(),
   };
@@ -405,6 +403,11 @@ function setStatus(id: string) {
 }
 
 /** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
+/** 옷장 미리보기에 쓰는 아바타 바탕. 입장 화면에서도 쓰니까 self에 기대지 않아요 */
+function previewBase(look: Look): PeerState {
+  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, ...look };
+}
+
 function profileOf(s: PeerState): store.Profile {
   return { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
 }
@@ -554,62 +557,6 @@ function addCommit(c: Commit) {
   ui.setCommits(commits);
 }
 
-// ── 4. 스프린트 (뽀모도로) ─────────────────────────
-let sprint = { phase: 'idle' as 'idle' | 'focus' | 'rest', endsAt: 0, total: 0, preset: '25' };
-
-function startSprint(presetId: string) {
-  const p = SPRINT_PRESETS.find((x) => x.id === presetId) ?? SPRINT_PRESETS[0];
-  store.setSprintPreset(p.id);
-  sprint = { phase: 'focus', endsAt: Date.now() + p.focus * 60e3, total: p.focus * 60e3, preset: p.id };
-  self.focusUntil = sprint.endsAt;
-  meAvatar().apply(self);
-  net.updateSelf({ focusUntil: self.focusUntil });
-  ui.setSprint(sprint);
-  ui.toast(`🎧 ${p.focus}분 스프린트 시작. 헤드폰을 썼어요.`, 'good');
-  if (!self.seat) ui.toast('자리에 앉아서 하면 더 집중돼요 (의자를 눌러보세요)');
-}
-
-function stopSprint() {
-  const wasFocus = sprint.phase === 'focus';
-  sprint = { ...sprint, phase: 'idle' };
-  self.focusUntil = null;
-  meAvatar().apply(self);
-  net.updateSelf({ focusUntil: null });
-  ui.setSprint(sprint);
-  document.title = pageTitle(room);
-  if (wasFocus) ui.toast('스프린트를 멈췄어요. 괜찮아요, 회고 때 말하면 돼요.');
-}
-
-function tickSprint() {
-  if (sprint.phase === 'idle') return;
-  const left = sprint.endsAt - Date.now();
-  if (left <= 0) {
-    const p = SPRINT_PRESETS.find((x) => x.id === sprint.preset) ?? SPRINT_PRESETS[0];
-    sound.chime();
-    if (sprint.phase === 'focus') {
-      store.addSprint(p.focus);
-      ui.toast(`🌱 스프린트 완료! 잔디 한 칸 심었어요. ${p.rest}분 쉬어요.`, 'good', 5000);
-      meAvatar().emote('🌱', '스프린트 완료');
-      net.send({ type: 'emote', id: self.id, emote: 'ship' });
-      sprint = { ...sprint, phase: 'rest', endsAt: Date.now() + p.rest * 60e3, total: p.rest * 60e3 };
-      self.focusUntil = null;
-      meAvatar().apply(self);
-      net.updateSelf({ focusUntil: null });
-    } else {
-      ui.toast('휴식 끝! 다음 스프린트 시작해볼까요?', 'info', 5000);
-      sprint = { ...sprint, phase: 'idle' };
-      document.title = pageTitle(room);
-    }
-  }
-  ui.setSprint(sprint);
-  if (sprint.phase !== 'idle') {
-    const l = Math.max(0, sprint.endsAt - Date.now());
-    const mm = String(Math.floor(l / 60e3)).padStart(2, '0');
-    const ss = String(Math.floor((l % 60e3) / 1000)).padStart(2, '0');
-    document.title = `${sprint.phase === 'focus' ? '🎧' : '☕'} ${mm}:${ss} · 온라인 모각코`;
-  }
-}
-
 // ── 5. 다른 사람들 ───────────────────────────────
 const known = new Map<string, PeerState>();
 
@@ -726,6 +673,7 @@ function onEvent(e: NetEvent) {
 // ── 6. 3D 클릭 ───────────────────────────────────
 function bindWorld() {
   world.setHandlers({
+    onViewState: (state) => ui.setViewState(state),
     onFloor: (x, z) => {
       if (!self) return;
       ui.hidePop();
@@ -794,8 +742,7 @@ function onFrame(dt: number) {
   secT += dt;
   if (secT >= 1) {
     secT = 0;
-    tickSprint();
-    ui.tickClock();
+    ui.tickSince();
   }
   if (!self) return;
   // 멀리서 들리는 다른 사람들 타자 소리
@@ -839,13 +786,12 @@ ui.bind({
   onEmote: (id) => emote(id),
   onAct: act,
   onLook: changeLook,
-  onLookPreview: async () => {
+  onView: (cmd) => world.viewCommand(cmd),
+  onLookPreview: async (look) => {
     // 미리보기용 3D 코드는 옷장을 처음 열 때 받아요
     const { LookPreview } = await import('./world/lookPreview');
-    return new LookPreview(self);
+    return new LookPreview(previewBase(look));
   },
-  onSprintStart: startSprint,
-  onSprintStop: stopSprint,
   onCoffee: useItem,
   onCommit: commit,
   onChat: chat,
@@ -893,7 +839,7 @@ ui.bind({
   },
 });
 
-ui.tickClock();
+ui.tickSince();
 boot()
   .then(bindWorld)
   .catch((err) => {

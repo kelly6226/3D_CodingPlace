@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { PlaceId } from '../config';
+import type { PlaceId, ViewCommand, ViewState } from '../config';
 import type { PeerState } from '../net/types';
 import { Avatar } from './avatar';
 import { ROOM, useLayout } from './layout';
@@ -16,7 +16,44 @@ export interface WorldHandlers {
   onSeat(id: string): void;
   onInteract(data: InteractData): void;
   onAvatar(id: string, screen: { x: number; y: number }): void;
+  /** 처음 시점에서 벗어났는지, 내 캐릭터를 따라가는지가 바뀔 때 (시점 버튼 표시용) */
+  onViewState(state: ViewState): void;
 }
+
+/** 시점 조작 한도 (각도는 라디안, 길이는 월드 단위) */
+const VIEW = {
+  /** 좌우로 돌 수 있는 한도 (약 103°). 이보다 더 돌면 뒷벽 뒤, 창밖 도시 쪽으로 넘어가요 */
+  maxAzimuth: 1.8,
+  /** 거의 바로 위에서 내려다보는 각도 */
+  minPolar: 0.12,
+  /** 바닥 아래로 내려가지 않게 수평 바로 위까지만 */
+  maxPolar: Math.PI / 2 - 0.05,
+  minDistance: 2.5,
+  /** 처음 시점 거리의 몇 배까지 멀어질 수 있는지. 처음 시점이 방 전체가 화면에 꽉 차는 거리라서 1에 가까울수록 더 못 물러나요 */
+  maxDistanceRatio: 1.05,
+  /** 화면 중심이 방 가장자리 밖으로 나갈 수 있는 여유 */
+  panMargin: 1,
+  /** 화면 중심의 높이 한도 */
+  panMaxY: 2,
+  rotateSpeed: 0.7,
+  zoomSpeed: 0.9,
+  panSpeed: 0.8,
+  dampingFactor: 0.08,
+} as const;
+
+/** 처음 시점에서 이만큼 이상 벗어나면 '움직인 것'으로 봄 */
+const VIEW_MOVED_DIST = 0.3;
+/** 시점 버튼('처음 시점'·'내 캐릭터')을 눌렀을 때 움직이는 데 걸리는 시간 */
+const VIEW_HOME_SECONDS = 0.7;
+/** '내 캐릭터' 시점: 캐릭터와의 거리, 내려다보는 각도(라디안, 0이 바로 위), 화면 중심으로 삼는 높이(가슴쯤) */
+const FOLLOW_DISTANCE = 6.5;
+const FOLLOW_POLAR = 1.05;
+const FOLLOW_FOCUS_Y = 0.9;
+/** 캐릭터가 걸을 때 화면 중심이 따라붙는 빠르기 (클수록 빨리 따라와요) */
+const FOLLOW_EASE_PER_SEC = 6;
+/** 한 번의 클릭으로 보는 최대 이동 거리(px)와 시간(ms) */
+const CLICK_MAX_MOVE_PX = 8;
+const CLICK_MAX_MS = 600;
 
 export class World {
   readonly scene = new THREE.Scene();
@@ -36,6 +73,14 @@ export class World {
   private sun: THREE.DirectionalLight;
   private handlers: WorldHandlers | null = null;
   private down: { x: number; y: number; t: number } | null = null;
+  /** 지금 화면에 닿아 있는 손가락·포인터 수. 둘 이상이면 확대/이동 중이라 클릭으로 안 봄 */
+  private pointers = new Set<number>();
+  private home = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
+  private viewState: ViewState = { moved: false, following: false };
+  /** 켜져 있으면 화면 중심이 내 캐릭터를 따라다녀요 (돌리기·확대는 내 캐릭터가 중심) */
+  private following = false;
+  /** '처음 시점'으로 부드럽게 돌아가는 중일 때만 있음 */
+  private flight: { t: number; seconds: number; fromPos: THREE.Vector3; fromTarget: THREE.Vector3; toPos: THREE.Vector3; toTarget: THREE.Vector3 } | null = null;
   private marker: THREE.Mesh;
   private markerT = 0;
   private hemiBase = new THREE.Color('#5a6a9a');
@@ -87,29 +132,48 @@ export class World {
 
     this.controls = new OrbitControls(this.camera, this.labels.domElement);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.enablePan = false;
-    this.controls.minDistance = 5;
-    this.controls.minPolarAngle = 0.45;
-    this.controls.maxPolarAngle = 1.2;
-    this.controls.minAzimuthAngle = -1.15;
-    this.controls.maxAzimuthAngle = 1.15;
-    this.controls.rotateSpeed = 0.6;
+    this.controls.dampingFactor = VIEW.dampingFactor;
+    // 바닥 평면을 따라 옮기고(screenSpacePanning=false), 휠은 커서가 가리키는 곳으로 확대
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = false;
+    this.controls.zoomToCursor = true;
+    this.controls.panSpeed = VIEW.panSpeed;
+    this.controls.zoomSpeed = VIEW.zoomSpeed;
+    this.controls.rotateSpeed = VIEW.rotateSpeed;
+    this.controls.minDistance = VIEW.minDistance;
+    this.controls.minPolarAngle = VIEW.minPolar;
+    this.controls.maxPolarAngle = VIEW.maxPolar;
+    this.controls.minAzimuthAngle = -VIEW.maxAzimuth;
+    this.controls.maxAzimuthAngle = VIEW.maxAzimuth;
+    // 사용자가 직접 만지기 시작하면 돌아가는 중이던 동작은 멈춤
+    this.controls.addEventListener('start', () => (this.flight = null));
+    this.controls.addEventListener('change', () => this.updateViewState());
 
     this.setPlace(first);
 
     addEventListener('resize', () => this.resize());
     const dom = this.labels.domElement;
     dom.addEventListener('pointerdown', (e) => {
-      this.down = { x: e.clientX, y: e.clientY, t: performance.now() };
+      this.pointers.add(e.pointerId);
+      // 두 번째 손가락이 닿으면 확대/이동이라 클릭 후보에서 뺌
+      this.down = this.pointers.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
     });
+    const release = (e: PointerEvent) => this.pointers.delete(e.pointerId);
     dom.addEventListener('pointerup', (e) => {
+      release(e);
       const d = this.down;
       this.down = null;
-      if (!d) return;
-      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || performance.now() - d.t > 600) return;
+      // 오른쪽·가운데 버튼은 이동·확대용이라 걷기·앉기로 보지 않음
+      if (!d || e.button !== 0) return;
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > CLICK_MAX_MOVE_PX || performance.now() - d.t > CLICK_MAX_MS) return;
       this.pick(e.clientX, e.clientY);
     });
+    dom.addEventListener('pointercancel', (e) => {
+      release(e);
+      this.down = null;
+    });
+    // 오른쪽 버튼 드래그로 옮길 때 메뉴가 뜨지 않게
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'mouse' || this.down) return;
       const hit = this.hitTest(e.clientX, e.clientY);
@@ -173,6 +237,9 @@ export class World {
 
   /** 방 전체가 화면에 들어오게 */
   resetCamera() {
+    this.following = false;
+    this.controls.enablePan = true;
+    this.controls.zoomToCursor = true;
     const aspect = this.el.clientWidth / Math.max(1, this.el.clientHeight);
     const portrait = aspect < 0.9;
     // 세로 화면에선 화각을 넓혀야 방 전체가 들어옴
@@ -221,10 +288,111 @@ export class World {
     }
     // 가로 화면은 조금 당겨서 사람이 잘 보이게 (모서리가 살짝 잘려도 됨)
     const dist = hi * (portrait ? 1 : 0.9);
-    this.controls.maxDistance = Math.max(16, dist * 1.35);
-    this.controls.minDistance = Math.min(6, dist * 0.6);
+    this.controls.maxDistance = dist * VIEW.maxDistanceRatio;
     place(dist);
+    this.flight = null;
     this.controls.update();
+    this.home.pos.copy(this.camera.position);
+    this.home.target.copy(this.controls.target);
+    this.updateViewState();
+  }
+
+  /** 오른쪽 위 시점 버튼 */
+  viewCommand(cmd: ViewCommand) {
+    switch (cmd) {
+      case 'home':
+        this.setFollowing(false);
+        this.flyTo(this.home.pos, this.home.target, VIEW_HOME_SECONDS);
+        break;
+      case 'follow':
+        this.startFollow();
+        break;
+    }
+  }
+
+  private flyTo(pos: THREE.Vector3, target: THREE.Vector3, seconds: number) {
+    this.flight = { t: 0, seconds, fromPos: this.camera.position.clone(), fromTarget: this.controls.target.clone(), toPos: pos.clone(), toTarget: target.clone() };
+  }
+
+  /** 버튼을 연달아 눌러도 쌓이도록, 움직이는 중이면 가는 곳을 기준으로 삼아요 */
+  private viewBase() {
+    return { pos: this.flight?.toPos ?? this.camera.position, target: this.flight?.toTarget ?? this.controls.target };
+  }
+
+  /** 내 캐릭터가 화면 중심이 되게 가까이 가서, 이후 걸어도 계속 따라가요. 좌우 보는 방향은 그대로예요 */
+  private startFollow() {
+    const me = this.selfAvatar();
+    if (!me) return;
+    this.setFollowing(true);
+    const focus = this.followFocus(me);
+    const { pos, target } = this.viewBase();
+    const azimuth = THREE.MathUtils.clamp(Math.atan2(pos.x - target.x, pos.z - target.z), -VIEW.maxAzimuth, VIEW.maxAzimuth);
+    const reach = THREE.MathUtils.clamp(FOLLOW_DISTANCE, this.controls.minDistance, this.controls.maxDistance);
+    const offset = new THREE.Vector3(
+      reach * Math.sin(FOLLOW_POLAR) * Math.sin(azimuth),
+      reach * Math.cos(FOLLOW_POLAR),
+      reach * Math.sin(FOLLOW_POLAR) * Math.cos(azimuth),
+    );
+    this.flyTo(focus.clone().add(offset), focus, VIEW_HOME_SECONDS);
+  }
+
+  /** 따라가는 동안엔 손으로 화면을 옮기거나 커서 쪽으로 확대하면 따라가기와 부딪혀서 막아요 */
+  private setFollowing(on: boolean) {
+    this.following = on;
+    this.controls.enablePan = !on;
+    this.controls.zoomToCursor = !on;
+    this.updateViewState();
+  }
+
+  private selfAvatar() {
+    for (const a of this.avatars.values()) if (a.isSelf) return a;
+    return null;
+  }
+
+  private followFocus(a: Avatar) {
+    return new THREE.Vector3(a.root.position.x, FOLLOW_FOCUS_Y, a.root.position.z);
+  }
+
+  /** 카메라와 화면 중심을 같이 밀어서, 사용자가 돌려 둔 각도와 거리는 그대로 두고 캐릭터만 따라가요 */
+  private stepFollow(dt: number) {
+    if (!this.following || this.flight) return;
+    const me = this.selfAvatar();
+    if (!me) return;
+    const t = this.controls.target;
+    const shift = this.followFocus(me).sub(t).multiplyScalar(1 - Math.exp(-dt * FOLLOW_EASE_PER_SEC));
+    t.add(shift);
+    this.camera.position.add(shift);
+  }
+
+  /** 처음 시점에서 벗어났는지, 따라가는 중인지가 바뀌었을 때만 알림 */
+  private updateViewState() {
+    const moved = this.camera.position.distanceTo(this.home.pos) > VIEW_MOVED_DIST || this.controls.target.distanceTo(this.home.target) > VIEW_MOVED_DIST;
+    const { moved: wasMoved, following: wasFollowing } = this.viewState;
+    if (moved === wasMoved && this.following === wasFollowing) return;
+    this.viewState = { moved, following: this.following };
+    this.handlers?.onViewState(this.viewState);
+  }
+
+  /** 화면 중심이 방 밖으로 너무 멀리 나가지 않게 (카메라도 같이 밀어서 보는 각도는 그대로) */
+  private keepTargetInRoom() {
+    const t = this.controls.target;
+    const m = VIEW.panMargin;
+    const x = THREE.MathUtils.clamp(t.x, ROOM.x0 - m, ROOM.x1 + m);
+    const y = THREE.MathUtils.clamp(t.y, 0, VIEW.panMaxY);
+    const z = THREE.MathUtils.clamp(t.z, ROOM.z0 - m, ROOM.z1 + m);
+    if (x === t.x && y === t.y && z === t.z) return;
+    this.camera.position.add(new THREE.Vector3(x - t.x, y - t.y, z - t.z));
+    t.set(x, y, z);
+  }
+
+  private stepFlight(dt: number) {
+    const f = this.flight;
+    if (!f) return;
+    f.t = Math.min(1, f.t + dt / f.seconds);
+    const k = THREE.MathUtils.smootherstep(f.t, 0, 1);
+    this.camera.position.lerpVectors(f.fromPos, f.toPos, k);
+    this.controls.target.lerpVectors(f.fromTarget, f.toTarget, k);
+    if (f.t >= 1) this.flight = null;
   }
 
   setHandlers(h: WorldHandlers) {
@@ -319,7 +487,10 @@ export class World {
     const loop = () => {
       this.timer.update();
       const dt = Math.min(0.05, this.timer.getDelta());
+      this.stepFlight(dt);
+      this.stepFollow(dt);
       this.controls.update();
+      this.keepTargetInRoom();
       for (const a of this.avatars.values()) a.update(dt);
       for (const a of this.leaving) a.update(dt);
       this.leaving = this.leaving.filter((a) => a.root.parent);

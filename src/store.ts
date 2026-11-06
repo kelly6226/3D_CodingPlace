@@ -1,4 +1,4 @@
-// 브라우저에만 남는 개인 기록 (프로필, 잔디, 커피, 소리 설정)
+// 브라우저에만 남는 개인 기록 (프로필, 커피, 소리 설정)
 import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS } from './config';
 import { DEFAULT_OUTFIT, normalizeOutfit, type Outfit } from './look';
 
@@ -18,11 +18,8 @@ export interface Profile {
 interface Saved {
   profile?: Profile;
   sound?: boolean;
-  sprintPreset?: string;
-  /** 날짜(YYYY-MM-DD, KST) → 완료한 스프린트 수 */
-  grass?: Record<string, number>;
-  /** 날짜 → 집중한 분 */
-  focusMin?: Record<string, number>;
+  /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
+  wardrobeOpened?: boolean;
   coffee?: { date: string; count: number };
   demoCommits?: unknown[];
   demoRooms?: unknown[];
@@ -91,30 +88,14 @@ export function setSound(on: boolean) {
   persist();
 }
 
-export function getSprintPreset(): string {
-  return cache.sprintPreset ?? '25';
+export function hasOpenedWardrobe(): boolean {
+  return cache.wardrobeOpened === true;
 }
 
-export function setSprintPreset(id: string) {
-  cache.sprintPreset = id;
+export function markWardrobeOpened() {
+  if (cache.wardrobeOpened) return;
+  cache.wardrobeOpened = true;
   persist();
-}
-
-export function addSprint(minutes: number) {
-  const d = kstDate();
-  cache.grass = cache.grass ?? {};
-  cache.focusMin = cache.focusMin ?? {};
-  cache.grass[d] = (cache.grass[d] ?? 0) + 1;
-  cache.focusMin[d] = (cache.focusMin[d] ?? 0) + minutes;
-  persist();
-}
-
-export function getGrass(): Record<string, number> {
-  return cache.grass ?? {};
-}
-
-export function getFocusMin(): Record<string, number> {
-  return cache.focusMin ?? {};
 }
 
 export function getCoffeeToday(): number {
@@ -146,18 +127,4 @@ export function getDemoRooms<T>(): T[] {
 export function setDemoRooms<T>(list: T[]) {
   cache.demoRooms = list.slice(0, 30);
   persist();
-}
-
-/** 연속으로 잔디를 심은 날 수 (오늘 또는 어제부터 거꾸로) */
-export function getStreak(): number {
-  const g = getGrass();
-  let streak = 0;
-  const day = new Date();
-  // 오늘 아직 안 심었으면 어제부터 센다
-  if (!g[kstDate(day)]) day.setDate(day.getDate() - 1);
-  while (g[kstDate(day)]) {
-    streak++;
-    day.setDate(day.getDate() - 1);
-  }
-  return streak;
 }

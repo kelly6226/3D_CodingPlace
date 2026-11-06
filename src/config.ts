@@ -14,7 +14,7 @@ export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent
 /**
  * GitHub 로그인 버튼을 보여줄지.
  * 지금은 로그인해도 다른 사람에게 보내는 게 없어서 숨겨 둠 (2026-11-05).
- * 잔디 동기화·랭킹처럼 계정이 필요한 기능을 만들 때 true로 바꾸고 privacy.html도 같이 확인해요.
+ * 접속 시간 기록·랭킹처럼 계정이 필요한 기능을 만들 때 true로 바꾸고 privacy.html도 같이 확인해요.
  */
 export const LOGIN_ENABLED = false;
 
@@ -46,11 +46,6 @@ export const PRESENCE_LAG_MS = PRESENCE_MIN_GAP_MS + PRESENCE_ARRIVAL_MARGIN_MS;
 
 /** 서버가 채널을 닫았을 때 다시 들어가기 전에 기다리는 시간 */
 export const REJOIN_DELAY_MS = 5000;
-
-export const SPRINT_PRESETS = [
-  { id: '25', label: '25분 집중 · 5분 휴식', focus: 25, rest: 5 },
-  { id: '50', label: '50분 집중 · 10분 휴식', focus: 50, rest: 10 },
-] as const;
 
 export interface StatusDef {
   id: string;
@@ -94,6 +89,14 @@ export const EMOTES: EmoteDef[] = [
 ];
 
 export const emoteById = (id: string): EmoteDef | undefined => EMOTES.find((e) => e.id === id);
+
+/** 화면 오른쪽 시점 버튼이 월드에 보내는 명령 */
+export type ViewCommand = 'home' | 'follow';
+/** 시점 버튼의 표시 상태: 처음 시점에서 벗어났는지, 내 캐릭터를 따라가는 중인지 */
+export interface ViewState {
+  moved: boolean;
+  following: boolean;
+}
 
 export type ActionId = 'dance' | 'throw' | 'flip' | 'faint';
 

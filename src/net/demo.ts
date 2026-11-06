@@ -143,7 +143,6 @@ export class DemoNet implements Net {
       seatAt: Date.now(),
       x: SPAWN.x,
       z: SPAWN.z,
-      focusUntil: Math.random() < 0.4 ? Date.now() + rand(3, 25) * 60e3 : null,
       coffee: Math.floor(rand(0, 4)),
       joinedAt: Date.now(),
       bot: true,
@@ -260,11 +259,6 @@ export class DemoNet implements Net {
       const c: Commit = { hash: randomHash(), name: b.name, msg: pick(BOT_COMMITS), lang: b.lang, at: Date.now() };
       this.commits.unshift(c);
       this.h.onEvent({ type: 'commit', commit: c });
-      return;
-    }
-    if (r < 0.8) {
-      b.focusUntil = b.focusUntil ? null : Date.now() + 25 * 60e3;
-      this.emit(true);
       return;
     }
     if (r < 0.88) {
