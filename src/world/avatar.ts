@@ -13,6 +13,8 @@ import { findPath } from './pathfinding';
 const SCALE = 1.2;
 const HIP = 0.32 * SCALE;
 const SPEED = 1.6;
+/** 이름표와 말풍선을 다는 높이(바닥 기준). 말풍선은 이 위로 쌓여요 */
+const LABEL_ANCHOR_Y = 1.62;
 /** 서서 노트북을 던질 때 손에서 떠나는 높이 (머리 위) */
 const THROW_HAND_Y = 1.45;
 /** 서서 책상을 뒤집을 때, 몸에서 책상 가운데까지 거리와 높이 */
@@ -242,7 +244,7 @@ export class Avatar {
     this.tagEl = document.createElement('div');
     this.tagEl.className = 'av-tag' + (isSelf ? ' self' : '');
     this.tag = new CSS2DObject(this.tagEl);
-    this.tag.position.set(0, 1.62, 0);
+    this.tag.position.set(0, LABEL_ANCHOR_Y, 0);
     this.root.add(this.tag);
 
     // CSS2DRenderer가 바깥 요소의 transform을 매 프레임 덮어써서, 애니메이션은 안쪽 요소에
@@ -252,7 +254,10 @@ export class Avatar {
     this.bubbleEl.className = 'av-bubble';
     wrap.append(this.bubbleEl);
     this.bubble = new CSS2DObject(wrap);
-    this.bubble.position.set(0, 2.2, 0);
+    // 이름표와 같은 높이에서, 말풍선 아랫변이 이름표 바로 위에 오게 (간격은 style.css .av-bubble-wrap).
+    // 가운데 기준으로 두면 줄이 많은 채팅이 이름표를 덮어서, 아랫변 기준으로 위로 커지게 해요
+    this.bubble.center.set(0.5, 1);
+    this.bubble.position.set(0, LABEL_ANCHOR_Y, 0);
     this.bubble.visible = false;
     this.root.add(this.bubble);
 
