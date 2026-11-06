@@ -349,7 +349,10 @@ button {
   translate: -50% 0;
   width: min(440px, calc(100vw - 24px));
   max-height: min(62vh, 560px, calc(100% - 16px));
-  overflow: auto;
+  /* 머리글과 입력 줄은 위에 고정하고, 내용은 .sheet-body 안에서만 스크롤 (ui.ts fixSheetHeader) */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 16px;
   border-radius: 20px;
   border: 1px solid var(--line);
@@ -379,6 +382,20 @@ button {
   margin: 4px 0 0;
   font-size: 12.5px;
   color: var(--muted);
+}
+.sheet > header,
+.sheet > .sheet-pin {
+  flex: none;
+}
+.sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* 끝까지 내려도 뒤 화면으로 스크롤이 넘어가지 않게 */
+  -webkit-overflow-scrolling: touch;
+  /* 버튼 포커스 테두리가 스크롤 영역 가장자리에서 잘리지 않게 */
+  margin: 0 -4px;
+  padding: 4px 4px 0;
 }
 .x {
   position: absolute;
@@ -819,6 +836,9 @@ button {
   padding: 16px;
 }
 .modal-card {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   width: min(380px, 100%);
   padding: 22px;
   border-radius: 20px;
@@ -1677,7 +1697,8 @@ button.place-name {
   padding: 0;
   max-height: min(30vh, 220px);
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -1828,7 +1849,7 @@ button.place-name {
   color: var(--muted);
 }
 .sheet-wardrobe {
-  max-height: min(70vh, 640px);
+  max-height: min(70vh, 640px, calc(100% - 16px));
 }
 .wd-stage {
   display: flex;
@@ -1921,4 +1942,19 @@ button.place-name {
 }
 .kb-open .chat {
   bottom: 8px;
+}
+
+/* ── 시트·채팅·모달이 떠 있을 때 뒤 화면이 같이 밀리지 않게 ──────
+   손가락으로 끄는 건 스크롤되는 칸(.sheet-body, .chat-log, .modal-card)에서만 받고,
+   머리글·입력 줄·빈 곳을 끌 때는 아무것도 움직이지 않아요 */
+.sheet,
+.chat,
+.modal {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.sheet-body,
+.chat-log,
+.modal-card {
+  touch-action: pan-y;
 }
