@@ -1,5 +1,6 @@
 // 실시간 연결(온라인/데모)이 공통으로 지키는 약속
-import type { PlaceId, RoomInfo } from '../config';
+import type { ActionId, PlaceId, RoomInfo } from '../config';
+import type { Outfit } from '../look';
 
 export interface PeerState {
   id: string;
@@ -9,6 +10,8 @@ export interface PeerState {
   hair: string;
   skin: string;
   glasses: boolean;
+  /** 모자·머리 모양·등/목 장식·바지/신발 색 */
+  outfit: Outfit;
   status: string;
   /** 앉아 있는 자리 id. 서 있으면 null */
   seat: string | null;
@@ -37,6 +40,7 @@ export type NetEvent =
   | { type: 'deploy'; id: string; name: string }
   | { type: 'commit'; commit: Commit }
   | { type: 'chat'; id: string; text: string }
+  | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
   | { type: 'coffee'; id: string };
 

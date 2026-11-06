@@ -14,9 +14,11 @@ import {
   placeMeta,
   roomUrl,
   statusById,
+  type ActionId,
   type PlaceId,
   type RoomInfo,
 } from './config';
+import type { Look } from './look';
 import { sound } from './audio';
 import { hasBadWord } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
@@ -402,6 +404,32 @@ function setStatus(id: string) {
   net.updateSelf({ status: id });
 }
 
+/** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
+function profileOf(s: PeerState): store.Profile {
+  return { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
+}
+
+/** 옷장에서 고를 때마다: 저장하고, 내 아바타에 입히고, 방 사람들에게 알림 (Presence 전송은 online.ts가 모아서 보내요) */
+function changeLook(look: Look) {
+  Object.assign(self, look);
+  store.saveProfile(profileOf(self));
+  meAvatar().apply(self);
+  ui.setSelf(self);
+  net.updateSelf(look);
+}
+
+/** 춤추기, 노트북 던지기 같은 큰 동작. 하던 동작이 끝나야 다음 동작을 할 수 있어요 */
+function act(id: ActionId) {
+  const me = meAvatar();
+  if (me.acting) {
+    ui.toast('아직 하던 동작이 안 끝났어요');
+    return;
+  }
+  me.perform(id);
+  sound.pop();
+  net.send({ type: 'act', id: self.id, act: id });
+}
+
 function emote(id: string, to?: string) {
   const e = emoteById(id);
   if (!e) return;
@@ -666,6 +694,12 @@ function onEvent(e: NetEvent) {
       if (e.to && e.to === self?.id) ui.toast(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
       break;
     }
+    case 'act': {
+      const a = world.avatars.get(e.id);
+      if (!a || a.isSelf) return;
+      a.perform(e.act);
+      break;
+    }
     case 'chat': {
       const a = world.avatars.get(e.id);
       if (!a || a.isSelf) return;
@@ -803,6 +837,13 @@ ui.bind({
   onEnter: (p) => void enter(p),
   onStatus: setStatus,
   onEmote: (id) => emote(id),
+  onAct: act,
+  onLook: changeLook,
+  onLookPreview: async () => {
+    // 미리보기용 3D 코드는 옷장을 처음 열 때 받아요
+    const { LookPreview } = await import('./world/lookPreview');
+    return new LookPreview(self);
+  },
   onSprintStart: startSprint,
   onSprintStop: stopSprint,
   onCoffee: useItem,
@@ -836,7 +877,7 @@ ui.bind({
     Object.assign(self, p);
     meAvatar().apply(self);
     ui.setSelf(self);
-    net.updateSelf({ name: p.name, color: p.color, lang: p.lang, glasses: p.glasses });
+    net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
     ui.toast('프로필을 바꿨어요');
   },
   onWave: (id) => {

@@ -1,5 +1,6 @@
 // 브라우저에만 남는 개인 기록 (프로필, 잔디, 커피, 소리 설정)
 import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS } from './config';
+import { DEFAULT_OUTFIT, normalizeOutfit, type Outfit } from './look';
 
 const KEY = 'mogakco:v1';
 
@@ -11,6 +12,7 @@ export interface Profile {
   hair: string;
   skin: string;
   glasses: boolean;
+  outfit: Outfit;
 }
 
 interface Saved {
@@ -57,7 +59,8 @@ export function kstDate(d = new Date()): string {
 }
 
 export function getProfile(): Profile {
-  if (cache.profile) return cache.profile;
+  // 꾸미기 기능이 생기기 전에 저장한 프로필에는 outfit이 없어서 기본 옷을 채워요
+  if (cache.profile) return { ...cache.profile, outfit: normalizeOutfit(cache.profile.outfit) };
   return {
     id: randomId(),
     name: pick(DEFAULT_NAMES),
@@ -66,6 +69,7 @@ export function getProfile(): Profile {
     hair: pick(HAIR_COLORS),
     skin: pick(SKIN_TONES),
     glasses: Math.random() < 0.5,
+    outfit: { ...DEFAULT_OUTFIT },
   };
 }
 

@@ -4,13 +4,13 @@
 // 그래서 Presence·Broadcast로 받은 값은 "믿을 수 없는 입력"으로 보고,
 // 화면에 그리기 전에 모양·길이·범위를 확인하고 모르는 필드는 버려요.
 // (DB에 저장되는 값은 supabase/schema.sql의 제약조건이 서버에서 한 번 더 막아요)
-import { CHAT_MAX_LENGTH, CHAT_RECEIVE_GAP_MS, EMOTES, LANGS, STATUSES } from '../config';
+import { ACT_RECEIVE_GAP_MS, CHAT_MAX_LENGTH, CHAT_RECEIVE_GAP_MS, EMOTES, HEX_RE, LANGS, STATUSES, actionById } from '../config';
+import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskBadWords } from './badwords';
 import type { Commit, NetEvent, PeerState } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
-const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const HASH_RE = /^[0-9a-f]{7}$/;
 // 제어문자 (줄바꿈, 탭, 방향 바꾸는 유니코드 등)
 // eslint-disable-next-line no-control-regex
@@ -60,6 +60,7 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
     skin: hex(raw.skin, '#eac3a3'),
     lang: LANGS.some((l) => l.id === raw.lang) ? (raw.lang as string) : LANGS[0].id,
     glasses: raw.glasses === true,
+    outfit: normalizeOutfit(raw.outfit),
     status: STATUSES.some((s) => s.id === raw.status) ? (raw.status as string) : 'coding',
     seat,
     seatAt: clamp(num(raw.seatAt, 0), 0, now + 60e3),
@@ -100,6 +101,11 @@ export function cleanEvent(raw: unknown): NetEvent | null {
       const msg = maskBadWords(text(raw.text, CHAT_MAX_LENGTH));
       return pid && msg ? { type: 'chat', id: pid, text: msg } : null;
     }
+    case 'act': {
+      const pid = id(raw.id);
+      const act = actionById(raw.act);
+      return pid && act ? { type: 'act', id: pid, act: act.id } : null;
+    }
     case 'commit': {
       const c = cleanCommit(raw.commit);
       return c ? { type: 'commit', commit: c } : null;
@@ -136,6 +142,7 @@ const MIN_GAP: Record<NetEvent['type'], number> = {
   move: 120,
   emote: 700,
   chat: CHAT_RECEIVE_GAP_MS,
+  act: ACT_RECEIVE_GAP_MS,
   typing: 250,
   coffee: 2000,
   deploy: 20000,

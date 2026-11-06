@@ -1,5 +1,6 @@
 // Supabase 키가 없을 때: 봇들이 단골손님처럼 드나드는 데모 모드
 import {
+  ACTIONS,
   BOT_CHATS,
   BOT_COMMITS,
   BUILTIN_ROOMS,
@@ -16,6 +17,7 @@ import {
   placeMeta,
   type RoomInfo,
 } from '../config';
+import { randomOutfit } from '../look';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
@@ -135,6 +137,7 @@ export class DemoNet implements Net {
       hair: pick(HAIR_COLORS),
       skin: pick(SKIN_TONES),
       glasses: Math.random() < 0.5,
+      outfit: randomOutfit(),
       status: seated ? pick(STATUSES.slice(0, 9)).id : 'coding',
       seat: null,
       seatAt: Date.now(),
@@ -266,6 +269,10 @@ export class DemoNet implements Net {
     }
     if (r < 0.88) {
       this.h.onEvent({ type: 'chat', id: b.id, text: pick(BOT_CHATS) });
+      return;
+    }
+    if (r < 0.94) {
+      this.h.onEvent({ type: 'act', id: b.id, act: pick(ACTIONS).id });
       return;
     }
     this.h.onEvent({ type: 'typing', id: b.id });

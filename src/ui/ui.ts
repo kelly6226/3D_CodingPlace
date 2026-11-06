@@ -1,5 +1,6 @@
 // 화면 위 UI (HUD, 하단 액션바, 시트, 토스트)
 import {
+  ACTIONS,
   CHAT_MAX_LENGTH,
   COMMIT_TYPES,
   EMOTES,
@@ -17,11 +18,15 @@ import {
   roomUrl,
   statusById,
   tagLabel,
+  type ActionId,
   type PlaceId,
   type RoomInfo,
 } from '../config';
+import type { Look } from '../look';
 import type { AuthUser, Commit, PeerState } from '../net/types';
+import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
+import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
   getCoffeeToday,
   getFocusMin,
@@ -31,26 +36,6 @@ import {
   kstDate,
   type Profile,
 } from '../store';
-
-type Attrs = Record<string, string | number | boolean | ((e: Event) => void) | undefined>;
-
-function h<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Attrs = {},
-  ...children: (Node | string | null | undefined | false)[]
-): HTMLElementTagNameMap[K] {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === false) continue;
-    if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v as EventListener);
-    else if (k === 'class') el.className = String(v);
-    else el.setAttribute(k, v === true ? '' : String(v));
-  }
-  for (const c of children) if (c !== null && c !== undefined && c !== false) el.append(c);
-  return el;
-}
-
-const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 /** 채팅 목록에 쌓아두는 줄 수. 넘으면 오래된 것부터 지워요 (저장은 안 해요) */
 const CHAT_LOG_MAX = 30;
@@ -64,12 +49,18 @@ export interface ChatLine {
   mine: boolean;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'sprint' | 'commit' | 'grass' | 'people' | 'profile';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'sprint' | 'commit' | 'grass' | 'people' | 'profile' | 'wardrobe';
 
 export interface UIHandlers {
   onEnter(p: Profile): void;
   onStatus(id: string): void;
   onEmote(id: string): void;
+  /** 춤추기, 노트북 던지기 같은 큰 동작 */
+  onAct(id: ActionId): void;
+  /** 옷장에서 고를 때마다. 저장하고 방 사람들에게 알리는 건 받는 쪽 몫 */
+  onLook(look: Look): void;
+  /** 옷장 안에 보여줄 3D 미리보기. 만들 수 없으면 null */
+  onLookPreview(): Promise<LookPreviewHandle | null>;
   onSprintStart(presetId: string): void;
   onSprintStop(): void;
   onCoffee(): void;
@@ -123,6 +114,7 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: () => this.h.onLookPreview() });
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -139,13 +131,19 @@ export class UI {
           h('span', { class: 'caret' }, '▾'),
         ),
         h(
-          'button',
-          { class: 'place-meta', id: 'people-btn', onclick: () => this.toggleSheet('people'), 'aria-label': '지금 있는 사람 보기' },
-          h('span', { class: 'live', id: 'conn' }),
-          h('b', { id: 'count' }, '1'),
-          '명 모각코 중',
-          h('span', { class: 'sep' }, '·'),
-          h('span', { id: 'clock' }, ''),
+          'div',
+          { class: 'hud-row' },
+          h(
+            'button',
+            { class: 'place-meta', id: 'people-btn', onclick: () => this.toggleSheet('people'), 'aria-label': '지금 있는 사람 보기' },
+            h('span', { class: 'live', id: 'conn' }),
+            h('b', { id: 'count' }, '1'),
+            '명 모각코 중',
+            h('span', { class: 'sep' }, '·'),
+            h('span', { id: 'clock' }, ''),
+          ),
+          // 오른쪽 위 도구 줄은 좁은 화면에서 방 이름과 겹쳐서, 옷장 버튼은 인원 표시 옆에 둠
+          h('button', { class: 'icon-btn hud-wardrobe', id: 'wardrobe-btn', onclick: () => this.toggleSheet('wardrobe'), 'aria-label': '옷장' }, '👕'),
         ),
         h('div', { class: 'mode-pill', id: 'mode', hidden: true }, ''),
       ),
@@ -649,12 +647,15 @@ export class UI {
 
   closeSheet() {
     this.sheet = '';
+    this.wardrobe.close();
     $('#sheet').hidden = true;
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
   }
 
   private renderSheet() {
     const el = $('#sheet');
+    // 다른 시트로 바뀌면 옷장의 3D 미리보기를 정리해요
+    if (this.sheet !== 'wardrobe') this.wardrobe.close();
     el.innerHTML = '';
     // 다시 그릴 때마다 클래스를 새로 정하니, 모양을 정하는 클래스는 모두 여기서 붙여요
     // 방 고르기와 커밋 방명록은 화면 가운데에 크게 (style.css .sheet.center, 방명록은 .wide로 더 넓게)
@@ -713,7 +714,31 @@ export class UI {
               ),
             ),
           ),
+          h('h3', { class: 'sheet-sub' }, '큰 동작'),
+          h(
+            'div',
+            { class: 'grid grid-4' },
+            ...ACTIONS.map((a) =>
+              h(
+                'button',
+                {
+                  class: 'chip col',
+                  onclick: () => {
+                    this.h.onAct(a.id);
+                    this.closeSheet();
+                  },
+                },
+                h('span', { class: 'e big' }, a.emoji),
+                a.label,
+              ),
+            ),
+          ),
         );
+        break;
+      }
+      case 'wardrobe': {
+        const s = this.self;
+        this.wardrobe.render(el, head('옷장', '고르면 바로 입어 봐요'), { color: s.color, hair: s.hair, skin: s.skin, outfit: s.outfit });
         break;
       }
       case 'sprint': {
@@ -892,25 +917,9 @@ export class UI {
       }
       case 'profile': {
         const s = this.self;
-        const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses };
+        const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
-        const sw = h('div', { class: 'swatches' });
-        for (const c of HOODIE_COLORS) {
-          sw.append(
-            h('button', {
-              class: 'sw' + (c === p.color ? ' on' : ''),
-              style: `--c:${c}`,
-              'aria-label': `후드티 색 ${c}`,
-              onclick: (e: Event) => {
-                e.preventDefault();
-                p.color = c;
-                sw.querySelectorAll('.sw').forEach((b) => b.classList.remove('on'));
-                (e.currentTarget as HTMLElement).classList.add('on');
-              },
-            }),
-          );
-        }
         const glasses = h('input', { type: 'checkbox', id: 'p-glasses', checked: p.glasses });
         const acct = this.account;
         const accountBox = this.canLogin
@@ -949,7 +958,7 @@ export class UI {
               )
             : null;
         el.append(
-          head('내 프로필'),
+          head('내 프로필', '후드티·머리·모자는 👕 옷장에서 바꿔요'),
           ...(accountBox ? [accountBox] : []),
           h(
             'form',
@@ -968,8 +977,6 @@ export class UI {
             nick,
             h('label', { for: 'p-lang' }, '주력 언어'),
             lang,
-            h('span', { class: 'lbl' }, '후드티'),
-            sw,
             h('label', { class: 'check', for: 'p-glasses' }, glasses, h('span', {}, '안경 쓰기')),
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
           ),
