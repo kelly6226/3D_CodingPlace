@@ -1,11 +1,11 @@
 // 개인정보 처리방침을 앱 안에서 보여주기
 //
 // 앱인토스는 토스 도메인 밖의 자사 사이트로 이동하거나 그 내용을 불러와 그리는 걸 막아요(비게임 출시 체크리스트).
-// 그래서 Vercel 페이지로 열지 않고, 앱 번들에 같이 들어 있는 public/privacy.html을 읽어 시트에 그려요.
-// 내용은 그 파일 하나만 고치면 웹과 앱이 같이 바뀌어요.
+// 그래서 Vercel 페이지로 열지 않고, 앱 번들에 같이 들어 있는 처리방침 파일을 읽어 시트에 그려요.
+// 토스 앱에는 Vercel 호스팅·방문 통계가 없어서, 웹용 privacy.html이 아니라 토스용 privacy-toss.html을 써요.
 
-/** 처방침 원문. 빌드 결과물의 맨 위에 같이 들어가요 (public/privacy.html) */
-const PRIVACY_PAGE_PATH = '/privacy.html';
+/** 토스 앱용 처방침 원문. 빌드 결과물의 맨 위에 같이 들어가요 (public/privacy-toss.html) */
+const PRIVACY_PAGE_PATH = '/privacy-toss.html';
 
 /** 처방침 본문을 시트에 넣을 조각으로 돌려줘요. 못 읽으면 throw */
 export async function loadPrivacyPolicy(): Promise<DocumentFragment> {
