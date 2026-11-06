@@ -21,7 +21,7 @@ import {
   mesh,
   plane,
   plantModel,
-  sideWallCutaway,
+  wallCutaway,
   std,
   stoolModel,
   type V3,
@@ -30,6 +30,8 @@ import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
 const ROOM = { x0: -7, x1: 7, z0: -5, z1: 5, wallH: 3.2 };
+/** 시점이 향하는 방 한가운데(눈높이쯤) */
+const ROOM_CENTER = new THREE.Vector3((ROOM.x0 + ROOM.x1) / 2, 0.6, (ROOM.z0 + ROOM.z1) / 2);
 const TABLE = { x0: -3.2, x1: 3.2, z0: -1.9, z1: -0.9, h: 0.75 };
 const LOW_TABLE = { x: -4.9, z: 2.9, r: 0.5, h: 0.42 };
 const STAND_DESKS = [2.1, 3.7];
@@ -431,7 +433,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
   L.point([5.3, 2.4, 2.9], '#ffd3a0', 9, 6);
 
   const alarm = alarmKit(b, ROOM, [M.red]);
-  const walls = sideWallCutaway(leftWall, rightWall, ROOM);
+  const walls = wallCutaway({ left: leftWall, right: rightWall, back: backWall }, ROOM);
 
   b.keep.add(outside).add(rack);
   b.finish([leftWall, rightWall, backWall]);
@@ -445,6 +447,8 @@ function build(scene: THREE.Scene, mobile: boolean) {
     gitlog,
     update(dt: number, cam: THREE.Camera) {
       walls(cam);
+      // 뒷벽 뒤로 돌아가도 창밖 빌딩 몸체 안에 파묻히지 않게
+      skyline.pullOutOfBuildings(cam.position, ROOM_CENTER);
       skyline.update(dt);
       alarm.update(dt);
       leds.update(dt, alarm.on);
