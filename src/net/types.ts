@@ -36,6 +36,7 @@ export type NetEvent =
   | { type: 'emote'; id: string; emote: string; to?: string }
   | { type: 'deploy'; id: string; name: string }
   | { type: 'commit'; commit: Commit }
+  | { type: 'chat'; id: string; text: string }
   | { type: 'typing'; id: string }
   | { type: 'coffee'; id: string };
 

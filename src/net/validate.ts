@@ -4,7 +4,7 @@
 // 그래서 Presence·Broadcast로 받은 값은 "믿을 수 없는 입력"으로 보고,
 // 화면에 그리기 전에 모양·길이·범위를 확인하고 모르는 필드는 버려요.
 // (DB에 저장되는 값은 supabase/schema.sql의 제약조건이 서버에서 한 번 더 막아요)
-import { EMOTES, LANGS, STATUSES } from '../config';
+import { CHAT_MAX_LENGTH, CHAT_RECEIVE_GAP_MS, EMOTES, LANGS, STATUSES } from '../config';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskBadWords } from './badwords';
 import type { Commit, NetEvent, PeerState } from './types';
@@ -95,6 +95,11 @@ export function cleanEvent(raw: unknown): NetEvent | null {
       if (!pid) return null;
       return { type: 'deploy', id: pid, name: maskBadWords(text(raw.name, 20)) || '누군가' };
     }
+    case 'chat': {
+      const pid = id(raw.id);
+      const msg = maskBadWords(text(raw.text, CHAT_MAX_LENGTH));
+      return pid && msg ? { type: 'chat', id: pid, text: msg } : null;
+    }
     case 'commit': {
       const c = cleanCommit(raw.commit);
       return c ? { type: 'commit', commit: c } : null;
@@ -130,6 +135,7 @@ export function cleanCommit(raw: unknown): Commit | null {
 const MIN_GAP: Record<NetEvent['type'], number> = {
   move: 120,
   emote: 700,
+  chat: CHAT_RECEIVE_GAP_MS,
   typing: 250,
   coffee: 2000,
   deploy: 20000,
