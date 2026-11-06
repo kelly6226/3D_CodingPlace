@@ -1,5 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 
+import aitDevtools from "@apps-in-toss/devtools/unplugin";
+
 /**
  * 링크 미리보기(og:image 등)는 절대 주소가 필요해서, 빌드할 때 사이트 주소를 채워 넣어요.
  * Vercel이 빌드할 때 주는 VERCEL_PROJECT_PRODUCTION_URL(대표 도메인)을 쓰고,
@@ -42,7 +44,7 @@ function injectAnalyticsScriptOnBuild(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [siteMeta(), injectAnalyticsScriptOnBuild()],
+  plugins: [aitDevtools.vite(), siteMeta(), injectAnalyticsScriptOnBuild()],
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 900,
