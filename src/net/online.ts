@@ -10,7 +10,19 @@
 // 로그인(선택, 지금은 config.ts LOGIN_ENABLED로 꺼 둠): Supabase Auth의 GitHub 로그인. PKCE 방식이라 GitHub에서 돌아올 때 주소에 붙은
 // 일회용 code를 supabase-js가 토큰으로 바꾸고 주소에서 지워요. 토큰은 이 브라우저에만 저장돼요.
 import { createClient, type RealtimeChannel, type SupabaseClient, type User } from '@supabase/supabase-js';
-import { BUILTIN_ROOMS, LOGIN_ENABLED, MAX_INSTANCE, ROOM_SLUG_RE, builtinRoom, isPlaceId, newRoomSlug, placeMeta, type RoomInfo } from '../config';
+import {
+  BUILTIN_ROOMS,
+  LOGIN_ENABLED,
+  MAX_INSTANCE,
+  PRESENCE_MIN_GAP_MS,
+  REJOIN_DELAY_MS,
+  ROOM_SLUG_RE,
+  builtinRoom,
+  isPlaceId,
+  newRoomSlug,
+  placeMeta,
+  type RoomInfo,
+} from '../config';
 import type { AuthUser, Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
 import { maskBadWords } from './badwords';
 import { RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
@@ -28,6 +40,13 @@ interface RoomRow {
 const ROOM_COLUMNS = 'slug,name,tags,is_public,place,creator,created_at';
 /** 한 방에서 받아들이는 최대 인원 (가짜 Presence를 잔뜩 띄우는 공격 대비) */
 const MAX_PEERS = 60;
+/** 내 상태가 바뀐 뒤 Presence로 보내기 전에 모아두는 시간 */
+const PRESENCE_BATCH_MS = 400;
+
+/** track이 'ok'가 아니면 콘솔에 남겨요 (한도 초과 등을 나중에 알아볼 수 있게) */
+const warnIfTrackFailed = (result: string) => {
+  if (result !== 'ok') console.warn('[presence] track 실패', result);
+};
 
 const AVATAR_RE = /^https:\/\/avatars\.githubusercontent\.com\/[A-Za-z0-9/_.?=&%-]+$/;
 
@@ -68,6 +87,8 @@ export class OnlineNet implements Net {
   private self!: PeerState;
   private h!: NetHandlers;
   private trackTimer = 0;
+  /** 마지막으로 Presence track을 보낸 시각 (로비 포함). PRESENCE_MIN_GAP_MS를 지키는 데 써요 */
+  private lastTrackAt = 0;
   private checkedCap = false;
   /** 지금 방에 Presence로 들어와 있는 사람들. 여기 없는 id가 보낸 이벤트는 버려요 */
   private present = new Set<string>();
@@ -159,7 +180,7 @@ export class OnlineNet implements Net {
   private async announce() {
     await this.ensureLobby();
     if (!this.lobby) return;
-    if (this.roomPublic) await this.lobby.track({ room: this.room });
+    if (this.roomPublic) await this.trackAndRecordTime(this.lobby, { room: this.room });
     else await this.lobby.untrack();
   }
 
@@ -187,6 +208,9 @@ export class OnlineNet implements Net {
     this.room = room.slug;
     this.roomPublic = room.isPublic;
     this.cap = placeMeta(room.place).cap;
+    // 보내려고 기다리던 track은 새 채널이 연결될 때 최신 상태로 나가요
+    clearTimeout(this.trackTimer);
+    this.trackTimer = 0;
     this.present.clear();
     this.limiter.clear();
     this.pendingCommits.clear();
@@ -226,7 +250,7 @@ export class OnlineNet implements Net {
 
       ch.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await ch.track(this.self);
+          warnIfTrackFailed(await this.trackAndRecordTime(ch, this.self));
           this.h.onStatus?.('online');
           resolve();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -234,6 +258,7 @@ export class OnlineNet implements Net {
           resolve();
         } else if (status === 'CLOSED' && this.ch === ch) {
           this.h.onStatus?.('offline');
+          this.rejoinLater(ch);
         }
       });
     });
@@ -280,13 +305,35 @@ export class OnlineNet implements Net {
     return true;
   }
 
+  /**
+   * Presence track을 보내면서 보낸 시각을 기록해요.
+   * updateSelf가 호출 한도를 지키려면 로비를 포함한 모든 track이 시각을 남겨야 해서 한 함수로 모았어요.
+   */
+  private trackAndRecordTime(channel: RealtimeChannel, payload: object) {
+    this.lastTrackAt = Date.now();
+    return channel.track(payload);
+  }
+
+  /** 서버가 채널을 닫으면(phx_close) 라이브러리는 다시 붙지 않아서, 잠시 뒤 직접 다시 들어가요 */
+  private rejoinLater(closed: RealtimeChannel) {
+    window.setTimeout(async () => {
+      if (this.ch !== closed) return; // 그 사이 방을 옮겼으면 그만
+      this.ch = null; // removeChannel이 부르는 CLOSED 콜백이 또 재접속하지 않게
+      await this.sb.removeChannel(closed);
+      await this.join();
+    }, REJOIN_DELAY_MS);
+  }
+
   updateSelf(patch: Partial<PeerState>) {
     Object.assign(this.self, patch);
-    // Presence 메시지는 무료 플랜 초당 한도가 낮아서 묶어서 보냄
-    clearTimeout(this.trackTimer);
+    // Presence는 클라이언트당 30초 5번 한도가 있어서(config.ts PRESENCE_MIN_GAP_MS) 모아서 보내요.
+    // 이미 예약돼 있으면 그때 가장 최신 this.self가 나가요.
+    if (this.trackTimer) return;
+    const wait = Math.max(PRESENCE_BATCH_MS, this.lastTrackAt + PRESENCE_MIN_GAP_MS - Date.now());
     this.trackTimer = window.setTimeout(() => {
-      void this.ch?.track(this.self);
-    }, 400);
+      this.trackTimer = 0;
+      if (this.ch) void this.trackAndRecordTime(this.ch, this.self).then(warnIfTrackFailed);
+    }, wait);
   }
 
   send(e: NetEvent) {
