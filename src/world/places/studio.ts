@@ -20,7 +20,7 @@ import {
   lightKit,
   mesh,
   plane,
-  sideWallCutaway,
+  wallCutaway,
   std,
 } from './kit';
 import type { PlaceDef } from './types';
@@ -411,7 +411,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
   }
 
   const alarm = alarmKit(b, ROOM, [M.red]);
-  const walls = sideWallCutaway(leftWall, rightWall, ROOM);
+  const walls = wallCutaway({ left: leftWall, right: rightWall, back: backWall }, ROOM);
   b.finish([leftWall, rightWall, backWall]);
 
   return {
