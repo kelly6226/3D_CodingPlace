@@ -25,6 +25,7 @@ import { DemoNet, randomHash } from './net/demo';
 import type { AuthUser, Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { UI } from './ui/ui';
+import { followVisualViewport } from './ui/viewport';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
 import type { InteractData } from './world/places/kit';
 import type { World } from './world/world';
@@ -60,6 +61,8 @@ function roomFromUrl(): { slug: string | null; instance: number } {
   if (m) return { slug: m[1], instance: Number(new URLSearchParams(location.search).get('n')) || 1 };
   return roomFromParam(new URLSearchParams(location.search).get('room') ?? '');
 }
+
+followVisualViewport();
 
 let world: World;
 let places: typeof import('./world/places');

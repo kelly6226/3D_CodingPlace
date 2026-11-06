@@ -74,7 +74,11 @@ button {
 }
 #app {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  /* 모바일 키보드가 올라오면 보이는 영역만큼만 (src/ui/viewport.ts가 값을 넣어요) */
+  top: var(--vv-top, 0px);
+  height: var(--vv-h, 100%);
   pointer-events: none;
   z-index: 2;
 }
@@ -344,8 +348,11 @@ button {
   bottom: calc(96px + var(--safe-b));
   translate: -50% 0;
   width: min(440px, calc(100vw - 24px));
-  max-height: min(62vh, 560px);
-  overflow: auto;
+  max-height: min(62vh, 560px, calc(100% - 16px));
+  /* 머리글과 입력 줄은 위에 고정하고, 내용은 .sheet-body 안에서만 스크롤 (ui.ts fixSheetHeader) */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 16px;
   border-radius: 20px;
   border: 1px solid var(--line);
@@ -375,6 +382,20 @@ button {
   margin: 4px 0 0;
   font-size: 12.5px;
   color: var(--muted);
+}
+.sheet > header,
+.sheet > .sheet-pin {
+  flex: none;
+}
+.sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* 끝까지 내려도 뒤 화면으로 스크롤이 넘어가지 않게 */
+  -webkit-overflow-scrolling: touch;
+  /* 버튼 포커스 테두리가 스크롤 영역 가장자리에서 잘리지 않게 */
+  margin: 0 -4px;
+  padding: 4px 4px 0;
 }
 .x {
   position: absolute;
@@ -604,7 +625,7 @@ button {
     bottom: auto;
     translate: -50% -50%;
     width: min(560px, calc(100vw - 48px));
-    height: min(80vh, 720px);
+    height: min(80vh, 720px, calc(100% - 16px));
     max-height: none;
     animation-name: center-in;
   }
@@ -617,7 +638,7 @@ button {
 }
 @media (max-width: 640px) {
   .sheet.center {
-    max-height: 85vh;
+    max-height: min(85vh, calc(100% - 8px));
   }
 }
 @keyframes center-in {
@@ -815,6 +836,9 @@ button {
   padding: 16px;
 }
 .modal-card {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   width: min(380px, 100%);
   padding: 22px;
   border-radius: 20px;
@@ -1073,7 +1097,7 @@ button {
     bottom: 0;
     translate: none;
     width: 100%;
-    max-height: 70vh;
+    max-height: min(70vh, calc(100% - 8px));
     border-radius: 20px 20px 0 0;
     padding-bottom: calc(16px + var(--safe-b));
     animation: rise-m 0.22s ease-out;
@@ -1629,6 +1653,7 @@ button.place-name {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
+  max-height: calc(100% - 16px);
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(16, 20, 33, 0.94);
@@ -1661,7 +1686,9 @@ button.place-name {
   margin: 0;
   padding: 0;
   max-height: min(30vh, 220px);
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -1812,7 +1839,7 @@ button.place-name {
   color: var(--muted);
 }
 .sheet-wardrobe {
-  max-height: min(70vh, 640px);
+  max-height: min(70vh, 640px, calc(100% - 16px));
 }
 .wd-stage {
   display: flex;
@@ -1895,4 +1922,29 @@ button.place-name {
     width: 112px;
     height: 134px;
   }
+}
+
+/* ── 모바일 키보드가 올라왔을 때 (src/ui/viewport.ts) ──────
+   하단 바와 안내는 지금 필요 없어서 숨기고, 채팅 입력란은 키보드 바로 위에 붙여요 */
+.kb-open .actions,
+.kb-open .hint {
+  display: none;
+}
+.kb-open .chat {
+  bottom: 8px;
+}
+
+/* ── 시트·채팅·모달이 떠 있을 때 뒤 화면이 같이 밀리지 않게 ──────
+   손가락으로 끄는 건 스크롤되는 칸(.sheet-body, .chat-log, .modal-card)에서만 받고,
+   머리글·입력 줄·빈 곳을 끌 때는 아무것도 움직이지 않아요 */
+.sheet,
+.chat,
+.modal {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.sheet-body,
+.chat-log,
+.modal-card {
+  touch-action: pan-y;
 }
