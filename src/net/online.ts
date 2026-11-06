@@ -44,6 +44,9 @@ const MAX_PEERS = 60;
 const PRESENCE_BATCH_MS = 400;
 /** 로비 track이 실패했을 때 다시 해보는 최대 횟수 */
 const LOBBY_TRACK_RETRIES = 3;
+
+/** 로비에 "나 여기 있어요"를 다시 알리는 간격. 서버가 조용히 내 기록을 잃어도 이 안에 복구돼요 */
+const LOBBY_HEARTBEAT_MS = 60_000;
 /** 커밋 알림을 받은 뒤 DB를 읽기까지 모아두는 시간 (같이 온 알림을 한 번에 읽으려고) */
 const COMMIT_FLUSH_DELAY_MS = 800;
 /** 한 번 읽을 때 확인할 커밋 해시 수 (가짜 알림으로 메모리가 늘지 않게) */
@@ -90,6 +93,8 @@ export class OnlineNet implements Net {
   private lobby: RealtimeChannel | null = null;
   private lobbyReady: Promise<void> | null = null;
   private lobbyRejoinTimer = 0;
+  private lobbyRefreshTimer = 0;
+  private lobbyHeartbeatOn = false;
   private countCbs: ((c: Record<string, number>) => void)[] = [];
   private self!: PeerState;
   private h!: NetHandlers;
@@ -171,10 +176,13 @@ export class OnlineNet implements Net {
       this.lobby = lobby;
       lobby.on('presence', { event: 'sync' }, () => {
         const counts: Record<string, number> = {};
-        for (const metas of Object.values(lobby.presenceState<{ room: string }>())) {
+        const state = lobby.presenceState<{ room: string }>();
+        for (const metas of Object.values(state)) {
           const m = metas[metas.length - 1] as unknown as { room?: unknown };
           if (typeof m?.room === 'string' && ROOM_SLUG_RE.test(m.room)) counts[m.room] = (counts[m.room] ?? 0) + 1;
         }
+        // 개발 서버에서만: 인원수가 안 맞을 때 로비에 누가 몇 개 기록으로 들어와 있는지 콘솔에서 볼 수 있게
+        if (import.meta.env.DEV) console.debug('[lobby] sync', { clients: Object.keys(state).length, counts, metasPerClient: Object.values(state).map((v) => v.length) });
         for (const f of this.countCbs) f(counts);
       });
       let subscribedBefore = false;
@@ -195,6 +203,7 @@ export class OnlineNet implements Net {
   /** 로비에 "나 지금 이 방에 있어요" 알리기. 비공개 방은 알리지 않음 */
   private async announce() {
     await this.ensureLobby();
+    this.startLobbyHeartbeat();
     await this.trackLobby();
   }
 
@@ -213,6 +222,26 @@ export class OnlineNet implements Net {
         if (this.lobby === lobby) void this.trackLobby(retriesLeft - 1);
       }, PRESENCE_MIN_GAP_MS);
     }
+  }
+
+  /**
+   * 채널이 안 닫혔는데 서버가 내 기록만 잃은 경우(탭이 오래 백그라운드에 있었을 때 등)를 위해,
+   * 1분마다와 화면이 다시 보일 때 내 방을 로비에 다시 알려요. 한도(PRESENCE_MIN_GAP_MS)는 지켜요.
+   */
+  private startLobbyHeartbeat() {
+    if (this.lobbyHeartbeatOn) return;
+    this.lobbyHeartbeatOn = true;
+    window.setInterval(() => this.refreshLobby(), LOBBY_HEARTBEAT_MS);
+    document.addEventListener('visibilitychange', () => this.refreshLobby());
+  }
+
+  private refreshLobby() {
+    if (document.visibilityState !== 'visible' || !this.room || !this.roomPublic || this.lobbyRefreshTimer) return;
+    const wait = Math.max(0, this.lastTrackAt + PRESENCE_MIN_GAP_MS - Date.now());
+    this.lobbyRefreshTimer = window.setTimeout(() => {
+      this.lobbyRefreshTimer = 0;
+      if (this.lobby?.state === 'joined') void this.trackLobby(0);
+    }, wait);
   }
 
   /** 로비 채널이 닫히면 잠시 뒤 새로 만들어서 다시 들어가요 */
