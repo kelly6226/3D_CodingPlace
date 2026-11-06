@@ -620,6 +620,7 @@ export class UI {
   closeSheet() {
     this.sheet = '';
     this.wardrobe.close();
+    delete $('#sheet').dataset.sheetKey; // 다시 열면 맨 위부터
     $('#sheet').hidden = true;
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
   }
@@ -628,6 +629,12 @@ export class UI {
     const el = $('#sheet');
     // 다른 시트로 바뀌면 옷장의 3D 미리보기를 정리해요
     if (this.sheet !== 'wardrobe') this.wardrobe.close();
+    // 같은 화면을 다시 그리는 거면(인원수·커밋이 갱신될 때) 스크롤 위치와 쓰던 글을 이어 가요
+    const sheetKey = `${this.sheet}:${this.roomsView}`;
+    const sameSheet = el.dataset.sheetKey === sheetKey;
+    const keptScroll = sameSheet ? (el.querySelector<HTMLElement>('.sheet-body')?.scrollTop ?? 0) : 0;
+    const keptDraft = sameSheet && this.sheet === 'commit' ? this.readCommitDraft(el) : null;
+    el.dataset.sheetKey = sheetKey;
     el.innerHTML = '';
     // 다시 그릴 때마다 클래스를 새로 정하니, 모양을 정하는 클래스는 모두 여기서 붙여요
     // 방 고르기와 커밋 방명록은 화면 가운데에 크게 (style.css .sheet.center, 방명록은 .wide로 더 넓게)
@@ -716,12 +723,12 @@ export class UI {
       case 'commit': {
         const type = h('select', { id: 'commit-type', 'aria-label': '커밋 종류' }, ...COMMIT_TYPES.map((t) => h('option', { value: t }, t)));
         const msg = h('input', { id: 'commit-msg', maxlength: 50, placeholder: '오늘 한 일, 하고 싶은 말', autocomplete: 'off' });
-        const err = h('p', { class: 'err', hidden: true });
+        const err = h('p', { class: 'err sheet-pin', hidden: true });
         const submit = h('button', { class: 'primary', type: 'submit' }, 'commit');
         const form = h(
           'form',
           {
-            class: 'commit-form',
+            class: 'commit-form sheet-pin',
             onsubmit: async (e: Event) => {
               e.preventDefault();
               const m = msg.value.trim();
@@ -769,7 +776,12 @@ export class UI {
             ),
           ),
         );
-        window.setTimeout(() => msg.focus({ preventScroll: true }), 30);
+        if (keptDraft) {
+          type.value = keptDraft.type;
+          msg.value = keptDraft.msg;
+        }
+        // 처음 열 때만 입력 칸에 커서를 둬요. 다시 그릴 때마다 두면 목록을 보다가 키보드가 올라와요
+        if (!keptDraft || keptDraft.focused) window.setTimeout(() => msg.focus({ preventScroll: true }), 30);
         break;
       }
       case 'people': {
@@ -875,6 +887,29 @@ export class UI {
         break;
       }
     }
+    this.fixSheetHeader(el, keptScroll);
+  }
+
+  /**
+   * 머리글(과 .sheet-pin 입력 줄)은 위에 고정하고, 나머지는 .sheet-body 안에서만 스크롤되게 감싸요.
+   * 시트마다 따로 짜지 않고 한 곳에서 해서, 새 시트를 추가해도 같은 모양이 돼요.
+   */
+  private fixSheetHeader(el: HTMLElement, scrollTop: number) {
+    const isPinned = (c: Element) => c.tagName === 'HEADER' || c.classList.contains('sheet-pin');
+    const children = [...el.children];
+    let pinned = 0;
+    while (pinned < children.length && isPinned(children[pinned])) pinned++;
+    const body = h('div', { class: 'sheet-body' }, ...children.slice(pinned));
+    el.append(body);
+    body.scrollTop = scrollTop;
+  }
+
+  /** 방명록 시트를 다시 그리기 전에, 쓰던 글과 종류를 꺼내 둬요 */
+  private readCommitDraft(el: HTMLElement) {
+    const msg = el.querySelector<HTMLInputElement>('#commit-msg');
+    const type = el.querySelector<HTMLSelectElement>('#commit-type');
+    if (!msg || !type) return null;
+    return { msg: msg.value, type: type.value, focused: document.activeElement === msg };
   }
 
   // ── 방 고르기 / 만들기 ────────────────────────────
