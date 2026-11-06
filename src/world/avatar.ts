@@ -284,6 +284,7 @@ export class Avatar {
   }
 
   emote(emoji: string, label: string) {
+    this.bubbleEl.classList.remove('multi');
     this.bubbleEl.textContent = '';
     const e = document.createElement('span');
     e.className = 'emoji';
@@ -297,6 +298,8 @@ export class Avatar {
   }
 
   say(text: string) {
+    // 채팅처럼 긴 글은 한 줄로 늘어나지 않고 줄바꿈 (style.css .av-bubble.multi)
+    this.bubbleEl.classList.add('multi');
     this.bubbleEl.textContent = text;
     this.bubble.visible = true;
     this.bubbleEl.classList.remove('popin');

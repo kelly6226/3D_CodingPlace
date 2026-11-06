@@ -1,5 +1,6 @@
 // 화면 위 UI (HUD, 하단 액션바, 시트, 토스트)
 import {
+  CHAT_MAX_LENGTH,
   COMMIT_TYPES,
   EMOTES,
   FEEDBACK_URL,
@@ -51,6 +52,18 @@ function h<K extends keyof HTMLElementTagNameMap>(
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
+/** 채팅 목록에 쌓아두는 줄 수. 넘으면 오래된 것부터 지워요 (저장은 안 해요) */
+const CHAT_LOG_MAX = 30;
+/** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
+const CHAT_FOCUS_DELAY_MS = 30;
+
+export interface ChatLine {
+  name: string;
+  lang: string;
+  text: string;
+  mine: boolean;
+}
+
 export type SheetKind = 'rooms' | 'status' | 'emote' | 'sprint' | 'commit' | 'grass' | 'people' | 'profile';
 
 export interface UIHandlers {
@@ -61,6 +74,10 @@ export interface UIHandlers {
   onSprintStop(): void;
   onCoffee(): void;
   onCommit(type: string, msg: string): Promise<string | null>;
+  /** 방 사람들에게 한마디. 보낼 수 없으면 이유를 돌려줌 */
+  onChat(text: string): string | null;
+  /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
+  onChatPin(text: string): Promise<string | null>;
   onSound(on: boolean): void;
   onShare(): void;
   onProfileSave(p: Profile): void;
@@ -101,6 +118,11 @@ export class UI {
   private roomsView: 'list' | 'create' = 'list';
   private account: AuthUser | null = null;
   private canLogin = false;
+  private chatBtn: HTMLButtonElement;
+  private chatPanel!: HTMLElement;
+  private chatLog!: HTMLOListElement;
+  private chatInput!: HTMLInputElement;
+  private chatErr!: HTMLElement;
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -151,12 +173,14 @@ export class UI {
         this.action('sprint', '🎯', '스프린트'),
         this.action('status', '💻', '상태', 'status-icon'),
         this.action('emote', '👍', '이모트'),
+        (this.chatBtn = h('button', { class: 'act', id: 'act-chat', onclick: () => this.toggleChat(), 'aria-label': '채팅' }, h('span', { class: 'ai' }, '💬'), h('span', { class: 'al' }, '채팅'))),
         h('button', { class: 'act', id: 'act-coffee', onclick: () => this.h.onCoffee() }, h('span', { class: 'ai', id: 'use-icon' }, '☕'), h('span', { class: 'al', id: 'use-label' }, '커피')),
         this.action('commit', '⎇', '커밋'),
         this.action('grass', '🌱', '잔디'),
       ),
       h('div', { class: 'hint', id: 'hint' }, '바닥을 눌러 걷고, 빈자리를 눌러 앉아요 · 드래그로 둘러보기'),
       h('section', { class: 'sheet', id: 'sheet', hidden: true, role: 'dialog' }),
+      this.buildChat(),
       h('div', { class: 'pop', id: 'pop', hidden: true }),
       h('div', { class: 'alarm', id: 'alarm', hidden: true }, h('div', { class: 'alarm-banner', id: 'alarm-text' }, '')),
       h('div', { class: 'modal', id: 'modal', hidden: true }),
@@ -172,7 +196,12 @@ export class UI {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeSheet();
+        this.closeChat();
         this.hidePop();
+      }
+      if (e.key === 'Enter' && this.canOpenChatWithEnter(e)) {
+        e.preventDefault();
+        this.openChat();
       }
     });
     window.setTimeout(() => $('#hint').classList.add('gone'), 9000);
@@ -484,12 +513,131 @@ export class UI {
   }
 
   // ── 시트 ───────────────────────────────────────
+  // ── 채팅 ─────────────────────────────────────
+  // 시트는 다시 그릴 때 입력 중인 글이 사라져서, 채팅은 한 번 만들어 두고 줄만 덧붙여요.
+  // 말풍선은 main.ts가 아바타에 띄우고, 여기는 입력 칸과 최근 대화 목록만 맡아요.
+  private buildChat(): HTMLElement {
+    this.chatLog = h('ol', { class: 'chat-log' });
+    this.chatErr = h('p', { class: 'err', hidden: true });
+    this.chatInput = h('input', { id: 'chat-input', maxlength: CHAT_MAX_LENGTH, placeholder: '한마디 (Enter로 보내기)', autocomplete: 'off', enterkeyhint: 'send' });
+    const form = h(
+      'form',
+      {
+        class: 'chat-form',
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          this.sendChat();
+        },
+      },
+      this.chatInput,
+      h('button', { class: 'primary', type: 'submit' }, '보내기'),
+    );
+    this.chatPanel = h(
+      'section',
+      { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' },
+      h(
+        'header',
+        { class: 'chat-head' },
+        h('p', {}, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'),
+        h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
+      ),
+      this.chatLog,
+      this.chatErr,
+      form,
+    );
+    return this.chatPanel;
+  }
+
+  toggleChat() {
+    if (this.chatPanel.hidden) this.openChat();
+    else this.closeChat();
+  }
+
+  openChat() {
+    if (!this.entered) return;
+    // 시트와 채팅은 화면의 같은 자리를 써서 둘 중 하나만 열어요 (openSheet도 채팅을 닫음)
+    this.closeSheet();
+    this.hidePop();
+    this.chatPanel.hidden = false;
+    this.chatBtn.classList.add('open');
+    this.chatBtn.classList.remove('unread');
+    window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
+  }
+
+  closeChat() {
+    this.chatPanel.hidden = true;
+    this.chatBtn.classList.remove('open');
+    this.chatInput.blur();
+  }
+
+  /** 입력 칸·버튼·대화상자에 포커스가 없을 때만 Enter로 채팅을 열어요 */
+  private canOpenChatWithEnter(e: KeyboardEvent) {
+    if (!this.entered || !$('#modal').hidden) return false;
+    return !(e.target as HTMLElement).closest('input, textarea, select, button, [contenteditable]');
+  }
+
+  private sendChat() {
+    const text = this.chatInput.value.trim();
+    if (!text) return;
+    const problem = this.h.onChat(text);
+    this.chatErr.hidden = !problem;
+    this.chatErr.textContent = problem ?? '';
+    if (!problem) this.chatInput.value = '';
+    this.chatInput.focus({ preventScroll: true });
+  }
+
+  /** 대화 한 줄 추가. 내 글에만 방명록에 남기는 📌 버튼이 붙어요 (방명록에는 내 닉네임으로 남으니까) */
+  addChat(line: ChatLine) {
+    const pin = line.mine
+      ? h(
+          'button',
+          {
+            class: 'pin',
+            type: 'button',
+            title: '방명록에 남기기',
+            'aria-label': '방명록에 남기기',
+            onclick: (e: Event) => void this.pinChat(line.text, e.currentTarget as HTMLButtonElement),
+          },
+          '📌',
+        )
+      : null;
+    this.chatLog.append(
+      h('li', { class: line.mine ? 'mine' : undefined }, h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, line.name), h('span', { class: 'msg' }, line.text), pin),
+    );
+    while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
+    this.chatLog.scrollTop = this.chatLog.scrollHeight;
+    // 패널이 닫혀 있으면 새 글이 왔다는 표시만 해둬요
+    if (!line.mine && this.chatPanel.hidden) this.chatBtn.classList.add('unread');
+  }
+
+  /** 방을 옮기면 이전 방의 대화는 비워요 */
+  clearChat() {
+    this.chatLog.replaceChildren();
+    this.chatErr.hidden = true;
+    this.chatBtn.classList.remove('unread');
+  }
+
+  private async pinChat(text: string, btn: HTMLButtonElement) {
+    btn.disabled = true;
+    const problem = await this.h.onChatPin(text);
+    if (problem) {
+      btn.disabled = false;
+      this.chatErr.hidden = false;
+      this.chatErr.textContent = problem;
+      return;
+    }
+    btn.textContent = '✓';
+    btn.title = '방명록에 남겼어요';
+  }
+
   toggleSheet(kind: SheetKind) {
     if (this.sheet === kind) this.closeSheet();
     else this.openSheet(kind);
   }
 
   openSheet(kind: SheetKind) {
+    // 채팅과 같은 자리를 쓰니까 열려 있으면 닫아요 (openChat도 시트를 닫음)
+    this.closeChat();
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
     this.sheet = kind;

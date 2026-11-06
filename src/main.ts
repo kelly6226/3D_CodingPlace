@@ -1,5 +1,7 @@
 import './style.css';
 import {
+  CHAT_MAX_LENGTH,
+  CHAT_SEND_GAP_MS,
   DEFAULT_ROOM,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
@@ -176,6 +178,7 @@ async function enter(p: store.Profile) {
         for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
         known.clear();
         lastMoves.clear();
+        ui.clearChat();
         ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
     },
@@ -246,6 +249,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id, true);
   known.clear();
   lastMoves.clear();
+  ui.clearChat();
   ui.setPeers([]);
   // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
   applyPlace(r);
@@ -404,6 +408,24 @@ function emote(id: string, to?: string) {
   meAvatar().emote(e.emoji, e.label);
   sound.pop();
   net.send({ type: 'emote', id: self.id, emote: id, to });
+}
+
+/** 채팅 글을 방명록에 남길 때 붙는 커밋 종류 */
+const CHAT_PIN_COMMIT_TYPE = 'chore';
+
+let lastChat = 0;
+/** 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요 */
+function chat(text: string): string | null {
+  const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
+  if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
+  if (hasBadWord(text)) return '욕설이 들어 있어서 보낼 수 없어요. 다른 말로 적어주세요.';
+  const msg = text.slice(0, CHAT_MAX_LENGTH);
+  lastChat = Date.now();
+  meAvatar().say(msg);
+  sound.pop();
+  ui.addChat({ name: self.name, lang: self.lang, text: msg, mine: true });
+  net.send({ type: 'chat', id: self.id, text: msg });
+  return null;
 }
 
 /** 먹고 마시기: 카페는 커피, 서버실은 자판기, 원룸은 컵라면, 해커톤장은 피자 */
@@ -644,6 +666,13 @@ function onEvent(e: NetEvent) {
       if (e.to && e.to === self?.id) ui.toast(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
       break;
     }
+    case 'chat': {
+      const a = world.avatars.get(e.id);
+      if (!a || a.isSelf) return;
+      a.say(e.text);
+      ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false });
+      break;
+    }
     case 'deploy':
       triggerDeploy(e.name);
       break;
@@ -778,6 +807,8 @@ ui.bind({
   onSprintStop: stopSprint,
   onCoffee: useItem,
   onCommit: commit,
+  onChat: chat,
+  onChatPin: (text) => commit(CHAT_PIN_COMMIT_TYPE, text),
   onSound: (on) => {
     store.setSound(on);
     sound.setEnabled(on);

@@ -1,5 +1,6 @@
 // Supabase 키가 없을 때: 봇들이 단골손님처럼 드나드는 데모 모드
 import {
+  BOT_CHATS,
   BOT_COMMITS,
   BUILTIN_ROOMS,
   DEFAULT_NAMES,
@@ -261,6 +262,10 @@ export class DemoNet implements Net {
     if (r < 0.8) {
       b.focusUntil = b.focusUntil ? null : Date.now() + 25 * 60e3;
       this.emit(true);
+      return;
+    }
+    if (r < 0.88) {
+      this.h.onEvent({ type: 'chat', id: b.id, text: pick(BOT_CHATS) });
       return;
     }
     this.h.onEvent({ type: 'typing', id: b.id });

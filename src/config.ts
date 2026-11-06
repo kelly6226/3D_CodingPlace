@@ -95,6 +95,24 @@ export const EMOTES: EmoteDef[] = [
 
 export const emoteById = (id: string): EmoteDef | undefined => EMOTES.find((e) => e.id === id);
 
+/** 채팅 한 번에 보낼 수 있는 글자 수 (입력 칸·받은 값 검사·자르기가 모두 이 값을 써요) */
+export const CHAT_MAX_LENGTH = 50;
+/** 한 사람이 채팅을 보낼 수 있는 최소 간격 */
+export const CHAT_SEND_GAP_MS = 1500;
+/** 받는 쪽은 네트워크 지연으로 도착 간격이 줄어들 수 있어서, 보내는 쪽보다 느슨하게 거름 */
+export const CHAT_RECEIVE_GAP_MS = CHAT_SEND_GAP_MS / 2;
+
+/** 데모 모드에서 봇들이 건네는 한마디 */
+export const BOT_CHATS = [
+  '이거 로컬에선 되는데요',
+  '배포 언제 하세요?',
+  '커피 한 잔 더 하실 분~',
+  '저 지금 집중 모드예요 🎧',
+  '버그 찾았다... 내 오타였음',
+  '다들 오늘도 화이팅이에요',
+  '점심 뭐 드세요?',
+];
+
 export interface LangDef {
   id: string;
   label: string;

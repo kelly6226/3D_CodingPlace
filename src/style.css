@@ -347,7 +347,8 @@ button {
   transition: background 0.15s;
 }
 .act:hover,
-.act.active {
+.act.active,
+.act.open {
   background: rgba(255, 255, 255, 0.07);
   color: var(--fg);
 }
@@ -1689,5 +1690,171 @@ button.place-name {
   }
   .vis {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── 채팅 ─────────────────────────────────────── */
+/* 말풍선: 채팅처럼 긴 글은 한 줄로 늘어나지 않고 줄바꿈 */
+.av-bubble.multi {
+  width: max-content;
+  max-width: 200px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.35;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+/* 하단 바의 채팅 버튼: 새 글이 오면 아이콘 옆에 점 */
+#act-chat {
+  position: relative;
+}
+#act-chat.unread::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 6px);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.chat {
+  position: absolute;
+  left: 50%;
+  bottom: calc(96px + var(--safe-b));
+  translate: -50% 0;
+  z-index: 20;
+  width: min(380px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(16, 20, 33, 0.94);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: rise 0.22s ease-out;
+}
+.chat[hidden] {
+  display: none;
+}
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-head p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.chat-head .x {
+  position: static;
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(30vh, 220px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+.chat-log:empty::before {
+  content: '아직 대화가 없어요. 한마디 건네볼까요?';
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.chat-log li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.chat-log .who {
+  flex: none;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.chat-log .who::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+  margin-right: 5px;
+}
+.chat-log .msg {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-log .mine .msg {
+  color: var(--amber);
+}
+.chat-log .pin {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.chat-log .pin:hover:not(:disabled) {
+  opacity: 1;
+}
+.chat-form {
+  display: flex;
+  gap: 8px;
+}
+.chat-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0a0d16;
+  color: var(--fg);
+  font-size: 14px;
+  outline: 0;
+}
+.chat-form input:focus {
+  border-color: var(--amber);
+}
+.chat .err {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  /* 하단 바 버튼이 8개라서, 360px 폭에서도 '스프린트' 라벨이 칸에 들어가도록 여백과 글자를 줄임 */
+  .actions {
+    padding: 4px 2px;
+  }
+  .act {
+    padding: 6px 1px 5px;
+  }
+  .act .al {
+    font-size: 10px;
+    letter-spacing: -0.02em;
+  }
+  /* 하단 바(채팅 버튼 포함)가 가려지지 않게 바 위에 띄움 */
+  .chat {
+    left: 10px;
+    right: 10px;
+    bottom: calc(88px + var(--safe-b));
+    translate: none;
+    width: auto;
+    animation-name: rise-m;
   }
 }
