@@ -124,30 +124,33 @@ button {
 }
 .av-bubble-wrap {
   pointer-events: none;
+  /* 말풍선 아랫변은 이름표 가운데에 맞춰지니(avatar.ts), 이름표 절반 높이 + 꼬리만큼 띄워요 */
+  padding-bottom: var(--bubble-gap, 20px);
 }
 .av-bubble {
   position: relative;
   pointer-events: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   max-width: 220px;
-  padding: 6px 11px;
-  border-radius: 14px;
+  padding: 6px 12px 6px 10px;
+  border-radius: 999px;
   background: #fffdf8;
   color: #1d1b17;
   font-size: 13px;
   font-weight: 700;
+  letter-spacing: -0.01em;
   white-space: nowrap;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 6px 16px rgba(0, 0, 0, 0.32);
 }
 .av-bubble::after {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: -5px;
-  width: 10px;
-  height: 10px;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
   background: inherit;
   translate: -50% 0;
   rotate: 45deg;
@@ -1621,6 +1624,8 @@ button.place-name {
 .av-bubble.multi {
   width: max-content;
   max-width: 200px;
+  padding: 7px 12px;
+  border-radius: 16px;
   white-space: normal;
   text-align: center;
   line-height: 1.35;
@@ -1947,4 +1952,24 @@ button.place-name {
 .chat-log,
 .modal-card {
   touch-action: pan-y;
+}
+
+/* 모바일은 이름표가 10px로 작아서 말풍선도 같이 줄여요 (이름표 규칙은 위쪽 @media에 있어요) */
+@media (max-width: 640px) {
+  .av-bubble-wrap {
+    --bubble-gap: 15px;
+  }
+  .av-bubble {
+    gap: 4px;
+    padding: 4px 10px 4px 8px;
+    font-size: 12px;
+  }
+  .av-bubble .emoji {
+    font-size: 15px;
+  }
+  .av-bubble.multi {
+    max-width: 160px;
+    padding: 5px 10px;
+    border-radius: 12px;
+  }
 }
