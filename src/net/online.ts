@@ -25,7 +25,7 @@ import {
 } from '../config';
 import type { AuthUser, Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
 import { maskBadWords } from './badwords';
-import { RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
+import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
 interface RoomRow {
   slug: string;
@@ -42,6 +42,10 @@ const ROOM_COLUMNS = 'slug,name,tags,is_public,place,creator,created_at';
 const MAX_PEERS = 60;
 /** 내 상태가 바뀐 뒤 Presence로 보내기 전에 모아두는 시간 */
 const PRESENCE_BATCH_MS = 400;
+/** 커밋 알림을 받은 뒤 DB를 읽기까지 모아두는 시간 (같이 온 알림을 한 번에 읽으려고) */
+const COMMIT_FLUSH_DELAY_MS = 800;
+/** 한 번 읽을 때 확인할 커밋 해시 수 (가짜 알림으로 메모리가 늘지 않게) */
+const MAX_PENDING_COMMITS = 10;
 
 /** track이 'ok'가 아니면 콘솔에 남겨요 (한도 초과 등을 나중에 알아볼 수 있게) */
 const warnIfTrackFailed = (result: string) => {
@@ -95,6 +99,7 @@ export class OnlineNet implements Net {
   private limiter = new RateLimiter();
   private pendingCommits = new Set<string>();
   private commitTimer = 0;
+  private lastCommitFlushAt = 0;
 
   constructor(
     url: string,
@@ -213,6 +218,8 @@ export class OnlineNet implements Net {
     this.trackTimer = 0;
     this.present.clear();
     this.limiter.clear();
+    clearTimeout(this.commitTimer);
+    this.commitTimer = 0;
     this.pendingCommits.clear();
   }
 
@@ -269,9 +276,7 @@ export class OnlineNet implements Net {
     const e = cleanEvent(payload);
     if (!e) return;
     if (e.type === 'commit') {
-      if (!this.limiter.allow('*', 'commit') && this.pendingCommits.size > 0) return;
-      if (this.pendingCommits.size < 10) this.pendingCommits.add(e.commit.hash);
-      if (!this.commitTimer) this.commitTimer = window.setTimeout(() => void this.flushCommits(ch), 800);
+      this.queueCommit(e.commit.hash, ch);
       return;
     }
     if (!this.present.has(e.id) || e.id === this.self.id) return;
@@ -279,9 +284,21 @@ export class OnlineNet implements Net {
     this.h.onEvent(e);
   }
 
+  /**
+   * 커밋 알림은 버리지 않고 모아 두되, DB를 읽는 건 COMMIT_REFRESH_GAP_MS에 한 번만.
+   * (알림을 간격으로 버리면 진짜 커밋도 놓치고, 안 버리면 가짜 알림이 DB 읽기로 번져요)
+   */
+  private queueCommit(hash: string, ch: RealtimeChannel) {
+    if (this.pendingCommits.size < MAX_PENDING_COMMITS) this.pendingCommits.add(hash);
+    if (this.commitTimer) return;
+    const wait = Math.max(COMMIT_FLUSH_DELAY_MS, this.lastCommitFlushAt + COMMIT_REFRESH_GAP_MS - Date.now());
+    this.commitTimer = window.setTimeout(() => void this.flushCommits(ch), wait);
+  }
+
   /** 알림 받은 커밋을 DB에서 다시 읽어서, 실제로 저장된 것만 화면에 */
   private async flushCommits(ch: RealtimeChannel) {
     this.commitTimer = 0;
+    this.lastCommitFlushAt = Date.now();
     const want = new Set(this.pendingCommits);
     this.pendingCommits.clear();
     const list = await this.loadCommits(this.room);
