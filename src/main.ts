@@ -1,6 +1,7 @@
 import './style.css';
 import {
   DEFAULT_ROOM,
+  PRIVATE_ROOMS_ENABLED,
   ROOM_SLUG_RE,
   SPRINT_PRESETS,
   builtinRoom,
@@ -14,6 +15,7 @@ import {
   type RoomInfo,
 } from './config';
 import { sound } from './audio';
+import { hasBadWord } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
 import type { AuthUser, Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
@@ -267,11 +269,13 @@ let lastRoomCreate = 0;
 async function createRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null> {
   const nm = name.trim().slice(0, 24);
   if (!nm) return '방 이름을 적어주세요.';
+  if (hasBadWord(nm)) return '욕설이 들어 있어서 쓸 수 없어요. 다른 이름으로 적어주세요.';
   if (!isPlaceId(place)) return '장소를 골라주세요.';
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
   let r: RoomInfo;
   try {
-    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic, place, creator: self?.name ?? profile.name });
+    // 비공개 방이 꺼져 있으면 화면과 상관없이 항상 공개 방으로 만듦
+    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: isPublic || !PRIVATE_ROOMS_ENABLED, place, creator: self?.name ?? profile.name });
   } catch (e) {
     console.warn(e);
     return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
@@ -474,6 +478,7 @@ function triggerDeploy(name: string) {
 let lastCommit = 0;
 async function commit(type: string, msg: string): Promise<string | null> {
   if (Date.now() - lastCommit < 30e3) return `커밋은 30초에 한 번씩 남길 수 있어요. ${Math.ceil((30e3 - (Date.now() - lastCommit)) / 1000)}초 남았어요.`;
+  if (hasBadWord(msg)) return '욕설이 들어 있어서 남길 수 없어요. 다른 말로 적어주세요.';
   const full = type === 'wip' ? `wip: ${msg}` : `${type}: ${msg}`;
   const c: Commit = { hash: randomHash(), name: self.name, msg: full.slice(0, 72), lang: self.lang, at: Date.now() };
   try {

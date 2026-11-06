@@ -2,9 +2,11 @@
 import {
   COMMIT_TYPES,
   EMOTES,
+  FEEDBACK_URL,
   HOODIE_COLORS,
   LANGS,
   PLACES,
+  PRIVATE_ROOMS_ENABLED,
   ROOM_TAGS,
   SITE,
   SPRINT_PRESETS,
@@ -18,6 +20,7 @@ import {
   type RoomInfo,
 } from '../config';
 import type { AuthUser, Commit, PeerState } from '../net/types';
+import { enableDragScroll } from './dragScroll';
 import {
   getCoffeeToday,
   getFocusMin,
@@ -93,6 +96,8 @@ export class UI {
   private invited = false;
   private entered = false;
   private tagFilter = '';
+  /** 칩을 눌러 목록을 다시 그려도 넘겨 둔 칩 줄 위치가 처음으로 돌아가지 않게 */
+  private tagFilterScroll = 0;
   private roomsView: 'list' | 'create' = 'list';
   private account: AuthUser | null = null;
   private canLogin = false;
@@ -255,6 +260,8 @@ export class UI {
         'p',
         { class: 'intro-foot' },
         '창 하나 켜두면 같이 있는 거예요. 장소마다 배경 소리가 달라요. · ',
+        h('a', { href: FEEDBACK_URL }, '피드백 보내기'),
+        ' · ',
         h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침'),
       ),
     );
@@ -331,7 +338,7 @@ export class UI {
         'div',
         { class: 'account' },
         h('button', { type: 'button', class: 'gh-btn', onclick: () => this.h.onSignIn() }, 'GitHub로 로그인'),
-        h('small', {}, '선택이에요 · 만 14세 이상만 · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
+        h('small', {}, '선택이에요 · 만 14세 이상만'),
       );
     }
     return h(
@@ -501,7 +508,10 @@ export class UI {
   private renderSheet() {
     const el = $('#sheet');
     el.innerHTML = '';
-    el.className = `sheet sheet-${this.sheet}`;
+    // 다시 그릴 때마다 클래스를 새로 정하니, 모양을 정하는 클래스는 모두 여기서 붙여요
+    // 방 고르기와 커밋 방명록은 화면 가운데에 크게 (style.css .sheet.center, 방명록은 .wide로 더 넓게)
+    const centered = this.sheet === 'rooms' || this.sheet === 'commit';
+    el.className = `sheet sheet-${this.sheet}` + (centered ? ' center' : '') + (this.sheet === 'commit' ? ' wide' : '');
     const head = (title: string, sub?: string) =>
       h('header', {}, h('h2', {}, title), sub ? h('p', {}, sub) : null, h('button', { class: 'x', onclick: () => this.closeSheet(), 'aria-label': '닫기' }, '✕'));
 
@@ -632,7 +642,13 @@ export class UI {
               }
             },
           },
-          h('div', { class: 'term' }, h('span', { class: 'prompt' }, '$ git commit -m "'), type, h('span', { class: 'colon' }, ':'), msg, h('span', { class: 'prompt' }, '"')),
+          // 패널이 좁아도 메시지 칸이 한 줄을 다 쓰도록 명령어와 입력 칸을 두 줄로 나눔
+          h(
+            'div',
+            { class: 'term' },
+            h('div', { class: 'term-line' }, h('span', { class: 'prompt' }, '$ git commit -m "'), type, h('span', { class: 'colon' }, ':')),
+            h('div', { class: 'term-line' }, msg, h('span', { class: 'prompt' }, '"')),
+          ),
           submit,
         );
         el.append(
@@ -781,7 +797,7 @@ export class UI {
                       ),
                     )
                   : null,
-                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.'),
+                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.', ' · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
               )
             : null;
         el.append(
@@ -808,6 +824,12 @@ export class UI {
             sw,
             h('label', { class: 'check', for: 'p-glasses' }, glasses, h('span', {}, '안경 쓰기')),
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
+          ),
+          h(
+            'small',
+            { class: 'sheet-note' },
+            '프로필과 잔디는 이 브라우저에만 저장돼요. 다른 기기나 시크릿 창에서는 처음부터 시작해요. · ',
+            h('a', { href: FEEDBACK_URL }, '피드백 보내기'),
           ),
         );
         break;
@@ -904,13 +926,17 @@ export class UI {
           placeBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
-          h('span', { class: 'lbl' }, '공개 여부'),
-          h(
-            'div',
-            { class: 'vis' },
-            h('label', { for: 'vis-pub', class: 'vis-opt' }, pub, h('span', {}, h('b', {}, '공개'), h('small', {}, '방 목록에 보여요'))),
-            h('label', { for: 'vis-priv', class: 'vis-opt' }, priv, h('span', {}, h('b', {}, '🔒 비공개'), h('small', {}, '링크를 받은 사람만 들어와요'))),
-          ),
+          ...(PRIVATE_ROOMS_ENABLED
+            ? [
+                h('span', { class: 'lbl' }, '공개 여부'),
+                h(
+                  'div',
+                  { class: 'vis' },
+                  h('label', { for: 'vis-pub', class: 'vis-opt' }, pub, h('span', {}, h('b', {}, '공개'), h('small', {}, '방 목록에 보여요'))),
+                  h('label', { for: 'vis-priv', class: 'vis-opt' }, priv, h('span', {}, h('b', {}, '🔒 비공개'), h('small', {}, '링크를 받은 사람만 들어와요'))),
+                ),
+              ]
+            : []),
           err,
           submit,
           h(
@@ -961,38 +987,39 @@ export class UI {
         ),
       );
     }
-    el.append(
+    const tagFilter = h(
+      'div',
+      { class: 'tag-filter', role: 'toolbar', 'aria-label': '주제로 거르기', onscroll: () => (this.tagFilterScroll = tagFilter.scrollLeft) },
       h(
-        'div',
-        { class: 'tag-filter', role: 'toolbar', 'aria-label': '주제로 거르기' },
+        'button',
+        {
+          type: 'button',
+          class: 'chip-sm' + (!this.tagFilter ? ' on' : ''),
+          onclick: () => {
+            this.tagFilter = '';
+            this.renderSheet();
+          },
+        },
+        '전체',
+      ),
+      ...ROOM_TAGS.map((t) =>
         h(
           'button',
           {
             type: 'button',
-            class: 'chip-sm' + (!this.tagFilter ? ' on' : ''),
+            class: 'chip-sm' + (this.tagFilter === t.id ? ' on' : ''),
             onclick: () => {
-              this.tagFilter = '';
+              this.tagFilter = this.tagFilter === t.id ? '' : t.id;
               this.renderSheet();
             },
           },
-          '전체',
-        ),
-        ...ROOM_TAGS.map((t) =>
-          h(
-            'button',
-            {
-              type: 'button',
-              class: 'chip-sm' + (this.tagFilter === t.id ? ' on' : ''),
-              onclick: () => {
-                this.tagFilter = this.tagFilter === t.id ? '' : t.id;
-                this.renderSheet();
-              },
-            },
-            t.label,
-          ),
+          t.label,
         ),
       ),
     );
+    el.append(tagFilter);
+    tagFilter.scrollLeft = this.tagFilterScroll;
+    enableDragScroll(tagFilter);
     el.append(
       h(
         'ul',
@@ -1034,7 +1061,7 @@ export class UI {
         },
         h('b', {}, '+'),
         h('span', {}, '새 방 만들기'),
-        h('i', {}, '공개 · 비공개'),
+        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : '링크로 초대'),
       ),
     );
   }

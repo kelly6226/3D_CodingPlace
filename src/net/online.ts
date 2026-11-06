@@ -7,11 +7,12 @@
 // 보안: 채널은 공개라서 받은 값은 전부 validate.ts로 검사하고, 보낸 사람별로 속도를 제한해요.
 // 커밋 알림은 Broadcast 내용을 믿지 않고 DB에서 다시 읽어서 진짜 저장된 것만 보여줘요.
 //
-// 로그인(선택): Supabase Auth의 GitHub 로그인. PKCE 방식이라 GitHub에서 돌아올 때 주소에 붙은
+// 로그인(선택, 지금은 config.ts LOGIN_ENABLED로 꺼 둠): Supabase Auth의 GitHub 로그인. PKCE 방식이라 GitHub에서 돌아올 때 주소에 붙은
 // 일회용 code를 supabase-js가 토큰으로 바꾸고 주소에서 지워요. 토큰은 이 브라우저에만 저장돼요.
 import { createClient, type RealtimeChannel, type SupabaseClient, type User } from '@supabase/supabase-js';
-import { BUILTIN_ROOMS, MAX_INSTANCE, ROOM_SLUG_RE, builtinRoom, isPlaceId, newRoomSlug, placeMeta, type RoomInfo } from '../config';
+import { BUILTIN_ROOMS, LOGIN_ENABLED, MAX_INSTANCE, ROOM_SLUG_RE, builtinRoom, isPlaceId, newRoomSlug, placeMeta, type RoomInfo } from '../config';
 import type { AuthUser, Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
+import { maskBadWords } from './badwords';
 import { RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
 interface RoomRow {
@@ -43,18 +44,18 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
   if (!r || typeof r.slug !== 'string' || !ROOM_SLUG_RE.test(r.slug)) return null;
   return {
     slug: r.slug,
-    name: text(r.name, 24) || r.slug,
+    name: maskBadWords(text(r.name, 24)) || r.slug,
     tags: Array.isArray(r.tags) ? r.tags.filter((t) => typeof t === 'string').slice(0, 3) : [],
     isPublic: r.is_public === true,
     place: isPlaceId(r.place) ? r.place : 'cafe',
-    creator: text(r.creator, 20) || undefined,
+    creator: maskBadWords(text(r.creator, 20)) || undefined,
     createdAt: new Date(r.created_at).getTime() || undefined,
   };
 };
 
 export class OnlineNet implements Net {
   readonly mode = 'online' as const;
-  readonly canLogin = true;
+  readonly canLogin = LOGIN_ENABLED;
   instance = 1;
   room = '';
   private roomPublic = true;

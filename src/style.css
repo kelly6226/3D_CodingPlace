@@ -542,14 +542,18 @@ button {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 10px;
+  flex-direction: column;
+  padding: 4px 10px;
   border-radius: 12px;
   background: #0a0d16;
   border: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 13px;
+}
+.term-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .term .prompt {
   color: var(--mint);
@@ -565,7 +569,7 @@ button {
   color: #e3b341;
   font-family: var(--mono);
   font-size: 13px;
-  padding: 10px 0;
+  padding: 6px 0;
 }
 .term input {
   flex: 1;
@@ -573,7 +577,7 @@ button {
   background: transparent;
   border: 0;
   outline: 0;
-  padding: 10px 0;
+  padding: 6px 0;
   font-size: 14px;
 }
 .primary {
@@ -646,6 +650,37 @@ button {
   font-size: 11.5px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* 방 고르기·커밋 방명록: 화면 정가운데 모달 (.wide는 방명록처럼 더 넓게). 모바일은 아래 시트 그대로, 높이만 늘림
+   높이를 고정해서, 주제 칩으로 목록이 짧아지거나 길어져도 모달 위치가 그대로예요 (넘치면 안에서 스크롤) */
+@media (min-width: 641px) {
+  .sheet.center {
+    top: 50%;
+    bottom: auto;
+    translate: -50% -50%;
+    width: min(560px, calc(100vw - 48px));
+    height: min(80vh, 720px);
+    max-height: none;
+    animation-name: center-in;
+  }
+  .sheet.center.wide {
+    width: min(720px, calc(100vw - 48px));
+  }
+  .sheet.wide .log {
+    font-size: 14px;
+  }
+}
+@media (max-width: 640px) {
+  .sheet.center {
+    max-height: 85vh;
+  }
+}
+@keyframes center-in {
+  from {
+    opacity: 0;
+    translate: -50% calc(-50% + 10px);
+  }
 }
 
 /* 잔디 */
@@ -1336,6 +1371,17 @@ button.place-name {
 .tag-filter::-webkit-scrollbar {
   display: none;
 }
+/* 마우스로 끌어서 넘길 수 있다는 표시 (src/ui/dragScroll.ts) */
+@media (hover: hover) and (pointer: fine) {
+  .tag-filter {
+    cursor: grab;
+    user-select: none;
+  }
+  .tag-filter.dragging,
+  .tag-filter.dragging .chip-sm {
+    cursor: grabbing;
+  }
+}
 .chip-sm {
   flex: none;
   padding: 6px 11px;
@@ -1477,7 +1523,7 @@ button.place-name {
 }
 /* GitHub 로그인 (선택) */
 .intro-account {
-  margin: 4px 0 2px;
+  margin: 18px 0 2px;
 }
 .account {
   display: flex;
@@ -1488,8 +1534,16 @@ button.place-name {
   color: var(--muted);
 }
 .account small a,
+.sheet-note {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
 .intro-foot a,
-.account-note a {
+.account-note a,
+.sheet-note a {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
