@@ -442,10 +442,12 @@ export class UI {
     if (this.sheet === 'people') this.renderSheet();
   }
 
-  /** 위쪽 인원 표시 옆에 내가 이 방에 있은 시간 (1초마다 불러요) */
+  /** 위쪽 인원 표시 옆에 내가 이 방에 있은 시간, 사람 목록이 열려 있으면 각자의 시간도 (1초마다 불러요) */
   tickSince() {
     if (!this.self) return;
-    $('#since').textContent = `⏱ ${elapsedText(Date.now() - this.self.joinedAt)}`;
+    $('#since').textContent = stayText(this.self.joinedAt);
+    if (this.sheet !== 'people') return;
+    for (const el of document.querySelectorAll<HTMLElement>('.people .since')) el.textContent = stayText(Number(el.dataset.joined));
   }
 
   setViewState({ moved, following }: ViewState) {
@@ -805,7 +807,7 @@ export class UI {
                   },
                   h('span', { class: 'e' }, st.emoji),
                   h('span', { class: 'n' }, p.name, p.id === this.self.id ? h('em', {}, ' (나)') : null),
-                  h('span', { class: 's' }, st.label),
+                  h('span', { class: 's' }, st.label, ' · ', h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt))),
                   h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
                 ),
               );
@@ -1232,6 +1234,11 @@ export class UI {
 }
 
 /** 얼마나 오래 있었는지: 방금 / 23분 / 1시간 / 1시간 23분 */
+/** 이 방에 들어온 뒤 지난 시간 표시 (위쪽 인원 표시와 사람 목록이 같이 써요) */
+function stayText(joinedAt: number) {
+  return `⏱ ${elapsedText(Date.now() - joinedAt)}`;
+}
+
 export function elapsedText(ms: number) {
   const min = Math.floor(Math.max(0, ms) / 60e3);
   if (min < 1) return '방금';
