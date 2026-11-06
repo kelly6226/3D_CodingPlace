@@ -183,11 +183,15 @@ export function disposeTree(root: THREE.Object3D) {
   });
 }
 
-/** 카메라 쪽 옆벽은 숨겨서 안이 보이게 */
-export function sideWallCutaway(left: THREE.Object3D, right: THREE.Object3D, room: RoomBounds) {
+/** 카메라가 벽 안쪽으로 이만큼 못 들어왔으면(벽 가까이거나 바깥이면) 그 벽을 숨겨요 */
+const WALL_CUTAWAY_MARGIN = 1.5;
+
+/** 카메라 쪽 벽(왼쪽·오른쪽·뒤)은 숨겨서 안이 보이게. 앞은 원래 비어 있어요 */
+export function wallCutaway(walls: { left: THREE.Object3D; right: THREE.Object3D; back: THREE.Object3D }, room: RoomBounds) {
   return (cam: THREE.Camera) => {
-    left.visible = cam.position.x > room.x0 + 1.5;
-    right.visible = cam.position.x < room.x1 - 1.5;
+    walls.left.visible = cam.position.x > room.x0 + WALL_CUTAWAY_MARGIN;
+    walls.right.visible = cam.position.x < room.x1 - WALL_CUTAWAY_MARGIN;
+    walls.back.visible = cam.position.z > room.z0 + WALL_CUTAWAY_MARGIN;
   };
 }
 

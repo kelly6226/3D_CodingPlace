@@ -22,7 +22,7 @@ import {
   mesh,
   plainWalls,
   plane,
-  sideWallCutaway,
+  wallCutaway,
   std,
   type V3,
 } from './kit';
@@ -383,7 +383,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
   L.point([-4.2, 1.2, -2.4], '#4f8cff', mobile ? 3 : 4, 4);
 
   const alarm = alarmKit(b, ROOM, [M.red]);
-  const wallsCut = sideWallCutaway(walls.left, walls.right, ROOM);
+  const wallsCut = wallCutaway(walls, ROOM);
 
   // 랙 줄은 줄마다 따로 합침 (LED 인스턴스는 그대로 남음)
   b.finish([walls.left, walls.right, walls.back, rowA, rowB]);
