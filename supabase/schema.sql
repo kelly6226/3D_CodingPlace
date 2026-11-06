@@ -44,19 +44,53 @@ create policy "anyone can commit"
   to anon, authenticated
   with check (char_length(msg) between 1 and 72);
 
--- 도배 방지: 방 하나에 1분 동안 30개까지. 작성 시각은 서버 시간으로 고정.
+-- 코드에 들어 있는 기본 방 주소. 방 목록(rooms)에는 없어서 여기서 따로 알려줘요.
+-- 기본 방을 늘리거나 줄이면 src/config.ts와 이 목록을 같이 고쳐야 해요.
+create or replace function public.is_builtin_room(p_slug text)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select p_slug in ('pangyo', 'frontend', 'backend', 'algo', 'side');
+$$;
+
+-- 커밋이 쌓이는 한도 (넘으면 막거나 오래된 것부터 지움)
+--   방 하나: 1분에 30개 / 서비스 전체: 1분에 120개 / 방마다 최근 200개만 남김
+-- 서비스 전체 한도는 이용자가 늘면 올려 주세요. 방 하나 한도만으로는
+-- 방을 여러 개 돌려 가며 채우는 걸 못 막아서 따로 둬요.
+-- 방 목록에 없는 방(기본 방도 아님)에는 쓸 수 없어요.
+-- 비공개 방까지 확인하고 지워야 해서 security definer예요.
 create or replace function public.commits_guard()
 returns trigger
 language plpgsql
+security definer
 set search_path = public
 as $$
 begin
   new.created_at := now();
+  if not (public.is_builtin_room(new.room) or exists (select 1 from public.rooms where slug = new.room)) then
+    raise exception 'unknown room';
+  end if;
   if (
     select count(*) from public.commits
     where room = new.room and created_at > now() - interval '1 minute'
   ) >= 30 then
     raise exception 'too many commits, slow down';
+  end if;
+  if (select count(*) from public.commits where created_at > now() - interval '1 minute') >= 120 then
+    raise exception 'too many commits, slow down';
+  end if;
+  -- 매번 세면 비싸서, 가끔(약 5%) 이 방의 오래된 커밋을 지워 200개 안팎으로 맞춰요
+  if random() < 0.05 then
+    delete from public.commits
+    where room = new.room
+      and id in (
+        select id from public.commits
+        where room = new.room
+        order by created_at desc, id desc
+        offset 200
+      );
   end if;
   return new;
 end;
@@ -137,8 +171,9 @@ as $$
   limit 1;
 $$;
 
--- 도배 방지: 전체 1분에 10개까지, 기본 방 주소는 못 씀, 만든 시각은 서버 시간
+-- 도배 방지: 전체 1분에 10개까지, 방은 전체 2000개까지, 기본 방 주소는 못 씀, 만든 시각은 서버 시간
 -- (비공개 방까지 세야 해서 security definer)
+-- 2000개는 방 목록이 한없이 불어나는 걸 막는 상한이에요. 이용자가 늘면 올려 주세요.
 create or replace function public.rooms_guard()
 returns trigger
 language plpgsql
@@ -147,11 +182,14 @@ set search_path = public
 as $$
 begin
   new.created_at := now();
-  if new.slug in ('pangyo', 'frontend', 'backend', 'algo', 'side', 'lobby') then
+  if public.is_builtin_room(new.slug) or new.slug = 'lobby' then
     raise exception 'reserved room slug';
   end if;
   if (select count(*) from public.rooms where created_at > now() - interval '1 minute') >= 10 then
     raise exception 'too many rooms, slow down';
+  end if;
+  if (select count(*) from public.rooms) >= 2000 then
+    raise exception 'room limit reached';
   end if;
   return new;
 end;
@@ -172,5 +210,6 @@ grant select, insert on public.commits, public.rooms to anon, authenticated;
 -- 함수: 링크로 방 찾기만 바깥에서 부를 수 있게
 revoke all on function public.get_room(text) from public, anon, authenticated;
 grant execute on function public.get_room(text) to anon, authenticated;
+revoke all on function public.is_builtin_room(text) from public, anon, authenticated;
 revoke all on function public.commits_guard() from public, anon, authenticated;
 revoke all on function public.rooms_guard() from public, anon, authenticated;

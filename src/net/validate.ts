@@ -51,7 +51,6 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
   const now = Date.now();
   const pos = inRoom(raw.x, raw.z);
   const seat = seatId(raw.seat);
-  const focus = num(raw.focusUntil, 0);
   return {
     id: pid,
     name: maskBadWords(text(raw.name, 20)) || '익명의 개발자',
@@ -66,8 +65,6 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
     seatAt: clamp(num(raw.seatAt, 0), 0, now + 60e3),
     x: pos.x,
     z: pos.z,
-    // 스프린트는 최대 50분이라 3시간 넘게 남았다고 하면 거짓말
-    focusUntil: focus > now && focus < now + 3 * 3600e3 ? focus : null,
     coffee: clamp(Math.floor(num(raw.coffee, 0)), 0, 99),
     joinedAt: clamp(num(raw.joinedAt, now), 0, now + 60e3),
   };
@@ -138,7 +135,13 @@ export function cleanCommit(raw: unknown): Commit | null {
  * 누가 스크립트로 이모트나 배포 경보를 초당 수백 번 보내도 화면이 버티게,
  * 종류마다 "이 간격보다 빨리 오면 버림"을 정해요.
  */
-const MIN_GAP: Record<NetEvent['type'], number> = {
+/**
+ * 커밋 알림을 받고 DB를 다시 읽는 간격. 알림 하나마다 읽으면 가짜 알림을 퍼붓는 것만으로
+ * 방 사람 전원이 DB를 두들기게 돼서, 알림이 몇 개 오든 이 간격에 한 번만 읽어요.
+ */
+export const COMMIT_REFRESH_GAP_MS = 5000;
+
+const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit'>, number> = {
   move: 120,
   emote: 700,
   chat: CHAT_RECEIVE_GAP_MS,
@@ -146,12 +149,11 @@ const MIN_GAP: Record<NetEvent['type'], number> = {
   typing: 250,
   coffee: 2000,
   deploy: 20000,
-  commit: 5000,
 };
 
 export class RateLimiter {
   private last = new Map<string, number>();
-  allow(sender: string, type: NetEvent['type'], now = Date.now()): boolean {
+  allow(sender: string, type: Exclude<NetEvent['type'], 'commit'>, now = Date.now()): boolean {
     const k = `${sender}:${type}`;
     const prev = this.last.get(k) ?? 0;
     if (now - prev < MIN_GAP[type]) return false;
