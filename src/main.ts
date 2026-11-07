@@ -2,6 +2,7 @@ import './style.css';
 import {
   CHAT_MAX_LENGTH,
   CHAT_SEND_GAP_MS,
+  CONTEXT_LOSS_TOAST_MS,
   DEFAULT_ROOM,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
@@ -25,12 +26,15 @@ import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { UI } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
+import { watchContextLoss } from './world/contextWatch';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
 import type { InteractData } from './world/places/kit';
+import { startRenderHud } from './world/renderHud';
 import type { World } from './world/world';
 
 const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const secondsSincePageLoad = () => Math.round(performance.now() / 1000);
 
 const app = document.getElementById('app')!;
 const stage = document.getElementById('stage')!;
@@ -115,6 +119,11 @@ async function boot() {
   world = new World(stage, def);
   sound.setAmbience(def.ambience);
   world.start(onFrame);
+  watchContextLoss(world.renderer.domElement, {
+    lost: () => ui.toast(`3D 화면이 멈췄어요 (접속 ${secondsSincePageLoad()}초 후)`, 'bad', CONTEXT_LOSS_TOAST_MS),
+    restored: () => ui.toast(`3D 화면이 돌아왔어요 (접속 ${secondsSincePageLoad()}초 후)`, 'good', CONTEXT_LOSS_TOAST_MS),
+  });
+  if (params.get('diag') === '1') startRenderHud(world.renderer);
   ui.setProgress(0.9);
   ui.setCurrentRoom(room, !!found);
   ui.setRoom(startInstance);
