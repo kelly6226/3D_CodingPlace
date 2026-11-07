@@ -29,6 +29,7 @@ import { followVisualViewport } from './ui/viewport';
 import { watchContextLoss } from './world/contextWatch';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
 import type { InteractData } from './world/places/kit';
+import { startRenderHud } from './world/renderHud';
 import type { World } from './world/world';
 
 const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
@@ -126,6 +127,7 @@ async function boot() {
     lost: () => ui.toast(`3D 화면이 멈췄어요 (접속 ${secondsSincePageLoad()}초 후)`, 'bad', CONTEXT_LOSS_TOAST_MS),
     restored: () => ui.toast(`3D 화면이 돌아왔어요 (접속 ${secondsSincePageLoad()}초 후)`, 'good', CONTEXT_LOSS_TOAST_MS),
   });
+  if (params.get('diag') === '1') startRenderHud(world.renderer);
   ui.setProgress(0.9);
   ui.setCurrentRoom(room, !!found);
   ui.setRoom(startInstance);

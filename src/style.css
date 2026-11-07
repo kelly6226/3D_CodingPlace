@@ -1983,3 +1983,20 @@ button.place-name {
     border-radius: 12px;
   }
 }
+
+/* ?diag=1 진단 표시 (src/world/renderHud.ts) */
+.diag-hud {
+  position: fixed;
+  left: 8px;
+  top: 40%;
+  z-index: 99;
+  margin: 0;
+  padding: 6px 8px;
+  max-width: calc(100vw - 16px);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--mint);
+  font: 11px/1.35 var(--mono);
+  white-space: pre-wrap;
+  pointer-events: none;
+}
