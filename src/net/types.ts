@@ -58,20 +58,8 @@ export interface NewRoom {
   creator: string;
 }
 
-/** GitHub로 로그인한 사람. 이메일은 일부러 안 담아요 (화면에도, 다른 사람에게도 안 쓰니까) */
-export interface AuthUser {
-  /** Supabase 계정 id */
-  id: string;
-  /** GitHub 아이디 */
-  login: string;
-  /** GitHub 프로필 사진 (avatars.githubusercontent.com만) */
-  avatar: string | null;
-}
-
 export interface Net {
   readonly mode: 'online' | 'demo';
-  /** GitHub 로그인을 쓸 수 있는지 (실시간 모드에서만) */
-  readonly canLogin: boolean;
   readonly instance: number;
   /** 지금 들어가 있는 방 */
   readonly room: string;
@@ -94,12 +82,4 @@ export interface Net {
   send(e: NetEvent): void;
   loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
-
-  // ── 로그인 (선택) ──────────────────────────────
-  /** 지금 로그인한 사람. GitHub에서 돌아온 직후면 로그인 처리가 끝날 때까지 기다려요 */
-  currentUser(): Promise<AuthUser | null>;
-  onAuthChange(cb: (u: AuthUser | null) => void): void;
-  /** GitHub 로그인 화면으로 이동. 끝나면 지금 주소로 돌아와요 */
-  signIn(): Promise<void>;
-  signOut(): Promise<void>;
 }
