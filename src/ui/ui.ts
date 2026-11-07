@@ -22,7 +22,7 @@ import {
   type ViewState,
 } from '../config';
 import type { Look } from '../look';
-import type { AuthUser, Commit, PeerState } from '../net/types';
+import type { Commit, PeerState } from '../net/types';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
@@ -73,9 +73,6 @@ export interface UIHandlers {
   onPickRoom(slug: string): void;
   /** 새 방 만들기. 실패하면 이유를 돌려줌 */
   onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null>;
-  /** GitHub 로그인 (선택) */
-  onSignIn(): void;
-  onSignOut(): void;
 }
 
 export class UI {
@@ -95,8 +92,6 @@ export class UI {
   /** 칩을 눌러 목록을 다시 그려도 넘겨 둔 칩 줄 위치가 처음으로 돌아가지 않게 */
   private tagFilterScroll = 0;
   private roomsView: 'list' | 'create' = 'list';
-  private account: AuthUser | null = null;
-  private canLogin = false;
   private chatBtn: HTMLButtonElement;
   private chatPanel!: HTMLElement;
   private chatLog!: HTMLOListElement;
@@ -254,7 +249,6 @@ export class UI {
         lang,
       ),
       dress,
-      h('div', { class: 'intro-account', id: 'intro-account', hidden: true }),
       h('div', { class: 'progress' }, bar),
       btn,
       h(
@@ -311,43 +305,6 @@ export class UI {
           '다른 방',
         ),
       ),
-    );
-  }
-
-  // ── GitHub 로그인 (선택) ────────────────────────
-  setAccount(u: AuthUser | null, canLogin: boolean) {
-    this.account = u;
-    this.canLogin = canLogin;
-    const el = document.getElementById('intro-account');
-    if (el) {
-      el.hidden = !canLogin;
-      el.replaceChildren(...(canLogin ? [this.accountRow()] : []));
-    }
-    if (this.sheet === 'profile') this.renderSheet();
-  }
-
-  /** 아직 저장한 프로필이 없으면 입장 화면 닉네임을 GitHub 아이디로 채워줌 */
-  suggestNick(name: string) {
-    const nick = document.getElementById('nick') as HTMLInputElement | null;
-    if (nick && !this.returning) nick.value = name.slice(0, 12);
-  }
-
-  private accountRow(): HTMLElement {
-    const u = this.account;
-    if (!u) {
-      return h(
-        'div',
-        { class: 'account' },
-        h('button', { type: 'button', class: 'gh-btn', onclick: () => this.h.onSignIn() }, 'GitHub로 로그인'),
-        h('small', {}, '선택이에요 · 만 14세 이상만'),
-      );
-    }
-    return h(
-      'div',
-      { class: 'account in' },
-      u.avatar ? h('img', { class: 'gh-avatar', src: u.avatar + (u.avatar.includes('?') ? '&' : '?') + 's=64', alt: '', width: 28, height: 28, referrerpolicy: 'no-referrer' }) : null,
-      h('span', { class: 'gh-login' }, '@' + u.login),
-      h('button', { type: 'button', class: 'ghost-sm', onclick: () => this.h.onSignOut() }, '로그아웃'),
     );
   }
 
@@ -835,45 +792,8 @@ export class UI {
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
-        const acct = this.account;
-        const accountBox = this.canLogin
-            ? h(
-                'div',
-                { class: 'account-box' },
-                h('span', { class: 'lbl' }, 'GitHub 계정'),
-                this.accountRow(),
-                acct
-                  ? h(
-                      'div',
-                      { class: 'account-more' },
-                      h(
-                        'button',
-                        {
-                          type: 'button',
-                          class: 'ghost-sm',
-                          onclick: () => {
-                            nick.value = acct.login.slice(0, 12);
-                            nick.focus();
-                          },
-                        },
-                        `닉네임을 ${acct.login.slice(0, 12)}로`,
-                      ),
-                      h(
-                        'a',
-                        {
-                          class: 'danger-link',
-                          href: `mailto:${SITE.contact}?subject=${encodeURIComponent('[온라인 모각코] 계정 삭제 요청')}&body=${encodeURIComponent(`GitHub 아이디: @${acct.login}\n계정 번호: ${acct.id}\n\n위 계정과 로그인 정보의 삭제를 요청합니다.`)}`,
-                        },
-                        '계정 삭제 요청',
-                      ),
-                    )
-                  : null,
-                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.', ' · ', this.privacyLink()),
-              )
-            : null;
         el.append(
           head('내 프로필', '후드티·머리·모자는 👕 옷장에서 바꿔요'),
-          ...(accountBox ? [accountBox] : []),
           h(
             'form',
             {
