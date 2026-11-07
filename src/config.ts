@@ -4,19 +4,12 @@
 export const SITE = {
   name: '온라인 모각코',
   title: '온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코',
-  /** 개인정보 문의·계정 삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
+  /** 개인정보 문의·삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
   contact: 'code_alone_together@naver.com',
 };
 
 /** 피드백 받는 곳. 구글폼 같은 걸 만들면 이 주소만 바꾸면 돼요 */
 export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent('[온라인 모각코] 피드백')}`;
-
-/**
- * GitHub 로그인 버튼을 보여줄지.
- * 지금은 로그인해도 다른 사람에게 보내는 게 없어서 숨겨 둠 (2026-11-05).
- * 접속 시간 기록·랭킹처럼 계정이 필요한 기능을 만들 때 true로 바꾸고 privacy.html도 같이 확인해요.
- */
-export const LOGIN_ENABLED = false;
 
 /**
  * 비공개 방을 만들 수 있게 할지.
