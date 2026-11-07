@@ -148,7 +148,8 @@ export class World {
 
     this.setPlace(first);
 
-    addEventListener('resize', () => this.resize());
+    // 창 크기 이벤트만으론 못 알아채는 변화도 잡으려고 그리는 영역 자체를 지켜봐요 (아이폰 Safari는 처음에 높이가 0일 때가 있어요)
+    new ResizeObserver(() => this.resize()).observe(el);
     const dom = this.labels.domElement;
     dom.addEventListener('pointerdown', (e) => {
       this.pointers.add(e.pointerId);
@@ -409,6 +410,8 @@ export class World {
   private resize() {
     const w = this.el.clientWidth;
     const h = this.el.clientHeight;
+    // 영역이 아직 0이면 그릴 곳이 없어요. 크기가 잡히면 지켜보던 쪽이 다시 불러줘요
+    if (w === 0 || h === 0) return;
     const wasPortrait = this.camera.aspect < 0.9;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
