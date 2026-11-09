@@ -29,6 +29,7 @@ import {
 } from '../config';
 import type { Look } from '../look';
 import type { Commit, NewRoom, PeerState } from '../net/types';
+import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
@@ -250,6 +251,7 @@ export class UI {
         onsubmit: async (e: Event) => {
           e.preventDefault();
           if (btn.disabled) return;
+          if (this.rejectBadNick(nick)) return;
           // 비밀번호 방이면 입장 화면을 닫기 전에 비밀번호부터 확인해요 (못 들어가면 여기 그대로)
           btn.disabled = true;
           const unlocked = await this.h.onUnlockRoom();
@@ -868,6 +870,7 @@ export class UI {
               class: 'intro-form',
               onsubmit: (e: Event) => {
                 e.preventDefault();
+                if (this.rejectBadNick(nick)) return;
                 p.name = nick.value.trim().slice(0, 12) || p.name;
                 p.lang = lang.value;
                 this.h.onProfileSave(p);
@@ -1235,6 +1238,14 @@ export class UI {
   }
 
   // ── 토스트 / 모달 / 경보 ─────────────────────────
+  /** 닉네임에 쓸 수 없는 말이 있으면 알려주고 true. 다른 사람 화면에서 ***로 가려지기 전에 입력할 때 막아요 */
+  private rejectBadNick(input: HTMLInputElement): boolean {
+    if (!hasBadWord(input.value)) return false;
+    this.toast(`${BLOCKED_WORDS_REASON} 다른 닉네임으로 적어주세요.`, 'bad', 4200);
+    input.focus();
+    return true;
+  }
+
   toast(text: string, kind: 'info' | 'good' | 'bad' = 'info', ms = 3200) {
     const el = h('div', { class: `toast ${kind}` }, text);
     this.toastBox.append(el);
