@@ -1431,19 +1431,6 @@ button.place-name {
   border-radius: 12px;
   font-weight: 700;
 }
-/* GitHub 로그인 (선택) */
-.intro-account {
-  margin: 18px 0 2px;
-}
-.account {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.account small a,
 .sheet-note {
   display: block;
   margin-top: 12px;
@@ -1452,72 +1439,10 @@ button.place-name {
   color: var(--muted);
 }
 .intro-foot a,
-.account-note a,
 .sheet-note a {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-.gh-btn {
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: #f0f2f5;
-  color: #16181d;
-  font-weight: 700;
-  font-size: 13.5px;
-  cursor: pointer;
-}
-.gh-btn:hover {
-  background: #ffffff;
-}
-.gh-btn:focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: 2px;
-}
-.account.in {
-  color: var(--fg);
-}
-.gh-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-}
-.gh-login {
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 600;
-}
-.account-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  font-size: 13px;
-}
-.account-box .lbl {
-  color: var(--muted);
-}
-.account-more {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.danger-link {
-  font-size: 12.5px;
-  color: var(--danger);
-}
-.account-note {
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.5;
 }
 /* 장소 */
 .tag.place {
@@ -1655,10 +1580,18 @@ button.place-name {
   justify-content: space-between;
   gap: 8px;
 }
-.chat-head p {
+.chat-hint {
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+}
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-pane[hidden] {
+  display: none;
 }
 .chat-head .x {
   position: static;
@@ -1905,4 +1838,296 @@ button.place-name {
     width: 112px;
     height: 134px;
   }
+}
+
+/* ── 채팅 탭: 방 전체 / 1:1 ───────────────────────── */
+.chat-tabs {
+  display: flex;
+  gap: 4px;
+}
+.chat-tab {
+  position: relative;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.chat-tab[hidden] {
+  display: none;
+}
+.chat-tab.on {
+  border-color: var(--amber);
+  background: rgba(242, 180, 90, 0.14);
+  color: var(--fg);
+}
+.chat-tab-dot,
+.dm-unread {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.chat-tab-dot[hidden] {
+  display: none;
+}
+
+/* ── 1:1 채팅 ─────────────────────────────────────── */
+.dm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dm[hidden] {
+  display: none;
+}
+.dm-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.dm-chips[hidden] {
+  display: none;
+}
+.dm-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 140px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dm-chip.on {
+  border-color: var(--amber);
+  background: rgba(242, 180, 90, 0.14);
+  color: var(--fg);
+}
+.dm-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dm-chip .dm-unread {
+  margin-left: 0;
+}
+.dm-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.dm-dot.on {
+  background: var(--mint);
+}
+.dm-dot.wait {
+  background: transparent;
+  border: 1.5px solid var(--mint);
+}
+.dm-dot.ask {
+  background: var(--amber);
+}
+.dm-dot.off {
+  background: var(--muted);
+  opacity: 0.5;
+}
+.dm-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.dm-head b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dm-status {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dm-head-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.dm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.dm-card p {
+  margin: 0;
+}
+.dm-card-actions {
+  display: flex;
+  gap: 6px;
+}
+.dm-card-actions button {
+  flex: 1;
+  min-height: 38px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.dm-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(28vh, 200px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+.dm-log:empty::before {
+  content: '아직 대화가 없어요. 한마디 건네볼까요?';
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.dm-log li {
+  overflow-wrap: anywhere;
+}
+.dm-log .mine {
+  color: var(--amber);
+  text-align: right;
+}
+.dm-log .notice {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.dm-empty,
+.dm-ended,
+.dm-foot,
+.dm .muted {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.dm-empty p,
+.dm-foot p,
+.dm-ended {
+  margin: 0;
+}
+.dm-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dm-empty b {
+  color: var(--fg);
+}
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--amber);
+  font-size: inherit;
+  text-decoration: underline;
+}
+
+/* ── 사람 팝업의 보조 버튼 ───────────────────────── */
+.pop .ghost {
+  min-height: 36px;
+  border-radius: 12px;
+  font-family: var(--font);
+  font-weight: 700;
+}
+
+/* ── 방 목록: 열린 방 / 🔒 방 구분 ─────────────────── */
+.room-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 4px 4px;
+  font-size: 12.5px;
+}
+.room-group:first-child {
+  padding-top: 2px;
+}
+.room-group b {
+  color: var(--fg);
+}
+.room-group small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.room-group.locked b {
+  color: var(--amber);
+}
+.room-item.locked {
+  border-left: 3px solid rgba(242, 180, 90, 0.55);
+  background: rgba(242, 180, 90, 0.04);
+}
+.room-item.locked:hover {
+  background: rgba(242, 180, 90, 0.1);
+}
+.tag.lock {
+  color: var(--amber);
+  border-color: rgba(242, 180, 90, 0.45);
+  background: rgba(242, 180, 90, 0.1);
+}
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pw-ask input {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0a0d16;
+  color: var(--fg);
+  font-size: 15px;
+  outline: 0;
+}
+.pw-ask input:focus {
+  border-color: var(--amber);
+}
+.pw-ask .err {
+  margin: 8px 0 0;
+}
+
+/* 1:1 채팅 확인 코드 */
+.dm-code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: help;
 }

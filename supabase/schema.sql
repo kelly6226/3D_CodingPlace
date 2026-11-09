@@ -1,4 +1,4 @@
--- 온라인 모각코: 방 목록 + 커밋 방명록
+-- 온라인 모각코: 방 목록 + 커밋 방명록 (+ 비밀번호 방)
 -- Supabase 대시보드 > SQL Editor 에 이 파일 내용을 그대로 붙여넣고 Run 하세요.
 -- 여러 번 실행해도 괜찮아요. 코드를 업데이트한 뒤엔 한 번 더 실행하면 돼요.
 --
@@ -8,6 +8,21 @@
 -- - 모든 테이블에 RLS, 함수는 search_path 고정
 -- (실시간 접속자/이동/이모트는 Realtime 채널만 써서 테이블이 필요 없어요)
 
+
+-- 비밀번호 방인지 (정책에서 쓰려고 맨 앞에 둬요. rooms 표는 아래 2번에서 만들고, 함수는 부를 때 표를 찾아요)
+create or replace function public.room_is_locked(p_slug text)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  return exists (select 1 from public.rooms where slug = p_slug and pw_check is not null);
+exception when undefined_table or undefined_column then
+  return false;
+end;
+$$;
 
 -- ── 1. 커밋 방명록 (방마다 따로) ─────────────────────
 create table if not exists public.commits (
@@ -36,13 +51,13 @@ drop policy if exists "commits are public" on public.commits;
 create policy "commits are public"
   on public.commits for select
   to anon, authenticated
-  using (true);
+  using (not public.room_is_locked(room));
 
 drop policy if exists "anyone can commit" on public.commits;
 create policy "anyone can commit"
   on public.commits for insert
   to anon, authenticated
-  with check (char_length(msg) between 1 and 72);
+  with check (char_length(msg) between 1 and 72 and not public.room_is_locked(room));
 
 -- 코드에 들어 있는 기본 방 주소. 방 목록(rooms)에는 없어서 여기서 따로 알려줘요.
 -- 기본 방을 늘리거나 줄이면 src/config.ts와 이 목록을 같이 고쳐야 해요.
@@ -123,6 +138,18 @@ alter table public.rooms drop constraint if exists rooms_place_check;
 alter table public.rooms add constraint rooms_place_check
   check (place in ('cafe', 'serverroom', 'studio', 'hackathon'));
 
+-- 비밀번호 방 (가벼운 잠금).
+-- 비밀번호는 브라우저에서 PBKDF2로 늘려서 두 값으로 나눠요: 확인값(pw_check)과 채널 이름.
+-- 서버에는 확인값만 저장하고 밖으로 내보내지 않아요 (아래 3번에서 이 컬럼의 읽기 권한을 막아요).
+-- 실시간 채널은 비밀번호에서 나온 이름으로 열려서, 비밀번호를 아는 사람들만 같은 채널에 모여요.
+alter table public.rooms add column if not exists pw_check text;
+alter table public.rooms drop constraint if exists rooms_pw_check_format;
+alter table public.rooms add constraint rooms_pw_check_format
+  check (pw_check is null or pw_check ~ '^[0-9a-f]{64}$');
+-- 화면에 🔒를 보여주려고 밖으로 내보내는 건 "있는지 없는지"뿐이에요
+alter table public.rooms add column if not exists has_password boolean
+  generated always as (pw_check is not null) stored;
+
 alter table public.rooms drop constraint if exists rooms_text_clean;
 alter table public.rooms add constraint rooms_text_clean check (
   btrim(name) <> '' and name !~ '[[:cntrl:]]'
@@ -158,14 +185,15 @@ returns table (
   is_public boolean,
   place text,
   creator text,
-  created_at timestamptz
+  created_at timestamptz,
+  has_password boolean
 )
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select r.slug, r.name, r.tags, r.is_public, r.place, r.creator, r.created_at
+  select r.slug, r.name, r.tags, r.is_public, r.place, r.creator, r.created_at, r.has_password
   from public.rooms r
   where r.slug = p_slug
   limit 1;
@@ -205,7 +233,10 @@ create trigger rooms_guard
 -- Supabase는 새 테이블에 anon/authenticated 권한을 넓게 주기 때문에,
 -- RLS와 별개로 "읽기 + 추가"만 남기고 나머지는 회수해요 (이중 잠금).
 revoke all on public.commits, public.rooms from anon, authenticated;
-grant select, insert on public.commits, public.rooms to anon, authenticated;
+grant select, insert on public.commits to anon, authenticated;
+-- rooms 는 컬럼별로: pw_check 는 쓰기만 되고 읽을 수 없어요 (select * 도 막혀서 컬럼을 하나하나 적어요)
+grant select (id, created_at, slug, name, tags, is_public, creator, place, has_password) on public.rooms to anon, authenticated;
+grant insert (slug, name, tags, is_public, creator, place, pw_check) on public.rooms to anon, authenticated;
 
 -- 함수: 링크로 방 찾기만 바깥에서 부를 수 있게
 revoke all on function public.get_room(text) from public, anon, authenticated;
@@ -213,3 +244,59 @@ grant execute on function public.get_room(text) to anon, authenticated;
 revoke all on function public.is_builtin_room(text) from public, anon, authenticated;
 revoke all on function public.commits_guard() from public, anon, authenticated;
 revoke all on function public.rooms_guard() from public, anon, authenticated;
+
+-- ── 4. 비밀번호 방의 확인 · 방명록 ────────────────────
+-- 로그인이 없어서 서버는 "누가 맞혔는지" 기억하지 않아요. 대신 부를 때마다 확인값을 같이 받아서 맞는지 봐요.
+-- 한계: 틀린 횟수를 세어 막지는 않아요 (세려면 사람을 알아봐야 하고, 방 단위로 막으면 일부러 방을 잠글 수 있어요).
+--       그래서 짧은 비밀번호는 시간을 들이면 맞힐 수 있어요. 가벼운 잠금 용도예요.
+create or replace function public.room_key_ok(p_slug text, p_check text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.rooms
+    where slug = p_slug and pw_check is not null and pw_check = p_check
+  );
+$$;
+
+-- 비밀번호 방의 방명록 읽기 (표를 직접 읽는 건 위 정책이 막아요). 확인값이 틀리면 빈 목록
+create or replace function public.locked_commits(p_slug text, p_check text)
+returns table (hash text, name text, msg text, lang text, created_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.hash, c.name, c.msg, c.lang, c.created_at
+  from public.commits c
+  where c.room = p_slug and public.room_key_ok(p_slug, p_check)
+  order by c.created_at desc, c.id desc
+  limit 30;
+$$;
+
+-- 비밀번호 방의 방명록 쓰기. 길이·도배 제한은 표의 제약조건과 commits_guard 가 똑같이 막아요
+create or replace function public.locked_commit(p_slug text, p_check text, p_hash text, p_name text, p_msg text, p_lang text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.room_key_ok(p_slug, p_check) then
+    raise exception 'wrong key';
+  end if;
+  insert into public.commits (room, hash, name, msg, lang) values (p_slug, p_hash, p_name, p_msg, p_lang);
+end;
+$$;
+
+revoke all on function public.room_is_locked(text) from public, anon, authenticated;
+grant execute on function public.room_is_locked(text) to anon, authenticated;
+revoke all on function public.room_key_ok(text, text) from public, anon, authenticated;
+grant execute on function public.room_key_ok(text, text) to anon, authenticated;
+revoke all on function public.locked_commits(text, text) from public, anon, authenticated;
+grant execute on function public.locked_commits(text, text) to anon, authenticated;
+revoke all on function public.locked_commit(text, text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.locked_commit(text, text, text, text, text, text) to anon, authenticated;

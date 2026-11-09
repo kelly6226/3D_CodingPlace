@@ -8,9 +8,10 @@ import {
   LANGS,
   PLACES,
   PRIVATE_ROOMS_ENABLED,
+  ROOM_PASSWORD_MIN_LENGTH,
   ROOM_TAGS,
-  SITE,
   STATUSES,
+  isLockedRoom,
   langById,
   placeMeta,
   roomUrl,
@@ -23,10 +24,12 @@ import {
   type ViewState,
 } from '../config';
 import type { Look } from '../look';
-import type { AuthUser, Commit, PeerState } from '../net/types';
+import type { Commit, PeerState } from '../net/types';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
-import { $, h } from './dom';
+import { $, badgeText, h } from './dom';
 import { enableDragScroll } from './dragScroll';
+import type { DmView } from '../dm/controller';
+import { DmPanel, type DmPanelHandlers } from './dmPanel';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
   type Profile,
@@ -36,6 +39,8 @@ import {
 const CHAT_LOG_MAX = 30;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const CHAT_FOCUS_DELAY_MS = 30;
+/** 대화상자가 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
+const MODAL_FOCUS_DELAY_MS = 30;
 
 export interface ChatLine {
   name: string;
@@ -71,11 +76,12 @@ export interface UIHandlers {
   onFocusPeer(id: string): void;
   /** 방 고르기: 입장 전이면 선택만, 입장 후면 그 방으로 이동 */
   onPickRoom(slug: string): void;
-  /** 새 방 만들기. 실패하면 이유를 돌려줌 */
-  onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null>;
-  /** GitHub 로그인 (선택) */
-  onSignIn(): void;
-  onSignOut(): void;
+  /** 새 방 만들기. password가 비어 있지 않으면 비밀번호 방이에요. 실패하면 이유를 돌려줌 */
+  onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId, password: string): Promise<string | null>;
+  /** 입장 버튼을 눌렀을 때, 입장 화면을 닫기 전에 불러요. 비밀번호 방이면 비밀번호를 확인하고, 못 들어가면 false */
+  onUnlockRoom(): Promise<boolean>;
+  /** 1:1 채팅: 사람을 눌러 요청하고(onStart), 받은 요청에 답하고, 말을 보내요 */
+  dm: DmPanelHandlers & { onStart(id: string): void };
 }
 
 export class UI {
@@ -95,13 +101,29 @@ export class UI {
   /** 칩을 눌러 목록을 다시 그려도 넘겨 둔 칩 줄 위치가 처음으로 돌아가지 않게 */
   private tagFilterScroll = 0;
   private roomsView: 'list' | 'create' = 'list';
-  private account: AuthUser | null = null;
-  private canLogin = false;
   private chatBtn: HTMLButtonElement;
   private chatPanel!: HTMLElement;
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  private chatPaneRoom!: HTMLElement;
+  private chatTabRoom!: HTMLButtonElement;
+  private chatTabDm!: HTMLButtonElement;
+  private chatTabDmDot!: HTMLElement;
+  private chatTab: 'room' | 'dm' = 'room';
+  /** 방 채팅에 안 읽은 글이 있는지. 1:1은 dmAttention이 따로 세요 */
+  private roomUnread = false;
+  private dmAttention = 0;
+  /** 비밀번호 방과 1:1 채팅을 쓸 수 있는지 (실시간 모드에서만) */
+  private privateOk = false;
+  private dmPanel = new DmPanel({
+    onAccept: (k) => this.h.dm.onAccept(k),
+    onDecline: (k, block) => this.h.dm.onDecline(k, block),
+    onBlock: (k) => this.h.dm.onBlock(k),
+    onClose: (k) => this.h.dm.onClose(k),
+    onSend: (k, t) => this.h.dm.onSend(k, t),
+    onUnblockAll: () => this.h.dm.onUnblockAll(),
+  });
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
   /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
   private introWardrobe: Wardrobe | null = null;
@@ -228,9 +250,14 @@ export class UI {
       'form',
       {
         class: 'intro-card',
-        onsubmit: (e: Event) => {
+        onsubmit: async (e: Event) => {
           e.preventDefault();
           if (btn.disabled) return;
+          // 비밀번호 방이면 입장 화면을 닫기 전에 비밀번호부터 확인해요 (못 들어가면 여기 그대로)
+          btn.disabled = true;
+          const unlocked = await this.h.onUnlockRoom();
+          btn.disabled = false;
+          if (!unlocked) return;
           p.name = nick.value.trim().slice(0, 12) || p.name;
           p.lang = lang.value;
           this.introWardrobe?.close();
@@ -254,7 +281,6 @@ export class UI {
         lang,
       ),
       dress,
-      h('div', { class: 'intro-account', id: 'intro-account', hidden: true }),
       h('div', { class: 'progress' }, bar),
       btn,
       h(
@@ -292,11 +318,12 @@ export class UI {
         h(
           'div',
           { class: 'ir-main' },
-          h('b', {}, r.isPublic ? '' : '🔒 ', r.name),
+          h('b', {}, isLockedRoom(r) ? '🔒 ' : '', r.name),
           h(
             'span',
             { class: 'ir-meta' },
             r.name === placeMeta(r.place).name ? null : this.placeChip(r.place),
+            r.hasPassword ? h('span', { class: 'tag lock' }, '입장할 때 비밀번호가 필요해요') : null,
             ...this.tagChips(r.tags),
             r.isPublic && n !== undefined ? h('span', { class: 'cnt' + (n ? ' on' : '') }, n ? `● ${n}명` : '비어 있음') : null,
           ),
@@ -311,43 +338,6 @@ export class UI {
           '다른 방',
         ),
       ),
-    );
-  }
-
-  // ── GitHub 로그인 (선택) ────────────────────────
-  setAccount(u: AuthUser | null, canLogin: boolean) {
-    this.account = u;
-    this.canLogin = canLogin;
-    const el = document.getElementById('intro-account');
-    if (el) {
-      el.hidden = !canLogin;
-      el.replaceChildren(...(canLogin ? [this.accountRow()] : []));
-    }
-    if (this.sheet === 'profile') this.renderSheet();
-  }
-
-  /** 아직 저장한 프로필이 없으면 입장 화면 닉네임을 GitHub 아이디로 채워줌 */
-  suggestNick(name: string) {
-    const nick = document.getElementById('nick') as HTMLInputElement | null;
-    if (nick && !this.returning) nick.value = name.slice(0, 12);
-  }
-
-  private accountRow(): HTMLElement {
-    const u = this.account;
-    if (!u) {
-      return h(
-        'div',
-        { class: 'account' },
-        h('button', { type: 'button', class: 'gh-btn', onclick: () => this.h.onSignIn() }, 'GitHub로 로그인'),
-        h('small', {}, '선택이에요 · 만 14세 이상만'),
-      );
-    }
-    return h(
-      'div',
-      { class: 'account in' },
-      u.avatar ? h('img', { class: 'gh-avatar', src: u.avatar + (u.avatar.includes('?') ? '&' : '?') + 's=64', alt: '', width: 28, height: 28, referrerpolicy: 'no-referrer' }) : null,
-      h('span', { class: 'gh-login' }, '@' + u.login),
-      h('button', { type: 'button', class: 'ghost-sm', onclick: () => this.h.onSignOut() }, '로그아웃'),
     );
   }
 
@@ -386,7 +376,7 @@ export class UI {
     this.room = r;
     if (invited !== undefined) this.invited = invited;
     $('#room-name').textContent = r.name;
-    $('#room-lock').hidden = r.isPublic;
+    $('#room-lock').hidden = !isLockedRoom(r);
     const kicker = document.getElementById('intro-kicker');
     if (kicker) kicker.textContent = placeMeta(r.place).tagline;
     this.paintUse();
@@ -425,6 +415,9 @@ export class UI {
   }
 
   setMode(mode: 'online' | 'demo') {
+    this.privateOk = mode === 'online';
+    this.chatTabDm.hidden = !this.privateOk;
+    if (!this.privateOk) this.setChatTab('room');
     const el = $('#mode');
     el.hidden = mode === 'online';
     el.textContent = '데모 모드 · 지금은 봇들이랑 있어요';
@@ -496,18 +489,27 @@ export class UI {
       this.chatInput,
       h('button', { class: 'primary', type: 'submit' }, '보내기'),
     );
+    this.chatPaneRoom = h('div', { class: 'chat-pane' }, h('p', { class: 'chat-hint' }, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'), this.chatLog, this.chatErr, form);
+    this.chatTabRoom = h('button', { type: 'button', role: 'tab', class: 'chat-tab on', 'aria-selected': 'true', onclick: () => this.setChatTab('room') }, '방 전체');
+    this.chatTabDmDot = h('b', { class: 'chat-tab-dot', hidden: true }, '0');
+    this.chatTabDm = h('button', { type: 'button', role: 'tab', class: 'chat-tab', 'aria-selected': 'false', hidden: true, onclick: () => this.setChatTab('dm') }, '1:1', this.chatTabDmDot);
+    this.dmPanel.el.hidden = true;
+    this.dmPanel.onAttention = (n) => {
+      this.dmAttention = n;
+      this.syncChatDot();
+    };
+    this.dmPanel.onOpenRequest = () => this.showDm();
     this.chatPanel = h(
       'section',
       { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' },
       h(
         'header',
         { class: 'chat-head' },
-        h('p', {}, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'),
+        h('div', { class: 'chat-tabs', role: 'tablist' }, this.chatTabRoom, this.chatTabDm),
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
-      this.chatLog,
-      this.chatErr,
-      form,
+      this.chatPaneRoom,
+      this.dmPanel.el,
     );
     return this.chatPanel;
   }
@@ -524,14 +526,57 @@ export class UI {
     this.hidePop();
     this.chatPanel.hidden = false;
     this.chatBtn.classList.add('open');
-    this.chatBtn.classList.remove('unread');
-    window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
+    this.dmPanel.setVisible(this.chatTab === 'dm');
+    if (this.chatTab === 'room') {
+      this.roomUnread = false;
+      window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
+    }
+    this.syncChatDot();
   }
 
   closeChat() {
     this.chatPanel.hidden = true;
     this.chatBtn.classList.remove('open');
     this.chatInput.blur();
+    this.dmPanel.setVisible(false);
+  }
+
+  /** 채팅 패널의 탭: 방 전체 / 1:1 */
+  private setChatTab(tab: 'room' | 'dm') {
+    this.chatTab = this.privateOk ? tab : 'room';
+    const dm = this.chatTab === 'dm';
+    this.chatPaneRoom.hidden = dm;
+    this.dmPanel.el.hidden = !dm;
+    this.chatTabRoom.classList.toggle('on', !dm);
+    this.chatTabRoom.setAttribute('aria-selected', String(!dm));
+    this.chatTabDm.classList.toggle('on', dm);
+    this.chatTabDm.setAttribute('aria-selected', String(dm));
+    const open = !this.chatPanel.hidden;
+    this.dmPanel.setVisible(open && dm);
+    if (open && !dm) {
+      this.roomUnread = false;
+      window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
+    }
+    this.syncChatDot();
+  }
+
+  /** 💬 버튼과 1:1 탭의 "새 소식" 표시 */
+  private syncChatDot() {
+    this.chatBtn.classList.toggle('unread', this.roomUnread || this.dmAttention > 0);
+    this.chatTabDmDot.hidden = this.dmAttention === 0;
+    this.chatTabDmDot.textContent = badgeText(this.dmAttention);
+  }
+
+  /** 1:1 대화를 보여줘요: 채팅 패널을 열고 1:1 탭으로 */
+  private showDm() {
+    if (!this.entered || !this.privateOk) return;
+    this.setChatTab('dm');
+    if (this.chatPanel.hidden) this.openChat();
+  }
+
+  /** main.ts가 1:1 채팅 컨트롤러에 넘겨줄 화면 */
+  get dmView(): DmView {
+    return this.dmPanel;
   }
 
   /** 입력 칸·버튼·대화상자에 포커스가 없을 때만 Enter로 채팅을 열어요 */
@@ -571,14 +616,18 @@ export class UI {
     while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
     this.chatLog.scrollTop = this.chatLog.scrollHeight;
     // 패널이 닫혀 있으면 새 글이 왔다는 표시만 해둬요
-    if (!line.mine && this.chatPanel.hidden) this.chatBtn.classList.add('unread');
+    if (!line.mine && (this.chatPanel.hidden || this.chatTab !== 'room')) {
+      this.roomUnread = true;
+      this.syncChatDot();
+    }
   }
 
   /** 방을 옮기면 이전 방의 대화는 비워요 */
   clearChat() {
     this.chatLog.replaceChildren();
     this.chatErr.hidden = true;
-    this.chatBtn.classList.remove('unread');
+    this.roomUnread = false;
+    this.syncChatDot();
   }
 
   private async pinChat(text: string, btn: HTMLButtonElement) {
@@ -807,45 +856,8 @@ export class UI {
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
-        const acct = this.account;
-        const accountBox = this.canLogin
-            ? h(
-                'div',
-                { class: 'account-box' },
-                h('span', { class: 'lbl' }, 'GitHub 계정'),
-                this.accountRow(),
-                acct
-                  ? h(
-                      'div',
-                      { class: 'account-more' },
-                      h(
-                        'button',
-                        {
-                          type: 'button',
-                          class: 'ghost-sm',
-                          onclick: () => {
-                            nick.value = acct.login.slice(0, 12);
-                            nick.focus();
-                          },
-                        },
-                        `닉네임을 ${acct.login.slice(0, 12)}로`,
-                      ),
-                      h(
-                        'a',
-                        {
-                          class: 'danger-link',
-                          href: `mailto:${SITE.contact}?subject=${encodeURIComponent('[온라인 모각코] 계정 삭제 요청')}&body=${encodeURIComponent(`GitHub 아이디: @${acct.login}\n계정 번호: ${acct.id}\n\n위 계정과 로그인 정보의 삭제를 요청합니다.`)}`,
-                        },
-                        '계정 삭제 요청',
-                      ),
-                    )
-                  : null,
-                h('small', { class: 'account-note' }, acct ? '로그인 정보는 Supabase에 저장돼요. 지우고 싶으면 메일로 요청해 주세요. 10일 안에 지우고 알려드려요.' : '로그인은 선택이에요. 안 해도 지금처럼 쓸 수 있어요.', ' · ', h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, '개인정보 처리방침')),
-              )
-            : null;
         el.append(
           head('내 프로필', '후드티·머리·모자는 👕 옷장에서 바꿔요'),
-          ...(accountBox ? [accountBox] : []),
           h(
             'form',
             {
@@ -933,6 +945,7 @@ export class UI {
       paintPlaces();
       const pub = h('input', { type: 'radio', name: 'vis', id: 'vis-pub', value: 'pub', checked: true });
       const priv = h('input', { type: 'radio', name: 'vis', id: 'vis-priv', value: 'priv' });
+      const pw = h('input', { id: 'room-pw', type: 'password', maxlength: 40, placeholder: '비워 두면 누구나 들어와요', autocomplete: 'new-password', spellcheck: 'false' });
       const err = h('p', { class: 'err', hidden: true });
       const submit = h('button', { class: 'primary wide', type: 'submit' }, '방 만들기');
       el.append(
@@ -949,7 +962,7 @@ export class UI {
                 return;
               }
               submit.disabled = true;
-              const problem = await this.h.onCreateRoom(n, [...picked], pub.checked, place);
+              const problem = await this.h.onCreateRoom(n, [...picked], pub.checked, place, pw.value);
               submit.disabled = false;
               if (problem) {
                 err.hidden = false;
@@ -965,6 +978,17 @@ export class UI {
           placeBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
+          ...(this.privateOk
+            ? [
+                h('label', { for: 'room-pw' }, '🔒 입장 비밀번호 (선택)'),
+                pw,
+                h(
+                  'small',
+                  { class: 'form-hint' },
+                  `정하면 방 목록에 🔒로 보이고, 비밀번호를 아는 사람끼리 모여요. 가벼운 잠금이라 ${ROOM_PASSWORD_MIN_LENGTH}글자 이상으로 정해 주세요. 만든 뒤에는 바꾸거나 풀 수 없고, 잊어버리면 찾을 수 없어요.`,
+                ),
+              ]
+            : []),
           ...(PRIVATE_ROOMS_ENABLED
             ? [
                 h('span', { class: 'lbl' }, '공개 여부'),
@@ -1013,7 +1037,7 @@ export class UI {
         h(
           'div',
           { class: 'cur-room' },
-          h('div', { class: 'cr-top' }, h('b', {}, cur.isPublic ? '' : '🔒 ', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
+          h('div', { class: 'cr-top' }, h('b', {}, isLockedRoom(cur) ? '🔒 ' : '', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
           h(
             'div',
             { class: 'cr-place' },
@@ -1059,34 +1083,46 @@ export class UI {
     el.append(tagFilter);
     tagFilter.scrollLeft = this.tagFilterScroll;
     enableDragScroll(tagFilter);
-    el.append(
-      h(
-        'ul',
-        { class: 'room-list' },
-        ...(list.length
-          ? list.map((r) => {
-              const n = counts[r.slug] ?? 0;
-              const here = cur?.slug === r.slug;
-              const label = here ? (this.entered ? '지금 여기' : '선택됨') : !r.isPublic ? '비공개' : n ? `● ${n}명` : '비어 있음';
-              return h(
-                'li',
-                {},
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    class: 'room-item' + (here ? ' here' : ''),
-                    onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
-                  },
-                  h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.isPublic ? '' : '🔒 ', r.name),
-                  h('span', { class: 'ri-tags' }, h('span', { class: 'tag place' }, placeMeta(r.place).name), ...this.tagChips(r.tags)),
-                  h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
-                ),
-              );
-            })
-          : [h('li', { class: 'empty' }, '이 주제의 방이 아직 없어요. 하나 만들어볼까요?')]),
-      ),
-    );
+    const roomRow = (r: RoomInfo) => {
+      const n = counts[r.slug] ?? 0;
+      const here = cur?.slug === r.slug;
+      const locked = isLockedRoom(r);
+      const label = roomCountLabel(r, n, here, this.entered);
+      return h(
+        'li',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'room-item' + (here ? ' here' : '') + (locked ? ' locked' : ''),
+            onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
+          },
+          h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.name),
+          h(
+            'span',
+            { class: 'ri-tags' },
+            locked ? h('span', { class: 'tag lock' }, r.hasPassword ? '🔒 비밀번호' : '🔒 링크로만') : null,
+            h('span', { class: 'tag place' }, placeMeta(r.place).name),
+            ...this.tagChips(r.tags),
+          ),
+          h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
+        ),
+      );
+    };
+    const groupHead = (kind: 'open' | 'locked', title: string, sub: string) =>
+      h('li', { class: `room-group ${kind}`, role: 'presentation' }, h('b', {}, title), h('small', {}, sub));
+    // 🔒 방이 하나라도 있으면 "열린 방"과 "🔒 방"으로 나눠서 보여줘요 (거르기 전 전체 기준)
+    const split = this.rooms.some(isLockedRoom);
+    const openRooms = list.filter((r) => !isLockedRoom(r));
+    const lockedRooms = list.filter(isLockedRoom);
+    const rows = split
+      ? [
+          ...(openRooms.length ? [groupHead('open', '열린 방', '누구나 바로 들어와요'), ...openRooms.map(roomRow)] : []),
+          ...(lockedRooms.length ? [groupHead('locked', '🔒 비밀번호 · 비공개 방', '비밀번호를 알거나 링크를 받은 사람만 들어와요'), ...lockedRooms.map(roomRow)] : []),
+        ]
+      : list.map(roomRow);
+    el.append(h('ul', { class: 'room-list' }, ...(rows.length ? rows : [h('li', { class: 'empty' }, '이 주제의 방이 아직 없어요. 하나 만들어볼까요?')])));
     el.append(
       h(
         'button',
@@ -1100,7 +1136,7 @@ export class UI {
         },
         h('b', {}, '+'),
         h('span', {}, '새 방 만들기'),
-        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : '링크로 초대'),
+        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : this.privateOk ? '링크 · 🔒 비밀번호' : '링크로 초대'),
       ),
     );
   }
@@ -1130,6 +1166,19 @@ export class UI {
               },
             },
             '👋 손 흔들기',
+          ),
+      isSelf || !this.privateOk
+        ? null
+        : h(
+            'button',
+            {
+              class: 'ghost',
+              onclick: () => {
+                this.h.dm.onStart(p.id);
+                this.hidePop();
+              },
+            },
+            '💬 1:1 채팅',
           ),
     ];
     el.append(...(rows.filter(Boolean) as Node[]));
@@ -1188,12 +1237,84 @@ export class UI {
     });
   }
 
+  /**
+   * 비밀번호 방에 들어가기 전에 비밀번호를 물어봐요.
+   * verify가 이유(글)를 돌려주면 그 자리에서 다시 입력받고, null을 돌려주면 통과예요. 취소하면 false.
+   */
+  askRoomPassword(roomName: string, verify: (password: string) => Promise<string | null>): Promise<boolean> {
+    return new Promise((resolve) => {
+      const m = $('#modal');
+      const done = (v: boolean) => {
+        m.hidden = true;
+        m.innerHTML = '';
+        m.onclick = null;
+        resolve(v);
+      };
+      const input = h('input', { type: 'password', maxlength: 40, placeholder: '비밀번호', autocomplete: 'off', spellcheck: 'false', 'aria-label': '방 비밀번호' });
+      const err = h('p', { class: 'err', hidden: true, role: 'alert' });
+      const cancel = h('button', { class: 'ghost', type: 'button', onclick: () => done(false) }, '취소');
+      const submit = h('button', { class: 'primary', type: 'submit' }, '들어가기');
+      const form = h(
+        'form',
+        {
+          class: 'modal-card pw-ask',
+          role: 'dialog',
+          'aria-label': `${roomName} 비밀번호`,
+          onkeydown: (e: Event) => {
+            if ((e as KeyboardEvent).key === 'Escape') done(false);
+          },
+          onsubmit: async (e: Event) => {
+            e.preventDefault();
+            const value = input.value;
+            if (!value) {
+              input.focus();
+              return;
+            }
+            submit.disabled = true;
+            cancel.disabled = true;
+            input.readOnly = true;
+            const problem = await verify(value);
+            if (!problem) {
+              done(true);
+              return;
+            }
+            err.hidden = false;
+            err.textContent = problem;
+            submit.disabled = false;
+            cancel.disabled = false;
+            input.readOnly = false;
+            input.select();
+          },
+        },
+        h('h2', {}, `🔒 ${roomName}`),
+        h('p', {}, '이 방은 비밀번호를 아는 사람끼리 모이는 방이에요.'),
+        input,
+        err,
+        h('div', { class: 'modal-actions' }, cancel, submit),
+      );
+      m.innerHTML = '';
+      m.append(form);
+      m.onclick = (e) => {
+        if (e.target === m) done(false);
+      };
+      m.hidden = false;
+      window.setTimeout(() => input.focus(), MODAL_FOCUS_DELAY_MS);
+    });
+  }
+
   alarm(text: string, seconds: number) {
     const a = $('#alarm');
     $('#alarm-text').textContent = text;
     a.hidden = false;
     window.setTimeout(() => (a.hidden = true), seconds * 1000);
   }
+}
+
+/** 방 목록 오른쪽 글자: 지금 여기 / 선택됨 / 비공개 / ● 3명 / 비어 있음 */
+function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean): string {
+  if (here) return entered ? '지금 여기' : '선택됨';
+  if (!r.isPublic) return '비공개';
+  return n ? `● ${n}명` : '비어 있음';
 }
 
 /** 얼마나 오래 있었는지: 방금 / 23분 / 1시간 / 1시간 23분 */
