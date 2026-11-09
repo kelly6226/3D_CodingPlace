@@ -1,6 +1,7 @@
 // 화면 위 UI (HUD, 하단 액션바, 시트, 토스트)
 import {
   ACTIONS,
+  BUILTIN_ROOMS,
   CHAT_MAX_LENGTH,
   COMMIT_TYPES,
   DEFAULT_NOISE,
@@ -278,6 +279,7 @@ export class UI {
       h('div', { class: 'intro-kicker', id: 'intro-kicker' }, placeMeta(this.room?.place).tagline),
       h('h1', {}, '온라인 모각코'),
       h('p', { class: 'intro-lead' }, '모여서 각자 코딩해요. 빈자리에 앉아 할 일을 하면 돼요.', h('br'), '말은 안 해도 괜찮아요.'),
+      h('div', { class: 'intro-places', id: 'intro-places' }),
       h('div', { class: 'intro-room', id: 'intro-room' }),
       h(
         'div',
@@ -303,7 +305,43 @@ export class UI {
     this.introBtn = btn;
     this.introBar = bar;
     this.returning = returning;
+    this.renderIntroPlaces();
     this.renderIntroRoom();
+  }
+
+  /**
+   * 입장 화면의 장소 네 곳. 눌러 보면 그 장소의 기본 방으로 바뀌어서 뒤의 3D 장면을 미리 볼 수 있어요.
+   * 지금 보이는 장소에 표시해요.
+   */
+  private renderIntroPlaces() {
+    const el = document.getElementById('intro-places');
+    if (!el) return;
+    const current = this.room?.place;
+    el.replaceChildren(
+      h('div', { class: 'ip-head' }, h('span', { class: 'ip-title' }, `장소는 ${PLACES.length}곳이에요`), h('small', {}, '눌러서 미리 둘러봐요')),
+      h(
+        'div',
+        { class: 'ip-list' },
+        ...PLACES.map((pm) => {
+          const here = pm.id === current;
+          const room = BUILTIN_ROOMS.find((r) => r.place === pm.id);
+          return h(
+            'button',
+            {
+              type: 'button',
+              class: 'ip-place' + (here ? ' on' : ''),
+              'aria-pressed': String(here),
+              title: pm.desc,
+              onclick: () => {
+                if (!here && room) this.h.onPickRoom(room.slug);
+              },
+            },
+            h('span', { class: 'ip-emoji', 'aria-hidden': 'true' }, pm.emoji),
+            h('span', { class: 'ip-name' }, pm.name),
+          );
+        }),
+      ),
+    );
   }
 
   /** 입장 화면의 "들어갈 방" 줄 */
@@ -388,6 +426,7 @@ export class UI {
     if (kicker) kicker.textContent = placeMeta(r.place).tagline;
     this.paintUse();
     if (!r.isPublic && !this.rooms.some((x) => x.slug === r.slug)) this.rooms = [r, ...this.rooms];
+    this.renderIntroPlaces();
     this.renderIntroRoom();
     if ((this.sheet === 'rooms' && this.roomsView === 'list') || this.sheet === 'people') this.renderSheet();
   }
