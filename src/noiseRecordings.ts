@@ -10,7 +10,7 @@ export type RecordingId = Extract<NoiseId, 'fire' | 'fireplace' | 'rain' | 'ocea
  * 귀에 잘 걸리는 소리는 0.008~0.012로 낮췄어요. 모든 소리가 피크 1.0을 넘지 않아요.
  */
 const GAIN: Record<RecordingId, number> = {
-  fire: 0.42,
+  fire: 0.93,
   fireplace: 0.28,
   rain: 0.41,
   ocean: 0.33,
