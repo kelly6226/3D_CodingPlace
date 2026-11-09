@@ -323,6 +323,11 @@ export class DemoNet implements Net {
     return this.commits.slice();
   }
 
+  /** 데모 모드는 신고를 모을 서버가 없어서, 신고한 사람 화면에서만 가려요 (main.ts) */
+  async reportCommit(): Promise<boolean> {
+    return false;
+  }
+
   async postCommit(c: Commit) {
     const mine = getDemoCommits<SavedCommit>();
     mine.unshift({ ...c, room: this.room });

@@ -612,8 +612,8 @@ button {
 }
 .log li {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: 'hash msg time' 'hash who who';
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'hash msg time report' 'hash who who report';
   column-gap: 10px;
   padding: 8px 4px;
   border-bottom: 1px solid var(--line);
@@ -1710,6 +1710,32 @@ button.place-name {
 }
 .chat-log .pin:hover:not(:disabled) {
   opacity: 1;
+}
+/* 신고·가리기: 한 번 누르면 확인 문구로 바뀌고 한 번 더 누르면 실행 (ui.ts confirmButton) */
+.confirm-btn {
+  flex: none;
+  align-self: start;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  opacity: 0.45;
+  white-space: nowrap;
+}
+.confirm-btn:hover,
+.confirm-btn:focus-visible {
+  opacity: 1;
+}
+.confirm-btn.armed {
+  opacity: 1;
+  padding: 1px 6px;
+  background: rgba(239, 83, 80, 0.18);
+  color: #ff8a80;
+  font-weight: 700;
+}
+.log .confirm-btn {
+  grid-area: report;
 }
 .chat-form {
   display: flex;
