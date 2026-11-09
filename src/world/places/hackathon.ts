@@ -22,7 +22,7 @@ import {
   mesh,
   plainWalls,
   plane,
-  sideWallCutaway,
+  wallCutaway,
   std,
   type V3,
 } from './kit';
@@ -281,7 +281,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
   if (!mobile) L.point([6.8, 2.2, 1.5], '#b9a8ff', 4, 6);
 
   const alarm = alarmKit(b, ROOM, [M.red]);
-  const wallsCut = sideWallCutaway(walls.left, walls.right, ROOM);
+  const wallsCut = wallCutaway(walls, ROOM);
   b.finish([walls.left, walls.right, walls.back]);
 
   let t = 0;

@@ -4,7 +4,7 @@
 export const SITE = {
   name: '온라인 모각코',
   title: '온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코',
-  /** 개인정보 문의·계정 삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
+  /** 개인정보 문의·삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
   contact: 'code_alone_together@naver.com',
 };
 
@@ -125,6 +125,9 @@ export const CHAT_MAX_LENGTH = 50;
 export const CHAT_SEND_GAP_MS = 1500;
 /** 받는 쪽은 네트워크 지연으로 도착 간격이 줄어들 수 있어서, 보내는 쪽보다 느슨하게 거름 */
 export const CHAT_RECEIVE_GAP_MS = CHAT_SEND_GAP_MS / 2;
+
+/** 3D 화면이 멈췄다 돌아왔다는 알림을 보여주는 시간. 폰에서 읽을 틈이 필요해서 일반 토스트보다 길어요 */
+export const CONTEXT_LOSS_TOAST_MS = 6000;
 
 /** 데모 모드에서 봇들이 건네는 한마디 */
 export const BOT_CHATS = [

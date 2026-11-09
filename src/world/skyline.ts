@@ -39,10 +39,25 @@ function building(w: number, h: number, d: number, x: number, y: number, z: numb
   return g;
 }
 
+/** 카메라가 빌딩 벽에 이만큼 이상 가까이 붙지 않게 (카메라 가까운 면에 걸려 잘리는 걸 막아요) */
+const CAMERA_CLEARANCE = 0.8;
+/** 빌딩 안에 들어간 카메라를 밖으로 빼내는 데 최대 몇 채까지 겹쳐 봐줄지 */
+const MAX_PULL_PASSES = 8;
+/** 상자 경계에 딱 걸려 다시 안으로 판정되지 않게 조금 더 나가는 거리 */
+const EXIT_EPSILON = 0.01;
+
 /** 창밖 야경을 parent 안에 만들어요 (배경색은 장소 설정에서) */
 export function buildSkyline(scene: THREE.Object3D) {
 
   const groups: Record<string, THREE.BufferGeometry[]> = { warm: [], cool: [], lighthouse: [] };
+  /** 카메라가 들어가면 안 되는 구역(빌딩마다 하나, 여유 포함) */
+  const keepOut: THREE.Box3[] = [];
+  const addBuilding = (kind: string, w: number, h: number, d: number, x: number, y: number, z: number) => {
+    groups[kind].push(building(w, h, d, x, y, z));
+    const half = new THREE.Vector3(w / 2 + CAMERA_CLEARANCE, h / 2 + CAMERA_CLEARANCE, d / 2 + CAMERA_CLEARANCE);
+    const center = new THREE.Vector3(x, y, z);
+    keepOut.push(new THREE.Box3(center.clone().sub(half), center.clone().add(half)));
+  };
 
   // 멀리 있는 빌딩 숲
   for (let i = 0; i < 70; i++) {
@@ -52,7 +67,7 @@ export function buildSkyline(scene: THREE.Object3D) {
     const d = 4 + rnd() * 7;
     const h = 10 + rnd() * 34 + (Math.abs(x) < 15 ? 6 : 0);
     const kind = rnd() < 0.18 ? 'lighthouse' : rnd() < 0.6 ? 'warm' : 'cool';
-    groups[kind].push(building(w, h, d, x, -22 + h / 2, z));
+    addBuilding(kind, w, h, d, x, -22 + h / 2, z);
   }
   // 양옆과 아래쪽 낮은 건물: 고층 카페라는 느낌
   for (let i = 0; i < 46; i++) {
@@ -65,13 +80,13 @@ export function buildSkyline(scene: THREE.Object3D) {
     const near = Math.abs(x) < 45;
     const h = near ? 3 + rnd() * 8 : 6 + rnd() * 16;
     const kind = rnd() < 0.12 ? 'lighthouse' : rnd() < 0.55 ? 'warm' : 'cool';
-    groups[kind].push(building(w, h, d, x, -22 + h / 2, z));
+    addBuilding(kind, w, h, d, x, -22 + h / 2, z);
   }
   for (let i = 0; i < 16; i++) {
     const x = -24 + rnd() * 48;
     const z = 26 + rnd() * 30;
     const h = 3 + rnd() * 6;
-    groups[rnd() < 0.5 ? 'warm' : 'cool'].push(building(5 + rnd() * 6, h, 5 + rnd() * 6, x, -22 + h / 2, z));
+    addBuilding(rnd() < 0.5 ? 'warm' : 'cool', 5 + rnd() * 6, h, 5 + rnd() * 6, x, -22 + h / 2, z);
   }
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(400, 400),
@@ -82,8 +97,8 @@ export function buildSkyline(scene: THREE.Object3D) {
   scene.add(ground);
 
   // 바로 앞 큰 오피스 두 채: 새벽인데도 불이 다 켜져 있음
-  groups.lighthouse.push(building(12, 46, 10, -10, -22 + 23, -18));
-  groups.lighthouse.push(building(10, 52, 9, 12, -22 + 26, -21));
+  addBuilding('lighthouse', 12, 46, 10, -10, -22 + 23, -18);
+  addBuilding('lighthouse', 10, 52, 9, 12, -22 + 26, -21);
 
   const mats: Record<string, THREE.Material> = {
     warm: new THREE.MeshBasicMaterial({ map: officeWindows(0.32, 'warm') }),
@@ -153,6 +168,24 @@ export function buildSkyline(scene: THREE.Object3D) {
 
   let t = 0;
   return {
+    /**
+     * 카메라가 빌딩 몸체 안에 들어가 있으면, 보고 있는 곳(toward) 쪽으로 직선으로 당겨서 빌딩 밖으로 빼내요.
+     * 보는 방향은 그대로라서 화면이 튀지 않고, 그냥 조금 가까이 다가온 것처럼 보여요.
+     */
+    pullOutOfBuildings(camera: THREE.Vector3, toward: THREE.Vector3) {
+      const dir = toward.clone().sub(camera).normalize();
+      for (let pass = 0; pass < MAX_PULL_PASSES; pass++) {
+        const inside = keepOut.find((box) => box.containsPoint(camera));
+        if (!inside) return;
+        // 빌딩 상자를 나가는 가장 가까운 면까지의 거리
+        let exit = Infinity;
+        for (const axis of ['x', 'y', 'z'] as const) {
+          if (dir[axis] > 0) exit = Math.min(exit, (inside.max[axis] - camera[axis]) / dir[axis]);
+          else if (dir[axis] < 0) exit = Math.min(exit, (inside.min[axis] - camera[axis]) / dir[axis]);
+        }
+        camera.addScaledVector(dir, exit + EXIT_EPSILON);
+      }
+    },
     update(dt: number) {
       t += dt;
       const on = Math.sin(t * 2.4) > 0.2;
