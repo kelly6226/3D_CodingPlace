@@ -16,7 +16,7 @@ import {
 } from '../config';
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
-import { maskBadWords } from './badwords';
+import { maskIfBad } from './badwords';
 import type { Commit, NetEvent, PeerState } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
@@ -62,7 +62,7 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
   const seat = seatId(raw.seat);
   return {
     id: pid,
-    name: maskBadWords(text(raw.name, 20)) || '익명의 개발자',
+    name: maskIfBad(text(raw.name, 20)) || '익명의 개발자',
     color: hex(raw.color, '#3b4a6b'),
     hair: hex(raw.hair, '#1d1a18'),
     skin: hex(raw.skin, '#eac3a3'),
@@ -100,11 +100,11 @@ export function cleanEvent(raw: unknown): NetEvent | null {
     case 'deploy': {
       const pid = id(raw.id);
       if (!pid) return null;
-      return { type: 'deploy', id: pid, name: maskBadWords(text(raw.name, 20)) || '누군가' };
+      return { type: 'deploy', id: pid, name: maskIfBad(text(raw.name, 20)) || '누군가' };
     }
     case 'chat': {
       const pid = id(raw.id);
-      const msg = maskBadWords(text(raw.text, CHAT_MAX_LENGTH));
+      const msg = maskIfBad(text(raw.text, CHAT_MAX_LENGTH));
       return pid && msg ? { type: 'chat', id: pid, text: msg } : null;
     }
     case 'act': {
@@ -132,8 +132,8 @@ export function cleanCommit(raw: unknown): Commit | null {
   if (!name || !msg) return null;
   return {
     hash: raw.hash,
-    name: maskBadWords(name),
-    msg: maskBadWords(msg),
+    name: maskIfBad(name),
+    msg: maskIfBad(msg),
     lang: LANGS.some((l) => l.id === raw.lang) ? (raw.lang as string) : '',
     at: clamp(num(raw.at, Date.now()), 0, Date.now() + 60e3),
   };

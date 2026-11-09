@@ -23,7 +23,7 @@ import {
 } from './config';
 import type { Look } from './look';
 import { sound } from './audio';
-import { hasBadWord } from './net/badwords';
+import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
@@ -324,7 +324,7 @@ let lastRoomCreate = 0;
 async function createRoom({ name, tags, isPublic, place, noise, password = '' }: RoomDraft): Promise<string | null> {
   const nm = name.trim().slice(0, 24);
   if (!nm) return '방 이름을 적어주세요.';
-  if (hasBadWord(nm)) return '욕설이 들어 있어서 쓸 수 없어요. 다른 이름으로 적어주세요.';
+  if (hasBadWord(nm)) return `${BLOCKED_WORDS_REASON} 다른 이름으로 적어주세요.`;
   if (!isPlaceId(place)) return '장소를 골라주세요.';
   if (!isNoiseId(noise)) return '배경 소리를 골라주세요.';
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
@@ -342,6 +342,7 @@ async function createRoom({ name, tags, isPublic, place, noise, password = '' }:
     r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: listed, place, noise, creator: self?.name ?? profile.name, password: hasPassword ? password : undefined });
   } catch (e) {
     console.warn(e);
+    if (isBlockedWordsError(e)) return `${BLOCKED_WORDS_REASON} 방 이름이나 닉네임을 바꿔주세요.`;
     return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
   }
   lastRoomCreate = Date.now();
@@ -473,7 +474,7 @@ let lastChat = 0;
 function chat(text: string): string | null {
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
-  if (hasBadWord(text)) return '욕설이 들어 있어서 보낼 수 없어요. 다른 말로 적어주세요.';
+  if (hasBadWord(text)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
   const msg = text.slice(0, CHAT_MAX_LENGTH);
   lastChat = Date.now();
   meAvatar().say(msg);
@@ -558,13 +559,15 @@ function triggerDeploy(name: string) {
 let lastCommit = 0;
 async function commit(type: string, msg: string): Promise<string | null> {
   if (Date.now() - lastCommit < 30e3) return `커밋은 30초에 한 번씩 남길 수 있어요. ${Math.ceil((30e3 - (Date.now() - lastCommit)) / 1000)}초 남았어요.`;
-  if (hasBadWord(msg)) return '욕설이 들어 있어서 남길 수 없어요. 다른 말로 적어주세요.';
+  if (hasBadWord(msg)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
+  if (hasBadWord(self.name)) return `닉네임에 쓸 수 없는 말이 있어서 커밋을 남길 수 없어요. ⚙️에서 닉네임을 바꿔주세요.`;
   const full = type === 'wip' ? `wip: ${msg}` : `${type}: ${msg}`;
   const c: Commit = { hash: randomHash(), name: self.name, msg: full.slice(0, 72), lang: self.lang, at: Date.now() };
   try {
     await net.postCommit(c);
   } catch (e) {
     console.warn(e);
+    if (isBlockedWordsError(e)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
     return '커밋을 저장하지 못했어요. 잠시 후 다시 해주세요.';
   }
   lastCommit = Date.now();

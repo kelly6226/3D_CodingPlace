@@ -26,7 +26,7 @@ import {
 } from '../config';
 import * as store from '../store';
 import type { Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
-import { maskBadWords } from './badwords';
+import { maskIfBad } from './badwords';
 import { deriveRoomKey } from './roomKey';
 import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
@@ -66,13 +66,13 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
   if (!r || typeof r.slug !== 'string' || !ROOM_SLUG_RE.test(r.slug)) return null;
   return {
     slug: r.slug,
-    name: maskBadWords(text(r.name, 24)) || r.slug,
+    name: maskIfBad(text(r.name, 24)) || r.slug,
     tags: Array.isArray(r.tags) ? r.tags.filter((t) => typeof t === 'string').slice(0, 3) : [],
     isPublic: r.is_public === true,
     hasPassword: r.has_password === true,
     place: isPlaceId(r.place) ? r.place : 'cafe',
     noise: isNoiseId(r.noise) ? r.noise : DEFAULT_NOISE,
-    creator: maskBadWords(text(r.creator, 20)) || undefined,
+    creator: maskIfBad(text(r.creator, 20)) || undefined,
     createdAt: new Date(r.created_at).getTime() || undefined,
   };
 };

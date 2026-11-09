@@ -24,6 +24,30 @@ exception when undefined_table or undefined_column then
 end;
 $$;
 
+-- >>> badwords (scripts/sync-badwords.mjs가 src/net/badwords.json에서 채워요. 여기를 직접 고치지 마세요)
+-- 커밋·방 이름에 막아야 할 말(욕설, 성적인 말, 혐오 표현, 정치 이야기)이 있는지
+create or replace function public.has_bad_word(t text)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $fn$
+  with p as (
+    select lower(coalesce(t, '')) as plain
+  ), s as (
+    select plain,
+      regexp_replace(regexp_replace(plain, '[^가-힣ㄱ-ㅣa-z]', '', 'g'), '시발점|시발역|essex|sussex|운지법|메갈로|대선배', '', 'g') as squeezed
+    from p
+  )
+  select squeezed ~ '시발|씨발|씨빨|씨팔|시팔|씨바|씨벌|시벌|쓰벌|십팔|십새|씹새|씹창|씹년|씹놈|씹할|좆|좇같|존나|존내|졸라게|개새끼|개새기|개색기|개색히|개섀끼|개세끼|새끼야|느금마|니애미|니애비|니엄마|느개비|엠창|애미뒤|애비뒤|병신|븅신|빙신|병싄|지랄|염병|미친놈|미친년|썅년|쌍년|쌍놈|개놈|걸레년|ㅅㅂ|ㅆㅂ|ㅂㅅ|ㅄ|ㅈㄹ|ㅈㄴ|ㅅㅍ|ㄴㄱㅁ|fuck|shit|bitch|asshole|motherf|cunt|bastard|섹스|섹수|쎅스|섹쓰|쎅쓰|야동|보지털|자지털|보짓|보빨|딸딸이|펠라|사까시|질싸|노콘|강간|윤간|몰카|꼴리|sex|porn|pussy|blowjob|hentai|nude|빨갱이|전라디언|경상디언|개쌍도|멍청도|깽깽이|토착왜구|짱깨|쪽바리|깜둥이|한남충|김치녀|된장녀|메갈|워마드|일베|틀딱|급식충|맘충|똥꼬충|장애새끼|정신병자|nigger|nigga|faggot|retard|윤석열|이재명|문재인|박근혜|이명박|노무현|김대중|박정희|전두환|한동훈|김건희|이준석|홍준표|안철수|김문수|조국혁신|찢재명|찢명|이죄명|문재앙|문죄인|닭근혜|쥐박이|윤두창|굥|쥴리|운지|노알라|민주당|국민의힘|국힘|새누리|한나라당|자유한국당|개혁신당|진보당|대통령|탄핵|계엄|좌파|우파|좌빨|수꼴|대깨문|개딸|종북|친일파|부정선거|대선|총선|정권'
+    or exists (
+      select 1 from regexp_split_to_table(plain, '[^가-힣ㄱ-ㅣa-z0-9]+') as w
+      where regexp_replace(w, '[^가-힣ㄱ-ㅣa-z]', '', 'g') = any (array['새끼', '씹', '애자', '니미', '한남', '홍어', '조국', 'cum', 'dick', 'cock', 'fag', 'ass', '자위'])
+    )
+  from s;
+$fn$;
+-- <<< badwords
+
 -- ── 1. 커밋 방명록 (방마다 따로) ─────────────────────
 create table if not exists public.commits (
   id bigint generated always as identity primary key,
@@ -86,6 +110,10 @@ begin
   new.created_at := now();
   if not (public.is_builtin_room(new.room) or exists (select 1 from public.rooms where slug = new.room)) then
     raise exception 'unknown room';
+  end if;
+  -- 욕설·성적인 말·혐오 표현·정치 이야기는 화면을 거치지 않고 API로 넣어도 막아요
+  if public.has_bad_word(new.msg) or public.has_bad_word(new.name) then
+    raise exception 'blocked words';
   end if;
   if (
     select count(*) from public.commits
@@ -225,6 +253,9 @@ begin
   if public.is_builtin_room(new.slug) or new.slug = 'lobby' then
     raise exception 'reserved room slug';
   end if;
+  if public.has_bad_word(new.name) or public.has_bad_word(new.creator) then
+    raise exception 'blocked words';
+  end if;
   if (select count(*) from public.rooms where created_at > now() - interval '1 minute') >= 10 then
     raise exception 'too many rooms, slow down';
   end if;
@@ -254,6 +285,7 @@ grant insert (slug, name, tags, is_public, creator, place, noise, pw_check) on p
 revoke all on function public.get_room(text) from public, anon, authenticated;
 grant execute on function public.get_room(text) to anon, authenticated;
 revoke all on function public.is_builtin_room(text) from public, anon, authenticated;
+revoke all on function public.has_bad_word(text) from public, anon, authenticated;
 revoke all on function public.commits_guard() from public, anon, authenticated;
 revoke all on function public.rooms_guard() from public, anon, authenticated;
 
