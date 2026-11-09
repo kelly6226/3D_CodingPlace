@@ -25,8 +25,112 @@ end;
 $$;
 
 -- >>> badwords (scripts/sync-badwords.mjs가 src/net/badwords.json에서 채워요. 여기를 직접 고치지 마세요)
--- 커밋·방 이름에 막아야 할 말(욕설, 성적인 말, 혐오 표현, 정치 이야기)이 있는지. 검사 방식은 src/net/badwords.ts 맨 위 설명과 같아요
--- (자모로 풀어 쓴 것은 화면 쪽만 잡아요)
+-- 금칙어(욕설, 성적인 말, 혐오 표현, 정치 이야기) 검사. 순서는 src/net/badwords.ts 맨 위 설명과 같아요
+-- (따로 쓴 자모를 글자로 모으는 것만 화면 쪽에서 해요)
+
+-- 겹받침 나누기("섻" → "섹ㅅ")와 늘인 모음 줄이기("씨이발" → "씨발", "조온나" → "존나")
+create or replace function public.ko_shrink(t text)
+returns text
+language plpgsql
+immutable
+set search_path = public
+as $fn$
+declare
+  jong_chars constant text := ' ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ';
+  compound_from constant text := 'ㄳㄵㄶㄺㄻㄼㄽㄾㄿㅀㅄ';
+  compound_first constant text := 'ㄱㄴㄴㄹㄹㄹㄹㄹㄹㄹㅂ';
+  compound_second constant text := 'ㅅㅈㅎㄱㅁㅂㅅㅌㅍㅎㅅ';
+  out_chars text[] := '{}';
+  ch text;
+  code int;
+  prev int;
+  jong int;
+  k int;
+begin
+  if coalesce(t, '') = '' then
+    return '';
+  end if;
+  foreach ch in array regexp_split_to_array(t, '') loop
+    code := ascii(ch);
+    if code not between 44032 and 55203 then
+      out_chars := out_chars || ch;
+      continue;
+    end if;
+    -- 앞 글자와 같은 모음을 'ㅇ'으로 한 번 더 낸 글자면 앞 글자에 합쳐요 (받침은 앞 글자로)
+    if cardinality(out_chars) > 0 then
+      prev := ascii(out_chars[cardinality(out_chars)]);
+      if prev between 44032 and 55203 and (prev - 44032) % 28 = 0
+         and (code - 44032) / 588 = 11
+         and ((code - 44032) % 588) / 28 = ((prev - 44032) % 588) / 28 then
+        out_chars := out_chars[1:cardinality(out_chars) - 1];
+        code := prev + (code - 44032) % 28;
+      end if;
+    end if;
+    jong := (code - 44032) % 28;
+    k := strpos(compound_from, substr(jong_chars, jong + 1, 1));
+    if jong > 0 and k > 0 then
+      out_chars := out_chars
+        || chr(code - jong + strpos(jong_chars, substr(compound_first, k, 1)) - 1)
+        || substr(compound_second, k, 1);
+    else
+      out_chars := out_chars || chr(code);
+    end if;
+  end loop;
+  return array_to_string(out_chars, '');
+end;
+$fn$;
+
+-- 비슷한 소리를 한 묶음으로("쎅쓰" → "섹스")
+create or replace function public.ko_similar(t text)
+returns text
+language plpgsql
+immutable
+set search_path = public
+as $fn$
+declare
+  cho_map constant int[] := array[0,0,2,3,3,5,6,7,7,9,9,11,12,12,14,15,16,17,18]::int[];
+  jung_map constant int[] := array[0,5,2,5,4,5,6,5,8,9,15,15,12,13,14,15,16,17,18,19,20]::int[];
+  jong_map constant int[] := array[0,1,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,19,21,22,23,1,25,26,27]::int[];
+  out_chars text[] := '{}';
+  ch text;
+  i int;
+begin
+  if coalesce(t, '') = '' then
+    return '';
+  end if;
+  foreach ch in array regexp_split_to_array(t, '') loop
+    i := ascii(ch) - 44032;
+    if i between 0 and 11171 then
+      out_chars := out_chars || chr(44032 + (cho_map[i / 588 + 1] * 21 + jung_map[(i % 588) / 28 + 1]) * 28 + jong_map[i % 28 + 1]);
+    else
+      out_chars := out_chars || translate(ch, 'ㄲㄸㅃㅆㅉ', 'ㄱㄷㅂㅅㅈ');
+    end if;
+  end loop;
+  return array_to_string(out_chars, '');
+end;
+$fn$;
+
+-- 첫 글자나 끝 글자를 초성만 쓴 것: "시발" → "ㅅ발", "시ㅂ"
+create or replace function public.ko_initial_variants(w text)
+returns text[]
+language plpgsql
+immutable
+set search_path = public
+as $fn$
+declare
+  cho_chars constant text := 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+  n int := char_length(coalesce(w, ''));
+begin
+  if n < 2 or w !~ '^[가-힣]+$' then
+    return '{}';
+  end if;
+  return array[
+    substr(cho_chars, (ascii(left(w, 1)) - 44032) / 588 + 1, 1) || substr(w, 2),
+    left(w, n - 1) || substr(cho_chars, (ascii(right(w, 1)) - 44032) / 588 + 1, 1)
+  ];
+end;
+$fn$;
+
 create or replace function public.has_bad_word(t text)
 returns boolean
 language plpgsql
@@ -34,20 +138,42 @@ immutable
 set search_path = public
 as $fn$
 declare
-  contains_words constant text[] := array['시발', '씨발', '씨빨', '씨팔', '시팔', '씨바', '씨벌', '시벌', '쓰벌', '십팔', '십새', '씹새', '씹창', '씹년', '씹놈', '씹할', '좆', '좇같', '존나', '존내', '졸라게', '개새끼', '개새기', '개색기', '개색히', '개섀끼', '개세끼', '새끼야', '느금마', '니애미', '니애비', '니엄마', '느개비', '엠창', '애미뒤', '애비뒤', '병신', '븅신', '빙신', '병싄', '지랄', '염병', '미친놈', '미친년', '썅년', '쌍년', '쌍놈', '개놈', '걸레년', 'ㅅㅂ', 'ㅆㅂ', 'ㅂㅅ', 'ㅄ', 'ㅈㄹ', 'ㅈㄴ', 'ㅅㅍ', 'ㄴㄱㅁ', 'fuck', 'shit', 'bitch', 'asshole', 'motherf', 'cunt', 'bastard', '씨이발', '시이발', '개새', '개쉐', '개새꺄', '쌔끼', '새꺄', 'fvck', 'phuck', '섹스', '섹수', '쎅스', '섹쓰', '쎅쓰', '야동', '보지털', '자지털', '보짓', '보빨', '딸딸이', '펠라', '사까시', '질싸', '노콘', '강간', '윤간', '몰카', '꼴리', 'sex', 'porn', 'pussy', 'blowjob', 'hentai', 'nude', '빨갱이', '전라디언', '경상디언', '개쌍도', '멍청도', '깽깽이', '토착왜구', '짱깨', '쪽바리', '깜둥이', '한남충', '김치녀', '된장녀', '메갈', '워마드', '일베', '틀딱', '급식충', '맘충', '똥꼬충', '장애새끼', '정신병자', 'nigger', 'nigga', 'faggot', 'retard', '윤석열', '이재명', '문재인', '박근혜', '이명박', '노무현', '김대중', '박정희', '전두환', '한동훈', '김건희', '이준석', '홍준표', '안철수', '김문수', '조국혁신', '찢재명', '찢명', '이죄명', '문재앙', '문죄인', '닭근혜', '쥐박이', '윤두창', '굥', '쥴리', '노알라', '민주당', '국민의힘', '국힘', '새누리', '한나라당', '자유한국당', '개혁신당', '대통령', '탄핵', '계엄', '좌파', '우파', '좌빨', '수꼴', '대깨문', '개딸', '종북', '친일파', '부정선거', '대선', '총선', '윤통', '국짐', '재명이', '대깨', '더불어민주']::text[];
-  long_words constant text[] := array['졸라게', '개새끼', '개새기', '개색기', '개색히', '개섀끼', '개세끼', '새끼야', '느금마', '니애미', '니애비', '니엄마', '느개비', '애미뒤', '애비뒤', '미친놈', '미친년', '걸레년', 'ㄴㄱㅁ', 'fuck', 'shit', 'bitch', 'asshole', 'motherf', 'cunt', 'bastard', '씨이발', '시이발', '개새꺄', 'fvck', 'phuck', '보지털', '자지털', '딸딸이', '사까시', 'sex', 'porn', 'pussy', 'blowjob', 'hentai', 'nude', '빨갱이', '전라디언', '경상디언', '개쌍도', '멍청도', '깽깽이', '토착왜구', '쪽바리', '깜둥이', '한남충', '김치녀', '된장녀', '워마드', '급식충', '똥꼬충', '장애새끼', '정신병자', 'nigger', 'nigga', 'faggot', 'retard', '윤석열', '이재명', '문재인', '박근혜', '이명박', '노무현', '김대중', '박정희', '전두환', '한동훈', '김건희', '이준석', '홍준표', '안철수', '김문수', '조국혁신', '찢재명', '이죄명', '문재앙', '문죄인', '닭근혜', '쥐박이', '윤두창', '노알라', '민주당', '국민의힘', '새누리', '한나라당', '자유한국당', '개혁신당', '대통령', '대깨문', '친일파', '부정선거', '재명이', '더불어민주']::text[];
-  exact_words constant text[] := array['새끼', '씹', '애자', '니미', '한남', '홍어', '조국', 'cum', 'dick', 'cock', 'fag', 'ass', '자위', '정권', '진보당']::text[];
+  contains_words constant text[] := array['시발', '씨발', '씨빨', '씨팔', '시팔', '씨바', '씨벌', '시벌', '쓰벌', '십팔', '십새', '씹새', '씹창', '씹년', '씹놈', '씹할', '좆', '좇같', '존나', '존내', '졸라게', '개새끼', '개새기', '개색기', '개색히', '개섀끼', '개세끼', '느금마', '니애미', '니애비', '니엄마', '느개비', '엠창', '애미뒤', '애비뒤', '병신', '븅신', '빙신', '병싄', '지랄', '염병', '미친놈', '미친년', '썅년', '쌍년', '쌍놈', '개놈', '걸레년', 'ㅅㅂ', 'ㅆㅂ', 'ㅂㅅ', 'ㅄ', 'ㅈㄹ', 'ㅈㄴ', 'ㅅㅍ', 'ㄴㄱㅁ', 'fuck', 'shit', 'bitch', 'asshole', 'motherf', 'cunt', 'bastard', '씨이발', '시이발', '개새', '개쉐', '개새꺄', '새꺄', 'fvck', 'phuck', '시바', '씨부랄', '시부랄', '좆까', 'ㅈ까', '좆같', '개같은', '호로새끼', '썅', '섹스', '섹수', '쎅스', '섹쓰', '쎅쓰', '야동', '보지털', '자지털', '보짓', '보빨', '딸딸이', '펠라', '사까시', '질싸', '노콘', '강간', '윤간', '몰카', '꼴리', 'sex', 'porn', 'pussy', 'blowjob', 'hentai', 'nude', '섻', 'ㅅㅅ', '애널', '오나홀', '풀발', '불알', '젖꼭지', '야짤', '빨갱이', '전라디언', '경상디언', '개쌍도', '멍청도', '깽깽이', '토착왜구', '짱깨', '쪽바리', '깜둥이', '한남충', '김치녀', '된장녀', '메갈', '워마드', '일베', '틀딱', '급식충', '맘충', '똥꼬충', '장애새끼', '정신병자', 'nigger', 'nigga', 'faggot', 'retard', '윤석열', '이재명', '문재인', '박근혜', '이명박', '노무현', '김대중', '박정희', '전두환', '한동훈', '김건희', '이준석', '홍준표', '안철수', '김문수', '조국혁신', '찢재명', '찢명', '이죄명', '문재앙', '문죄인', '닭근혜', '쥐박이', '윤두창', '굥', '쥴리', '노알라', '민주당', '국민의힘', '국힘', '새누리', '한나라당', '자유한국당', '개혁신당', '대통령', '탄핵', '계엄', '좌파', '우파', '좌빨', '수꼴', '대깨문', '개딸', '종북', '친일파', '부정선거', '대선', '총선', '윤통', '국짐', '재명이', '대깨', '더불어민주']::text[];
+  variant_source constant text[] := array['시발', '씨발', '씨빨', '씨팔', '시팔', '씨바', '씨벌', '시벌', '쓰벌', '십팔', '십새', '씹새', '씹창', '씹년', '씹놈', '씹할', '좆', '좇같', '존나', '존내', '졸라게', '개새끼', '개새기', '개색기', '개색히', '개섀끼', '개세끼', '느금마', '니애미', '니애비', '니엄마', '느개비', '엠창', '애미뒤', '애비뒤', '병신', '븅신', '빙신', '병싄', '지랄', '염병', '미친놈', '미친년', '썅년', '쌍년', '쌍놈', '개놈', '걸레년', 'ㅅㅂ', 'ㅆㅂ', 'ㅂㅅ', 'ㅄ', 'ㅈㄹ', 'ㅈㄴ', 'ㅅㅍ', 'ㄴㄱㅁ', 'fuck', 'shit', 'bitch', 'asshole', 'motherf', 'cunt', 'bastard', '씨이발', '시이발', '개새', '개쉐', '개새꺄', '새꺄', 'fvck', 'phuck', '시바', '씨부랄', '시부랄', '좆까', 'ㅈ까', '좆같', '개같은', '호로새끼', '썅', '섹스', '섹수', '쎅스', '섹쓰', '쎅쓰', '야동', '보지털', '자지털', '보짓', '보빨', '딸딸이', '펠라', '사까시', '질싸', '노콘', '강간', '윤간', '몰카', '꼴리', 'sex', 'porn', 'pussy', 'blowjob', 'hentai', 'nude', '섻', 'ㅅㅅ', '애널', '오나홀', '풀발', '불알', '젖꼭지', '야짤']::text[];
+  exact_words constant text[] := array['새끼', '씹', '애자', '니미', '한남', '홍어', '조국', 'cum', 'dick', 'cock', 'fag', 'ass', '자위', '정권', '진보당', 'ㅗ', 'ㅗㅗ', 'ㅗㅗㅗ', '호로', '쌔끼', '쌔기', '새기']::text[];
   exact_raw constant text[] := array['2찍', '1찍']::text[];
+  allow_words constant text[] := array['시발점', '시발역', 'essex', 'sussex', '운지법', '메갈로', '대선배', '대통령배', '시바견', '시바이누', '상년도']::text[];
   josa constant text[] := array['은', '는', '이', '가', '을', '를', '에', '의', '도', '들', '야', '아', '이야', '들아', '들은', '들이', '들도', '들을']::text[];
-  allow_re constant text := '시발점|시발역|essex|sussex|운지법|메갈로|대선배|대통령배';
+  short_words text[];
+  multi_words text[];
+  allow_re text;
+  allow_similar_re text;
   w text;
   c text;
-  words text[] := '{}';
-  units text[] := '{}';
-  run text := '';
+  base text[] := '{}';
+  near text[] := '{}';
+  units text[];
+  run text;
+  pass int;
 begin
-  -- 1. 띄어쓰기로 나누고, 단어 안의 숫자·기호를 지워요 (영문은 숫자를 비슷한 글자로)
-  foreach w in array regexp_split_to_array(lower(translate(coalesce(t, ''), 'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９', 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')), '\s+') loop
+  -- 찾을 단어 준비: 한 글자는 그대로, 두 글자 이상은 비슷한 소리로 바꿔서 (초성 변형 포함)
+  short_words := array(select x from unnest(contains_words) as x where char_length(x) = 1);
+  multi_words := array(
+    select distinct public.ko_similar(public.ko_shrink(src.x))
+    from (
+      select x from unnest(contains_words) as x where char_length(x) >= 2
+      union all
+      select v from unnest(variant_source) as s, unnest(public.ko_initial_variants(s)) as v
+    ) as src(x)
+  );
+  allow_re := (select string_agg(public.ko_shrink(a), '|') from unnest(allow_words) as a);
+  allow_similar_re := (select string_agg(public.ko_similar(public.ko_shrink(a)), '|') from unnest(allow_words) as a);
+
+  -- 1~6. 띄어쓰기로 나눈 단어마다: 전각·키릴 → 영문, 숫자 단어(exactRaw), 영문 숫자 치환, 기호 지우기, 겹받침·늘인 모음
+  foreach w in array regexp_split_to_array(
+    translate(lower(translate(coalesce(t, ''), 'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９', 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')), 'аеорсхуіѕ', 'aeopcxyis'),
+    '\s+'
+  ) loop
     continue when w = '';
     if regexp_replace(w, '[^가-힣ㄱ-ㅣa-z0-9]', '', 'g') = any (exact_raw) then
       return true;
@@ -55,36 +181,46 @@ begin
     if w ~ '[a-z]' then
       w := translate(w, '013457@$', 'oieastas');
     end if;
-    words := words || regexp_replace(regexp_replace(w, '[^가-힣ㄱ-ㅣa-z]', '', 'g'), allow_re, '', 'g');
+    c := regexp_replace(public.ko_shrink(regexp_replace(w, '[^가-힣ㄱ-ㅣa-z]', '', 'g')), allow_re, '', 'g');
+    base := base || c;
+    -- 7. 비슷한 소리
+    near := near || regexp_replace(public.ko_similar(c), allow_similar_re, '', 'g');
   end loop;
-  -- 2. 한 글자짜리 단어가 이어지면 붙여요
-  foreach c in array words loop
-    continue when c = '';
-    units := units || c;
-    if char_length(c) = 1 then
-      run := run || c;
-    else
-      if run <> '' then units := units || run; end if;
-      run := '';
-    end if;
+
+  -- 단어 + 한 글자짜리 단어를 이어 붙인 것. pass 1은 그대로(exact, 한 글자 단어), pass 2는 비슷한 소리(두 글자 이상)
+  for pass in 1..2 loop
+    units := '{}';
+    run := '';
+    foreach c in array case when pass = 1 then base else near end loop
+      continue when c = '';
+      units := units || c;
+      if char_length(c) = 1 then
+        run := run || c;
+      else
+        if run <> '' then units := units || run; end if;
+        run := '';
+      end if;
+    end loop;
+    if run <> '' then units := units || run; end if;
+
+    foreach c in array units loop
+      if pass = 1 then
+        if c = any (exact_words) or exists (
+          select 1 from unnest(josa) as j
+          where char_length(c) > char_length(j) and right(c, char_length(j)) = j
+            and left(c, char_length(c) - char_length(j)) = any (exact_words)
+        ) or exists (select 1 from unnest(short_words) as x where strpos(c, x) > 0) then
+          return true;
+        end if;
+      elsif exists (select 1 from unnest(multi_words) as x where strpos(c, x) > 0) then
+        return true;
+      end if;
+    end loop;
   end loop;
-  if run <> '' then units := units || run; end if;
-  -- 3. contains는 단어 안 어디든, exact는 단어 전체(뒤에 조사만 허용)
-  foreach c in array units loop
-    if exists (select 1 from unnest(contains_words) as x where strpos(c, x) > 0) then
-      return true;
-    end if;
-    if c = any (exact_words) or exists (
-      select 1 from unnest(josa) as j
-      where char_length(c) > char_length(j) and right(c, char_length(j)) = j
-        and left(c, char_length(c) - char_length(j)) = any (exact_words)
-    ) then
-      return true;
-    end if;
-  end loop;
-  -- 4. 세 글자 이상 단어는 띄어쓰기를 무시한 전체 글에서도
-  c := array_to_string(words, '');
-  return exists (select 1 from unnest(long_words) as x where strpos(c, x) > 0);
+
+  -- 세 글자 이상 단어는 띄어쓰기를 무시한 전체 글에서도
+  c := array_to_string(near, '');
+  return exists (select 1 from unnest(multi_words) as x where char_length(x) >= 3 and strpos(c, x) > 0);
 end;
 $fn$;
 -- <<< badwords
@@ -332,6 +468,9 @@ revoke all on function public.get_room(text) from public, anon, authenticated;
 grant execute on function public.get_room(text) to anon, authenticated;
 revoke all on function public.is_builtin_room(text) from public, anon, authenticated;
 revoke all on function public.has_bad_word(text) from public, anon, authenticated;
+revoke all on function public.ko_shrink(text) from public, anon, authenticated;
+revoke all on function public.ko_similar(text) from public, anon, authenticated;
+revoke all on function public.ko_initial_variants(text) from public, anon, authenticated;
 revoke all on function public.commits_guard() from public, anon, authenticated;
 revoke all on function public.rooms_guard() from public, anon, authenticated;
 
