@@ -38,8 +38,6 @@ import {
   type Profile,
 } from '../store';
 
-/** 신고·가리기 버튼이 확인 문구로 바뀐 뒤 원래대로 돌아가기까지 */
-const CONFIRM_MS = 3000;
 /** 채팅 목록에 쌓아두는 줄 수. 넘으면 오래된 것부터 지워요 (저장은 안 해요) */
 const CHAT_LOG_MAX = 30;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
@@ -48,8 +46,6 @@ const CHAT_FOCUS_DELAY_MS = 30;
 const MODAL_FOCUS_DELAY_MS = 30;
 
 export interface ChatLine {
-  /** 보낸 사람 id (가리기에 써요) */
-  id: string;
   name: string;
   lang: string;
   text: string;
@@ -91,10 +87,8 @@ export interface UIHandlers {
   onView(cmd: ViewCommand): void;
   onProfileSave(p: Profile): void;
   onWave(id: string): void;
-  /** 커밋 신고 (확인은 UI가 두 번 눌러서 받아요) */
-  onReportCommit(hash: string): void;
-  /** 이 사람의 채팅·말풍선 가리기 / 풀기 */
-  onToggleMute(id: string): void;
+  /** 커밋 신고 버튼을 눌렀을 때 (확인 창은 main.ts가 띄워요) */
+  onReportCommit(c: Commit): void;
   onFocusPeer(id: string): void;
   /** 방 고르기: 입장 전이면 선택만, 입장 후면 그 방으로 이동 */
   onPickRoom(slug: string): void;
@@ -112,8 +106,8 @@ export class UI {
   private self!: PeerState;
   private toastBox: HTMLElement;
   private soundOn = true;
-  /** 내가 가린 사람 id */
-  private muted = new Set<string>();
+  /** 이번에 내가 남긴 커밋 (신고 버튼 대신 '내 커밋'을 보여요) */
+  private myCommits = new Set<string>();
   private noise: NoiseState = { current: 'place', roomDefault: 'place' };
   private rooms: RoomInfo[] = [];
   private counts: Record<string, number> = {};
@@ -520,8 +514,10 @@ export class UI {
   }
 
   // ── 커밋 ───────────────────────────────────────
-  setCommits(list: Commit[]) {
+  /** mine: 이번에 내가 남긴 커밋 해시 (신고 버튼 대신 '내 커밋'을 보여요) */
+  setCommits(list: Commit[], mine: Set<string>) {
     this.commits = list;
+    this.myCommits = mine;
     if (this.sheet === 'commit') this.renderSheet();
   }
 
@@ -614,63 +610,13 @@ export class UI {
           '📌',
         )
       : null;
-    const mute = line.mine ? null : this.confirmButton('🙈', '가릴까요?', `${line.name}님의 채팅 가리기`, () => this.h.onToggleMute(line.id));
     this.chatLog.append(
-      h(
-        'li',
-        { class: line.mine ? 'mine' : undefined, 'data-id': line.id },
-        h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, line.name),
-        h('span', { class: 'msg' }, line.text),
-        pin,
-        mute,
-      ),
+      h('li', { class: line.mine ? 'mine' : undefined }, h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, line.name), h('span', { class: 'msg' }, line.text), pin),
     );
     while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
     this.chatLog.scrollTop = this.chatLog.scrollHeight;
     // 패널이 닫혀 있으면 새 글이 왔다는 표시만 해둬요
     if (!line.mine && this.chatPanel.hidden) this.chatBtn.classList.add('unread');
-  }
-
-  /** 가린 사람이 바뀌면 이미 올라온 채팅 줄도 숨기거나 다시 보여요 */
-  setMuted(ids: Set<string>) {
-    this.muted = ids;
-    for (const li of this.chatLog.querySelectorAll<HTMLElement>('li[data-id]')) li.hidden = ids.has(li.dataset.id ?? '');
-  }
-
-  /**
-   * 한 번 누르면 확인 문구로 바뀌고, 그 상태에서 한 번 더 누르면 실행해요 (실수로 신고·가리기 하지 않게).
-   * 확인 문구는 CONFIRM_MS 뒤에 원래대로 돌아가요.
-   */
-  private confirmButton(icon: string, confirmText: string, label: string, run: () => void) {
-    let timer = 0;
-    const btn: HTMLButtonElement = h(
-      'button',
-      {
-        type: 'button',
-        class: 'confirm-btn',
-        title: label,
-        'aria-label': label,
-        onclick: (e: Event) => {
-          e.stopPropagation();
-          if (btn.classList.contains('armed')) {
-            window.clearTimeout(timer);
-            btn.disabled = true;
-            run();
-            return;
-          }
-          btn.classList.add('armed');
-          btn.textContent = confirmText;
-          btn.setAttribute('aria-label', `${label} 확인: 한 번 더 누르세요`);
-          timer = window.setTimeout(() => {
-            btn.classList.remove('armed');
-            btn.textContent = icon;
-            btn.setAttribute('aria-label', label);
-          }, CONFIRM_MS);
-        },
-      },
-      icon,
-    );
-    return btn;
   }
 
   /** 방을 옮기면 이전 방의 대화는 비워요 */
@@ -874,7 +820,19 @@ export class UI {
                 h('span', { class: 'msg' }, c.msg),
                 h('span', { class: 'who', style: `--c:${langById(c.lang).color}` }, c.name),
                 h('time', {}, ago(c.at)),
-                this.confirmButton('🚩', '신고?', `${c.hash} 커밋 신고하기`, () => this.h.onReportCommit(c.hash)),
+                this.myCommits.has(c.hash)
+                  ? h('span', { class: 'mine-tag' }, '내 커밋')
+                  : h(
+                      'button',
+                      {
+                        type: 'button',
+                        class: 'report-btn',
+                        'aria-label': `${c.hash} 커밋 신고하기`,
+                        onclick: () => this.h.onReportCommit(c),
+                      },
+                      h('span', { 'aria-hidden': 'true' }, '🚩'),
+                      '신고',
+                    ),
               ),
             ),
           ),
@@ -1282,19 +1240,6 @@ export class UI {
               },
             },
             '👋 손 흔들기',
-          ),
-      isSelf
-        ? null
-        : h(
-            'button',
-            {
-              class: 'ghost',
-              onclick: () => {
-                this.h.onToggleMute(p.id);
-                this.hidePop();
-              },
-            },
-            this.muted.has(p.id) ? '🙈 가리기 풀기' : '🙈 채팅 가리기',
           ),
     ];
     el.append(...(rows.filter(Boolean) as Node[]));
