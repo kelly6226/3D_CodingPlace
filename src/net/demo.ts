@@ -39,8 +39,8 @@ export const randomHash = () =>
 
 export class DemoNet implements Net {
   readonly mode = 'demo' as const;
-  /** 데모 모드엔 서버가 없어서 비밀번호 방도, 사람과의 1:1 채팅도 없어요 */
-  readonly canPrivate = false;
+  /** 데모 모드엔 서버가 없어서 비밀번호 방을 만들 수 없어요 */
+  readonly canLockRooms = false;
   readonly instance = 1;
   room = '';
   private bots: PeerState[] = [];
@@ -330,11 +330,4 @@ export class DemoNet implements Net {
   async joinRoom(): Promise<JoinResult> {
     return 'error';
   }
-  async dmOpen(): Promise<boolean> {
-    return false;
-  }
-  dmSend(): boolean {
-    return false;
-  }
-  dmClose() {}
 }

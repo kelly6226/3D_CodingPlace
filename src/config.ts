@@ -328,22 +328,6 @@ export function roomPasswordProblem(pw: string): string | null {
   return null;
 }
 
-// ── 1:1 채팅 ─────────────────────────────────────
-export const DM_MAX_LENGTH = 200;
-export const DM_SEND_GAP_MS = 700;
-/** 받는 쪽은 보내는 쪽 간격의 절반보다 빨리 오면 버려요 (네트워크로 몰려 도착하는 건 봐주려고) */
-export const DM_RECEIVE_GAP_MS = DM_SEND_GAP_MS / 2;
-/** 화면에 남겨두는 대화 줄 수 (대화마다) */
-export const DM_LOG_MAX = 100;
-/** 동시에 열어둘 수 있는 1:1 채팅. 채널마다 Presence 호출이 하나씩 나가서(PRESENCE_MIN_GAP_MS 설명) 적게 잡았어요 */
-export const DM_MAX_OPEN = 3;
-/** 대화 요청을 보낸 뒤 답을 기다리는 시간. 지나면 요청을 접어요 */
-export const DM_REQUEST_TTL_MS = 60_000;
-/** 같은 사람이 보내는 요청·응답 이벤트 사이 최소 간격 (받는 쪽 기준) */
-export const DM_EVENT_GAP_MS = 2000;
-/** 한꺼번에 받아둘 수 있는 대화 요청 수 (요청을 퍼부어 화면이 도배되는 걸 막으려고) */
-export const DM_MAX_INCOMING = 5;
-
 /** 방 주소: /r/<slug>. 기본 방은 루트에서도 열림 */
 export function roomUrl(slug: string): string {
   return `${location.origin}/r/${slug}`;

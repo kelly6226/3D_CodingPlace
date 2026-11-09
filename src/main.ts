@@ -21,7 +21,6 @@ import {
 } from './config';
 import type { Look } from './look';
 import { sound } from './audio';
-import { DmController } from './dm/controller';
 import { hasBadWord } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
@@ -64,8 +63,6 @@ followVisualViewport();
 let world: World;
 let places: typeof import('./world/places');
 let net: Net;
-/** 1:1 채팅. 실시간 서버에 연결될 때만 쓸 수 있어서 net이 정해진 뒤에 만들어요 */
-let dm: DmController | null = null;
 let self: PeerState;
 let room: RoomInfo = builtinRoom(DEFAULT_ROOM)!;
 let startInstance = 1;
@@ -104,15 +101,6 @@ async function boot() {
     net = new DemoNet();
   }
   ui.setMode(net.mode);
-  if (net.canPrivate) {
-    dm = new DmController({
-      net,
-      view: ui.dmView,
-      me: () => ({ id: self.id, name: self.name }),
-      sendEvent: (e) => net.send(e),
-      toast: (text, kind) => ui.toast(text, kind),
-    });
-  }
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
   const fromUrl = roomFromUrl();
@@ -322,7 +310,7 @@ async function createRoom(name: string, tags: string[], isPublic: boolean, place
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
   const hasPassword = password !== '';
   if (hasPassword) {
-    if (!net.canPrivate) return '비밀번호 방은 지금 만들 수 없어요. 실시간 서버에 연결됐을 때 다시 해주세요.';
+    if (!net.canLockRooms) return '비밀번호 방은 지금 만들 수 없어요. 실시간 서버에 연결됐을 때 다시 해주세요.';
     const problem = roomPasswordProblem(password);
     if (problem) return problem;
   }
@@ -683,9 +671,6 @@ function onEvent(e: NetEvent) {
     case 'typing':
       world.avatars.get(e.id)?.typeBurst();
       break;
-    case 'dm':
-      dm?.onEvent(e);
-      break;
   }
 }
 
@@ -835,18 +820,6 @@ ui.bind({
     // 비밀번호 방의 방명록은 열쇠가 있어야 읽혀서, 맞힌 직후에 다시 읽어요
     if (unlocked && room.hasPassword) void loadRoomCommits();
     return unlocked;
-  },
-  dm: {
-    onStart: (id) => {
-      const name = world.avatars.get(id)?.state.name ?? known.get(id)?.name;
-      if (name) void dm?.start({ id, name });
-    },
-    onAccept: (key) => void dm?.accept(key),
-    onDecline: (key, block) => dm?.decline(key, block),
-    onBlock: (key) => dm?.block(key),
-    onClose: (key) => dm?.close(key),
-    onSend: async (key, text) => (await dm?.send(key, text)) ?? '지금은 1:1 채팅을 쓸 수 없어요.',
-    onUnblockAll: () => dm?.unblockAll(),
   },
   onProfileSave: (p) => {
     store.saveProfile(p);

@@ -26,10 +26,8 @@ import {
 import type { Look } from '../look';
 import type { Commit, PeerState } from '../net/types';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
-import { $, badgeText, h } from './dom';
+import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
-import type { DmView } from '../dm/controller';
-import { DmPanel, type DmPanelHandlers } from './dmPanel';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
   type Profile,
@@ -80,8 +78,6 @@ export interface UIHandlers {
   onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId, password: string): Promise<string | null>;
   /** 입장 버튼을 눌렀을 때, 입장 화면을 닫기 전에 불러요. 비밀번호 방이면 비밀번호를 확인하고, 못 들어가면 false */
   onUnlockRoom(): Promise<boolean>;
-  /** 1:1 채팅: 사람을 눌러 요청하고(onStart), 받은 요청에 답하고, 말을 보내요 */
-  dm: DmPanelHandlers & { onStart(id: string): void };
 }
 
 export class UI {
@@ -106,24 +102,8 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
-  private chatPaneRoom!: HTMLElement;
-  private chatTabRoom!: HTMLButtonElement;
-  private chatTabDm!: HTMLButtonElement;
-  private chatTabDmDot!: HTMLElement;
-  private chatTab: 'room' | 'dm' = 'room';
-  /** 방 채팅에 안 읽은 글이 있는지. 1:1은 dmAttention이 따로 세요 */
-  private roomUnread = false;
-  private dmAttention = 0;
-  /** 비밀번호 방과 1:1 채팅을 쓸 수 있는지 (실시간 모드에서만) */
-  private privateOk = false;
-  private dmPanel = new DmPanel({
-    onAccept: (k) => this.h.dm.onAccept(k),
-    onDecline: (k, block) => this.h.dm.onDecline(k, block),
-    onBlock: (k) => this.h.dm.onBlock(k),
-    onClose: (k) => this.h.dm.onClose(k),
-    onSend: (k, t) => this.h.dm.onSend(k, t),
-    onUnblockAll: () => this.h.dm.onUnblockAll(),
-  });
+  /** 비밀번호 방을 만들 수 있는지 (실시간 모드에서만) */
+  private lockRoomOk = false;
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
   /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
   private introWardrobe: Wardrobe | null = null;
@@ -415,9 +395,7 @@ export class UI {
   }
 
   setMode(mode: 'online' | 'demo') {
-    this.privateOk = mode === 'online';
-    this.chatTabDm.hidden = !this.privateOk;
-    if (!this.privateOk) this.setChatTab('room');
+    this.lockRoomOk = mode === 'online';
     const el = $('#mode');
     el.hidden = mode === 'online';
     el.textContent = '데모 모드 · 지금은 봇들이랑 있어요';
@@ -491,27 +469,18 @@ export class UI {
       this.chatInput,
       h('button', { class: 'primary', type: 'submit' }, '보내기'),
     );
-    this.chatPaneRoom = h('div', { class: 'chat-pane' }, h('p', { class: 'chat-hint' }, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'), this.chatLog, this.chatErr, form);
-    this.chatTabRoom = h('button', { type: 'button', role: 'tab', class: 'chat-tab on', 'aria-selected': 'true', onclick: () => this.setChatTab('room') }, '방 전체');
-    this.chatTabDmDot = h('b', { class: 'chat-tab-dot', hidden: true }, '0');
-    this.chatTabDm = h('button', { type: 'button', role: 'tab', class: 'chat-tab', 'aria-selected': 'false', hidden: true, onclick: () => this.setChatTab('dm') }, '1:1', this.chatTabDmDot);
-    this.dmPanel.el.hidden = true;
-    this.dmPanel.onAttention = (n) => {
-      this.dmAttention = n;
-      this.syncChatDot();
-    };
-    this.dmPanel.onOpenRequest = () => this.showDm();
     this.chatPanel = h(
       'section',
       { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' },
       h(
         'header',
         { class: 'chat-head' },
-        h('div', { class: 'chat-tabs', role: 'tablist' }, this.chatTabRoom, this.chatTabDm),
+        h('p', {}, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'),
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
-      this.chatPaneRoom,
-      this.dmPanel.el,
+      this.chatLog,
+      this.chatErr,
+      form,
     );
     return this.chatPanel;
   }
@@ -528,57 +497,14 @@ export class UI {
     this.hidePop();
     this.chatPanel.hidden = false;
     this.chatBtn.classList.add('open');
-    this.dmPanel.setVisible(this.chatTab === 'dm');
-    if (this.chatTab === 'room') {
-      this.roomUnread = false;
-      window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
-    }
-    this.syncChatDot();
+    this.chatBtn.classList.remove('unread');
+    window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
   }
 
   closeChat() {
     this.chatPanel.hidden = true;
     this.chatBtn.classList.remove('open');
     this.chatInput.blur();
-    this.dmPanel.setVisible(false);
-  }
-
-  /** 채팅 패널의 탭: 방 전체 / 1:1 */
-  private setChatTab(tab: 'room' | 'dm') {
-    this.chatTab = this.privateOk ? tab : 'room';
-    const dm = this.chatTab === 'dm';
-    this.chatPaneRoom.hidden = dm;
-    this.dmPanel.el.hidden = !dm;
-    this.chatTabRoom.classList.toggle('on', !dm);
-    this.chatTabRoom.setAttribute('aria-selected', String(!dm));
-    this.chatTabDm.classList.toggle('on', dm);
-    this.chatTabDm.setAttribute('aria-selected', String(dm));
-    const open = !this.chatPanel.hidden;
-    this.dmPanel.setVisible(open && dm);
-    if (open && !dm) {
-      this.roomUnread = false;
-      window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
-    }
-    this.syncChatDot();
-  }
-
-  /** 💬 버튼과 1:1 탭의 "새 소식" 표시 */
-  private syncChatDot() {
-    this.chatBtn.classList.toggle('unread', this.roomUnread || this.dmAttention > 0);
-    this.chatTabDmDot.hidden = this.dmAttention === 0;
-    this.chatTabDmDot.textContent = badgeText(this.dmAttention);
-  }
-
-  /** 1:1 대화를 보여줘요: 채팅 패널을 열고 1:1 탭으로 */
-  private showDm() {
-    if (!this.entered || !this.privateOk) return;
-    this.setChatTab('dm');
-    if (this.chatPanel.hidden) this.openChat();
-  }
-
-  /** main.ts가 1:1 채팅 컨트롤러에 넘겨줄 화면 */
-  get dmView(): DmView {
-    return this.dmPanel;
   }
 
   /** 입력 칸·버튼·대화상자에 포커스가 없을 때만 Enter로 채팅을 열어요 */
@@ -618,18 +544,14 @@ export class UI {
     while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
     this.chatLog.scrollTop = this.chatLog.scrollHeight;
     // 패널이 닫혀 있으면 새 글이 왔다는 표시만 해둬요
-    if (!line.mine && (this.chatPanel.hidden || this.chatTab !== 'room')) {
-      this.roomUnread = true;
-      this.syncChatDot();
-    }
+    if (!line.mine && this.chatPanel.hidden) this.chatBtn.classList.add('unread');
   }
 
   /** 방을 옮기면 이전 방의 대화는 비워요 */
   clearChat() {
     this.chatLog.replaceChildren();
     this.chatErr.hidden = true;
-    this.roomUnread = false;
-    this.syncChatDot();
+    this.chatBtn.classList.remove('unread');
   }
 
   private async pinChat(text: string, btn: HTMLButtonElement) {
@@ -1015,7 +937,7 @@ export class UI {
           placeBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
-          ...(this.privateOk
+          ...(this.lockRoomOk
             ? [
                 h('label', { for: 'room-pw' }, '🔒 입장 비밀번호 (선택)'),
                 pw,
@@ -1173,7 +1095,7 @@ export class UI {
         },
         h('b', {}, '+'),
         h('span', {}, '새 방 만들기'),
-        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : this.privateOk ? '링크 · 🔒 비밀번호' : '링크로 초대'),
+        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : this.lockRoomOk ? '링크 · 🔒 비밀번호' : '링크로 초대'),
       ),
     );
   }
@@ -1203,19 +1125,6 @@ export class UI {
               },
             },
             '👋 손 흔들기',
-          ),
-      isSelf || !this.privateOk
-        ? null
-        : h(
-            'button',
-            {
-              class: 'ghost',
-              onclick: () => {
-                this.h.dm.onStart(p.id);
-                this.hidePop();
-              },
-            },
-            '💬 1:1 채팅',
           ),
     ];
     el.append(...(rows.filter(Boolean) as Node[]));

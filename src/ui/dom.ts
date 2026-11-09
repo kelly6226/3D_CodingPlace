@@ -18,8 +18,4 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-/** 안 읽은 수를 뱃지에 쓸 글자로. 너무 크면 9+ */
-const BADGE_MAX = 9;
-export const badgeText = (n: number) => (n > BADGE_MAX ? `${BADGE_MAX}+` : String(n));
-
 export const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;

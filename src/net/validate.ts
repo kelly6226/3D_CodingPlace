@@ -8,7 +8,6 @@ import {
   ACT_RECEIVE_GAP_MS,
   CHAT_MAX_LENGTH,
   CHAT_RECEIVE_GAP_MS,
-  DM_EVENT_GAP_MS,
   EMOTES,
   HEX_RE,
   LANGS,
@@ -18,15 +17,9 @@ import {
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskBadWords } from './badwords';
-import type { Commit, DmCipher, NetEvent, PeerState } from './types';
+import type { Commit, NetEvent, PeerState } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
-const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
-const DM_PUBLIC_KEY_RE = /^[A-Za-z0-9_-]{87}$/;
-/** AES-GCM 초기값 12바이트 = base64url 16글자 */
-const DM_IV_RE = /^[A-Za-z0-9_-]{16}$/;
-/** 한 줄 최대 길이(DM_MAX_LENGTH글자, 한글 3바이트 + JSON 틀 + 인증 태그)를 base64url로 늘린 것보다 넉넉하게 */
-const DM_CIPHER_MAX_LENGTH = 1200;
 const HASH_RE = /^[0-9a-f]{7}$/;
 // 제어문자 (줄바꿈, 탭, 방향 바꾸는 유니코드 등)
 // eslint-disable-next-line no-control-regex
@@ -123,16 +116,6 @@ export function cleanEvent(raw: unknown): NetEvent | null {
       const c = cleanCommit(raw.commit);
       return c ? { type: 'commit', commit: c } : null;
     }
-    case 'dm': {
-      const pid = id(raw.id);
-      const to = id(raw.to);
-      if (!pid || !to) return null;
-      if (raw.stage === 'no') return { type: 'dm', id: pid, to, stage: 'no' };
-      if (raw.stage !== 'req' && raw.stage !== 'ok') return null;
-      // 공개 키는 모양이 딱 맞는 것만 받아요 (P-256 공개 키 65바이트 = base64url 87글자)
-      if (typeof raw.key !== 'string' || !DM_PUBLIC_KEY_RE.test(raw.key)) return null;
-      return { type: 'dm', id: pid, to, stage: raw.stage, key: raw.key, name: maskBadWords(text(raw.name, 20)) || '익명의 개발자' };
-    }
     case 'typing':
     case 'coffee': {
       const pid = id(raw.id);
@@ -140,14 +123,6 @@ export function cleanEvent(raw: unknown): NetEvent | null {
     }
   }
   return null;
-}
-
-/** 1:1 채팅 채널로 받은 암호문 한 줄. 풀어서 내용을 검사하는 건 받는 쪽(dm/controller.ts) 몫이에요 */
-export function cleanDmCipher(raw: unknown): DmCipher | null {
-  if (!isObj(raw)) return null;
-  if (typeof raw.iv !== 'string' || !DM_IV_RE.test(raw.iv)) return null;
-  if (typeof raw.ct !== 'string' || raw.ct.length > DM_CIPHER_MAX_LENGTH || !BASE64URL_RE.test(raw.ct)) return null;
-  return { iv: raw.iv, ct: raw.ct };
 }
 
 export function cleanCommit(raw: unknown): Commit | null {
@@ -183,7 +158,6 @@ const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit'>, number> = {
   typing: 250,
   coffee: 2000,
   deploy: 20000,
-  dm: DM_EVENT_GAP_MS,
 };
 
 export class RateLimiter {

@@ -9,12 +9,9 @@
 //
 // 비밀번호 방(가벼운 잠금): 비밀번호에서 나온 값(net/roomKey.ts)을 채널 이름 끝에 붙여서, 비밀번호를 아는 사람끼리만 같은 채널에 모여요.
 //   서버(room_key_ok)에는 확인값만 맡겨요. 로그인은 없어요.
-// 1:1 채팅: 둘만 아는 비밀값(dm/crypto.ts)에서 나온 이름의 채널에서 암호문만 주고받아요. 내용은 저장하지 않아요.
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import {
   BUILTIN_ROOMS,
-  DM_MAX_OPEN,
-  DM_RECEIVE_GAP_MS,
   MAX_INSTANCE,
   PRESENCE_MIN_GAP_MS,
   REJOIN_DELAY_MS,
@@ -26,10 +23,10 @@ import {
   type RoomInfo,
 } from '../config';
 import * as store from '../store';
-import type { Commit, DmCipher, DmHandlers, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
+import type { Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
 import { maskBadWords } from './badwords';
 import { deriveRoomKey } from './roomKey';
-import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanDmCipher, cleanEvent, cleanPeer, text } from './validate';
+import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
 interface RoomRow {
   slug: string;
@@ -76,21 +73,14 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
   };
 };
 
-interface DmChannel {
-  ch: RealtimeChannel;
-  /** 마지막으로 받은 메시지 시각 (너무 빨리 오는 건 버리려고) */
-  lastAt: number;
-}
-
 export class OnlineNet implements Net {
   readonly mode = 'online' as const;
-  readonly canPrivate = true;
+  readonly canLockRooms = true;
   instance = 1;
   room = '';
   private roomPublic = true;
   /** 지금 방이 비밀번호 방인지 */
   private roomLocked = false;
-  private dmChannels = new Map<string, DmChannel>();
   private cap = 20;
   private sb: SupabaseClient;
   private ch: RealtimeChannel | null = null;
@@ -498,58 +488,5 @@ export class OnlineNet implements Net {
     if (data !== true) return 'wrong';
     store.setRoomKey(slug, key);
     return 'ok';
-  }
-
-  // ── 1:1 채팅 ─────────────────────────────────
-  // 채널 이름(topic)은 둘만 아는 비밀값에서 나와서, 이름을 아는 것만으로 들어올 자격이 돼요.
-  async dmOpen(topic: string, h: DmHandlers): Promise<boolean> {
-    if (this.dmChannels.has(topic)) return true;
-    if (this.dmChannels.size >= DM_MAX_OPEN) return false;
-
-    // Presence 키는 내 아바타 id. 나 말고 다른 키가 보이면 상대가 와 있는 거예요
-    const myKey = this.self?.id ?? this.clientId;
-    const ch = this.sb.channel(topic, { config: { broadcast: { self: false }, presence: { key: myKey } } });
-    const entry: DmChannel = { ch, lastAt: 0 };
-    this.dmChannels.set(topic, entry);
-
-    ch.on('broadcast', { event: 'm' }, ({ payload }) => {
-      const c = cleanDmCipher(payload);
-      const now = Date.now();
-      if (!c || now - entry.lastAt < DM_RECEIVE_GAP_MS) return;
-      entry.lastAt = now;
-      h.onMessage(topic, c);
-    });
-    ch.on('presence', { event: 'sync' }, () => h.onPresence(topic, Object.keys(ch.presenceState()).some((k) => k !== myKey)));
-
-    return new Promise<boolean>((resolve) => {
-      ch.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          warnIfTrackFailed(await this.trackAndRecordTime(ch, { at: Date.now() }));
-          resolve(true);
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          // 직접 닫은 경우(dmClose)는 이미 목록에서 빠져 있어서 여기로 안 와요
-          if (this.dmChannels.get(topic) === entry) {
-            this.dmChannels.delete(topic);
-            void this.sb.removeChannel(ch);
-            h.onClosed(topic);
-          }
-          resolve(false);
-        }
-      });
-    });
-  }
-
-  dmSend(topic: string, c: DmCipher): boolean {
-    const entry = this.dmChannels.get(topic);
-    if (!entry) return false;
-    void entry.ch.send({ type: 'broadcast', event: 'm', payload: c });
-    return true;
-  }
-
-  dmClose(topic: string) {
-    const entry = this.dmChannels.get(topic);
-    if (!entry) return;
-    this.dmChannels.delete(topic);
-    void this.sb.removeChannel(entry.ch);
   }
 }

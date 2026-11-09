@@ -40,41 +40,7 @@ export type NetEvent =
   | { type: 'chat'; id: string; text: string }
   | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
-  | { type: 'coffee'; id: string }
-  | DmEvent;
-
-/**
- * 1:1 채팅을 시작하는 약속. 방 채널(모두가 받는 곳)로 오가지만 대화 내용은 안 실려요.
- *   req: 나랑 1:1로 얘기해요 (내 공개 키와 이름)  →  ok: 좋아요 (내 공개 키)  /  no: 안 할래요
- * 서로의 공개 키로 둘만 아는 비밀값을 만들고, 거기서 나온 채널 이름·암호 키로 대화해요 (dm/crypto.ts).
- * 이 이벤트의 id는 방 안의 아바타 id라서 믿을 수 없어요. 그래서 두 화면에 같은 확인 코드가 뜨는지 비교할 수 있게 했어요.
- */
-export type DmStage = 'req' | 'ok' | 'no';
-export interface DmEvent {
-  type: 'dm';
-  /** 보낸 사람의 아바타 id */
-  id: string;
-  /** 받는 사람의 아바타 id */
-  to: string;
-  stage: DmStage;
-  /** 보낸 사람의 공개 키 (base64url). req·ok에만 있어요 */
-  key?: string;
-  name?: string;
-}
-
-/** 암호화된 1:1 채팅 한 줄 (둘 다 base64url). 서버와 같은 방 사람들은 이것만 봐요 */
-export interface DmCipher {
-  iv: string;
-  ct: string;
-}
-
-export interface DmHandlers {
-  onMessage(topic: string, c: DmCipher): void;
-  /** 상대가 이 대화에 들어와 있는지가 바뀔 때 */
-  onPresence(topic: string, online: boolean): void;
-  /** 연결이 끊겨서 이 대화를 더 못 쓸 때 */
-  onClosed(topic: string): void;
-}
+  | { type: 'coffee'; id: string };
 
 export type JoinResult = 'ok' | 'wrong' | 'error';
 
@@ -98,8 +64,8 @@ export interface NewRoom {
 
 export interface Net {
   readonly mode: 'online' | 'demo';
-  /** 비밀번호 방과 1:1 채팅을 쓸 수 있는지 (실시간 서버에 연결된 모드에서만) */
-  readonly canPrivate: boolean;
+  /** 비밀번호 방을 만들 수 있는지 (실시간 서버에 연결된 모드에서만) */
+  readonly canLockRooms: boolean;
   readonly instance: number;
   /** 지금 들어가 있는 방 */
   readonly room: string;
@@ -128,11 +94,4 @@ export interface Net {
   hasRoomAccess(room: RoomInfo): Promise<boolean>;
   /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
   joinRoom(slug: string, password: string): Promise<JoinResult>;
-
-  // ── 1:1 채팅 ───────────────────────────────────
-  /** 이 이름의 채널을 열어요(이름은 둘만 알아요). 열었으면 true */
-  dmOpen(topic: string, h: DmHandlers): Promise<boolean>;
-  /** 보냈으면 true (채널이 안 열려 있으면 false) */
-  dmSend(topic: string, c: DmCipher): boolean;
-  dmClose(topic: string): void;
 }
