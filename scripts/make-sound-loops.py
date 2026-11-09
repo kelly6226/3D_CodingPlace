@@ -5,7 +5,7 @@ import numpy as np, subprocess, json, os
 R='sounds-raw'; O='public/sounds'; os.makedirs(O,exist_ok=True)
 SR=44100; XF=4.0
 # 소리별로 고른 구간(시작초, 길이초): 큰 돌발음이 적은 곳
-WIN={'cafe':(104,46),'typing':(2,60),'fire':(60,60),'fireplace':(2,60),'forest':(30,60),
+WIN={'cafe':(104,46),'typing':(2,60),'fire':(37,60),'fireplace':(59,60),'forest':(30,60),
      'library':(96,60),'night':(18,60),'ocean':(40,60),'rain':(125,55),'stream':(2,50),'clock':(2,58)}
 def load(n):
     raw=subprocess.run(['ffmpeg','-v','error','-i',f'{R}/{n}.mp3','-ac','1','-ar',str(SR),'-f','f32le','-'],capture_output=True).stdout
