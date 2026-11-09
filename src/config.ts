@@ -280,6 +280,8 @@ export interface RoomInfo {
   name: string;
   tags: string[];
   isPublic: boolean;
+  /** 비밀번호를 맞힌 사람만 들어오는 방인지. 목록에는 보이되 🔒로 구분해요 */
+  hasPassword?: boolean;
   /** 어느 장소인지 (PLACES의 id) */
   place: PlaceId;
   /** 방에 처음 들어온 사람이 듣는 배경 소리 (NOISES의 id). 각자 바꿀 수 있어요 */
@@ -330,6 +332,9 @@ export const BUILTIN_ROOMS: RoomInfo[] = [
   { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon', noise: DEFAULT_NOISE },
 ];
 
+/** 방 목록·방 이름 옆에 🔒를 붙일지: 링크로만 들어오는 방이거나 비밀번호가 있는 방 */
+export const isLockedRoom = (r: Pick<RoomInfo, 'isPublic' | 'hasPassword'>) => !r.isPublic || !!r.hasPassword;
+
 export const DEFAULT_ROOM = 'pangyo';
 export const ROOM_SLUG_RE = /^[a-z0-9-]{3,32}$/;
 
@@ -340,6 +345,21 @@ export function newRoomSlug(): string {
   let s = '';
   for (let i = 0; i < 8; i++) s += abc[Math.floor(Math.random() * abc.length)];
   return s;
+}
+
+// ── 비밀번호 방 ───────────────────────────────────
+// 비밀번호는 브라우저에서 열쇠로 바꿔 쓰고(net/roomKey.ts) 원문은 서버로 가지 않아요.
+// 서버가 틀린 횟수를 세어 막지 않는 가벼운 잠금이라, 맞히기 어렵도록 짧은 건 받지 않아요.
+export const ROOM_PASSWORD_MIN_LENGTH = 6;
+export const ROOM_PASSWORD_MAX_LENGTH = 40;
+
+/** 비밀번호에 문제가 있으면 이유를 돌려줘요 */
+export function roomPasswordProblem(pw: string): string | null {
+  if (pw.trim() === '') return '비밀번호를 적어주세요.';
+  const length = [...pw].length;
+  if (length < ROOM_PASSWORD_MIN_LENGTH) return `비밀번호는 ${ROOM_PASSWORD_MIN_LENGTH}글자 이상이어야 해요.`;
+  if (length > ROOM_PASSWORD_MAX_LENGTH) return `비밀번호는 ${ROOM_PASSWORD_MAX_LENGTH}글자까지 쓸 수 있어요.`;
+  return null;
 }
 
 /** 방 주소: /r/<slug>. 기본 방은 루트에서도 열림 */

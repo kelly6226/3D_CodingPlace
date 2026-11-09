@@ -4,7 +4,16 @@
 // 그래서 Presence·Broadcast로 받은 값은 "믿을 수 없는 입력"으로 보고,
 // 화면에 그리기 전에 모양·길이·범위를 확인하고 모르는 필드는 버려요.
 // (DB에 저장되는 값은 supabase/schema.sql의 제약조건이 서버에서 한 번 더 막아요)
-import { ACT_RECEIVE_GAP_MS, CHAT_MAX_LENGTH, CHAT_RECEIVE_GAP_MS, EMOTES, HEX_RE, LANGS, STATUSES, actionById } from '../config';
+import {
+  ACT_RECEIVE_GAP_MS,
+  CHAT_MAX_LENGTH,
+  CHAT_RECEIVE_GAP_MS,
+  EMOTES,
+  HEX_RE,
+  LANGS,
+  STATUSES,
+  actionById,
+} from '../config';
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskBadWords } from './badwords';

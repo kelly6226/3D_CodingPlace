@@ -1880,6 +1880,63 @@ button.place-name {
   }
 }
 
+/* ── 방 목록: 열린 방 / 🔒 방 구분 ─────────────────── */
+.room-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 4px 4px;
+  font-size: 12.5px;
+}
+.room-group:first-child {
+  padding-top: 2px;
+}
+.room-group b {
+  color: var(--fg);
+}
+.room-group small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.room-group.locked b {
+  color: var(--amber);
+}
+.room-item.locked {
+  border-left: 3px solid rgba(242, 180, 90, 0.55);
+  background: rgba(242, 180, 90, 0.04);
+}
+.room-item.locked:hover {
+  background: rgba(242, 180, 90, 0.1);
+}
+.tag.lock {
+  color: var(--amber);
+  border-color: rgba(242, 180, 90, 0.45);
+  background: rgba(242, 180, 90, 0.1);
+}
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pw-ask input {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0a0d16;
+  color: var(--fg);
+  font-size: 15px;
+  outline: 0;
+}
+.pw-ask input:focus {
+  border-color: var(--amber);
+}
+.pw-ask .err {
+  margin: 8px 0 0;
+}
+
 /* ── 모바일 키보드가 올라왔을 때 (src/ui/viewport.ts) ──────
    하단 바와 안내는 지금 필요 없어서 숨기고, 채팅 입력란은 키보드 바로 위에 붙여요 */
 .kb-open .actions,

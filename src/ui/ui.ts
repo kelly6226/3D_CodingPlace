@@ -10,8 +10,10 @@ import {
   NOISES,
   PLACES,
   PRIVATE_ROOMS_ENABLED,
+  ROOM_PASSWORD_MIN_LENGTH,
   ROOM_TAGS,
   STATUSES,
+  isLockedRoom,
   langById,
   placeMeta,
   roomUrl,
@@ -38,6 +40,8 @@ import {
 const CHAT_LOG_MAX = 30;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const CHAT_FOCUS_DELAY_MS = 30;
+/** 대화상자가 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
+const MODAL_FOCUS_DELAY_MS = 30;
 
 export interface ChatLine {
   name: string;
@@ -84,8 +88,10 @@ export interface UIHandlers {
   onFocusPeer(id: string): void;
   /** 방 고르기: 입장 전이면 선택만, 입장 후면 그 방으로 이동 */
   onPickRoom(slug: string): void;
-  /** 새 방 만들기. 실패하면 이유를 돌려줌 */
+  /** 새 방 만들기. password가 비어 있지 않으면 비밀번호 방이에요. 실패하면 이유를 돌려줌 */
   onCreateRoom(draft: RoomDraft): Promise<string | null>;
+  /** 입장 버튼을 눌렀을 때, 입장 화면을 닫기 전에 불러요. 비밀번호 방이면 비밀번호를 확인하고, 못 들어가면 false */
+  onUnlockRoom(): Promise<boolean>;
 }
 
 export class UI {
@@ -111,6 +117,8 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  /** 비밀번호 방을 만들 수 있는지 (실시간 모드에서만) */
+  private lockRoomOk = false;
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
   /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
   private introWardrobe: Wardrobe | null = null;
@@ -238,9 +246,14 @@ export class UI {
       'form',
       {
         class: 'intro-card',
-        onsubmit: (e: Event) => {
+        onsubmit: async (e: Event) => {
           e.preventDefault();
           if (btn.disabled) return;
+          // 비밀번호 방이면 입장 화면을 닫기 전에 비밀번호부터 확인해요 (못 들어가면 여기 그대로)
+          btn.disabled = true;
+          const unlocked = await this.h.onUnlockRoom();
+          btn.disabled = false;
+          if (!unlocked) return;
           p.name = nick.value.trim().slice(0, 12) || p.name;
           p.lang = lang.value;
           this.introWardrobe?.close();
@@ -301,11 +314,12 @@ export class UI {
         h(
           'div',
           { class: 'ir-main' },
-          h('b', {}, r.isPublic ? '' : '🔒 ', r.name),
+          h('b', {}, isLockedRoom(r) ? '🔒 ' : '', r.name),
           h(
             'span',
             { class: 'ir-meta' },
             r.name === placeMeta(r.place).name ? null : this.placeChip(r.place),
+            r.hasPassword ? h('span', { class: 'tag lock' }, '입장할 때 비밀번호가 필요해요') : null,
             ...this.tagChips(r.tags),
             r.isPublic && n !== undefined ? h('span', { class: 'cnt' + (n ? ' on' : '') }, n ? `● ${n}명` : '비어 있음') : null,
           ),
@@ -358,7 +372,7 @@ export class UI {
     this.room = r;
     if (invited !== undefined) this.invited = invited;
     $('#room-name').textContent = r.name;
-    $('#room-lock').hidden = r.isPublic;
+    $('#room-lock').hidden = !isLockedRoom(r);
     const kicker = document.getElementById('intro-kicker');
     if (kicker) kicker.textContent = placeMeta(r.place).tagline;
     this.paintUse();
@@ -397,6 +411,7 @@ export class UI {
   }
 
   setMode(mode: 'online' | 'demo') {
+    this.lockRoomOk = mode === 'online';
     const el = $('#mode');
     el.hidden = mode === 'online';
     el.textContent = '데모 모드 · 지금은 봇들이랑 있어요';
@@ -975,6 +990,7 @@ export class UI {
       paintNoises();
       const pub = h('input', { type: 'radio', name: 'vis', id: 'vis-pub', value: 'pub', checked: true });
       const priv = h('input', { type: 'radio', name: 'vis', id: 'vis-priv', value: 'priv' });
+      const pw = h('input', { id: 'room-pw', type: 'password', maxlength: 40, placeholder: '비워 두면 누구나 들어와요', autocomplete: 'new-password', spellcheck: 'false' });
       const err = h('p', { class: 'err', hidden: true });
       const submit = h('button', { class: 'primary wide', type: 'submit' }, '방 만들기');
       el.append(
@@ -991,7 +1007,7 @@ export class UI {
                 return;
               }
               submit.disabled = true;
-              const problem = await this.h.onCreateRoom({ name: n, tags: [...picked], isPublic: pub.checked, place, noise });
+              const problem = await this.h.onCreateRoom({ name: n, tags: [...picked], isPublic: pub.checked, place, noise, password: pw.value });
               submit.disabled = false;
               if (problem) {
                 err.hidden = false;
@@ -1009,6 +1025,17 @@ export class UI {
           noiseBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
+          ...(this.lockRoomOk
+            ? [
+                h('label', { for: 'room-pw' }, '🔒 입장 비밀번호 (선택)'),
+                pw,
+                h(
+                  'small',
+                  { class: 'form-hint' },
+                  `정하면 방 목록에 🔒로 보이고, 비밀번호를 아는 사람끼리 모여요. 가벼운 잠금이라 ${ROOM_PASSWORD_MIN_LENGTH}글자 이상으로 정해 주세요. 만든 뒤에는 바꾸거나 풀 수 없고, 잊어버리면 찾을 수 없어요.`,
+                ),
+              ]
+            : []),
           ...(PRIVATE_ROOMS_ENABLED
             ? [
                 h('span', { class: 'lbl' }, '공개 여부'),
@@ -1057,7 +1084,7 @@ export class UI {
         h(
           'div',
           { class: 'cur-room' },
-          h('div', { class: 'cr-top' }, h('b', {}, cur.isPublic ? '' : '🔒 ', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
+          h('div', { class: 'cr-top' }, h('b', {}, isLockedRoom(cur) ? '🔒 ' : '', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
           h(
             'div',
             { class: 'cr-place' },
@@ -1103,34 +1130,46 @@ export class UI {
     el.append(tagFilter);
     tagFilter.scrollLeft = this.tagFilterScroll;
     enableDragScroll(tagFilter);
-    el.append(
-      h(
-        'ul',
-        { class: 'room-list' },
-        ...(list.length
-          ? list.map((r) => {
-              const n = counts[r.slug] ?? 0;
-              const here = cur?.slug === r.slug;
-              const label = here ? (this.entered ? '지금 여기' : '선택됨') : !r.isPublic ? '비공개' : n ? `● ${n}명` : '비어 있음';
-              return h(
-                'li',
-                {},
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    class: 'room-item' + (here ? ' here' : ''),
-                    onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
-                  },
-                  h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.isPublic ? '' : '🔒 ', r.name),
-                  h('span', { class: 'ri-tags' }, h('span', { class: 'tag place' }, placeMeta(r.place).name), ...this.tagChips(r.tags)),
-                  h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
-                ),
-              );
-            })
-          : [h('li', { class: 'empty' }, '이 주제의 방이 아직 없어요. 하나 만들어볼까요?')]),
-      ),
-    );
+    const roomRow = (r: RoomInfo) => {
+      const n = counts[r.slug] ?? 0;
+      const here = cur?.slug === r.slug;
+      const locked = isLockedRoom(r);
+      const label = roomCountLabel(r, n, here, this.entered);
+      return h(
+        'li',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'room-item' + (here ? ' here' : '') + (locked ? ' locked' : ''),
+            onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
+          },
+          h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.name),
+          h(
+            'span',
+            { class: 'ri-tags' },
+            locked ? h('span', { class: 'tag lock' }, r.hasPassword ? '🔒 비밀번호' : '🔒 링크로만') : null,
+            h('span', { class: 'tag place' }, placeMeta(r.place).name),
+            ...this.tagChips(r.tags),
+          ),
+          h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
+        ),
+      );
+    };
+    const groupHead = (kind: 'open' | 'locked', title: string, sub: string) =>
+      h('li', { class: `room-group ${kind}`, role: 'presentation' }, h('b', {}, title), h('small', {}, sub));
+    // 🔒 방이 하나라도 있으면 "열린 방"과 "🔒 방"으로 나눠서 보여줘요 (거르기 전 전체 기준)
+    const split = this.rooms.some(isLockedRoom);
+    const openRooms = list.filter((r) => !isLockedRoom(r));
+    const lockedRooms = list.filter(isLockedRoom);
+    const rows = split
+      ? [
+          ...(openRooms.length ? [groupHead('open', '열린 방', '누구나 바로 들어와요'), ...openRooms.map(roomRow)] : []),
+          ...(lockedRooms.length ? [groupHead('locked', '🔒 비밀번호 · 비공개 방', '비밀번호를 알거나 링크를 받은 사람만 들어와요'), ...lockedRooms.map(roomRow)] : []),
+        ]
+      : list.map(roomRow);
+    el.append(h('ul', { class: 'room-list' }, ...(rows.length ? rows : [h('li', { class: 'empty' }, '이 주제의 방이 아직 없어요. 하나 만들어볼까요?')])));
     el.append(
       h(
         'button',
@@ -1144,7 +1183,7 @@ export class UI {
         },
         h('b', {}, '+'),
         h('span', {}, '새 방 만들기'),
-        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : '링크로 초대'),
+        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : this.lockRoomOk ? '링크 · 🔒 비밀번호' : '링크로 초대'),
       ),
     );
   }
@@ -1232,12 +1271,84 @@ export class UI {
     });
   }
 
+  /**
+   * 비밀번호 방에 들어가기 전에 비밀번호를 물어봐요.
+   * verify가 이유(글)를 돌려주면 그 자리에서 다시 입력받고, null을 돌려주면 통과예요. 취소하면 false.
+   */
+  askRoomPassword(roomName: string, verify: (password: string) => Promise<string | null>): Promise<boolean> {
+    return new Promise((resolve) => {
+      const m = $('#modal');
+      const done = (v: boolean) => {
+        m.hidden = true;
+        m.innerHTML = '';
+        m.onclick = null;
+        resolve(v);
+      };
+      const input = h('input', { type: 'password', maxlength: 40, placeholder: '비밀번호', autocomplete: 'off', spellcheck: 'false', 'aria-label': '방 비밀번호' });
+      const err = h('p', { class: 'err', hidden: true, role: 'alert' });
+      const cancel = h('button', { class: 'ghost', type: 'button', onclick: () => done(false) }, '취소');
+      const submit = h('button', { class: 'primary', type: 'submit' }, '들어가기');
+      const form = h(
+        'form',
+        {
+          class: 'modal-card pw-ask',
+          role: 'dialog',
+          'aria-label': `${roomName} 비밀번호`,
+          onkeydown: (e: Event) => {
+            if ((e as KeyboardEvent).key === 'Escape') done(false);
+          },
+          onsubmit: async (e: Event) => {
+            e.preventDefault();
+            const value = input.value;
+            if (!value) {
+              input.focus();
+              return;
+            }
+            submit.disabled = true;
+            cancel.disabled = true;
+            input.readOnly = true;
+            const problem = await verify(value);
+            if (!problem) {
+              done(true);
+              return;
+            }
+            err.hidden = false;
+            err.textContent = problem;
+            submit.disabled = false;
+            cancel.disabled = false;
+            input.readOnly = false;
+            input.select();
+          },
+        },
+        h('h2', {}, `🔒 ${roomName}`),
+        h('p', {}, '이 방은 비밀번호를 아는 사람끼리 모이는 방이에요.'),
+        input,
+        err,
+        h('div', { class: 'modal-actions' }, cancel, submit),
+      );
+      m.innerHTML = '';
+      m.append(form);
+      m.onclick = (e) => {
+        if (e.target === m) done(false);
+      };
+      m.hidden = false;
+      window.setTimeout(() => input.focus(), MODAL_FOCUS_DELAY_MS);
+    });
+  }
+
   alarm(text: string, seconds: number) {
     const a = $('#alarm');
     $('#alarm-text').textContent = text;
     a.hidden = false;
     window.setTimeout(() => (a.hidden = true), seconds * 1000);
   }
+}
+
+/** 방 목록 오른쪽 글자: 지금 여기 / 선택됨 / 비공개 / ● 3명 / 비어 있음 */
+function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean): string {
+  if (here) return entered ? '지금 여기' : '선택됨';
+  if (!r.isPublic) return '비공개';
+  return n ? `● ${n}명` : '비어 있음';
 }
 
 /** 얼마나 오래 있었는지: 방금 / 23분 / 1시간 / 1시간 23분 */

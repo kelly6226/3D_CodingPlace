@@ -6,6 +6,9 @@
 //
 // 보안: 채널은 공개라서 받은 값은 전부 validate.ts로 검사하고, 보낸 사람별로 속도를 제한해요.
 // 커밋 알림은 Broadcast 내용을 믿지 않고 DB에서 다시 읽어서 진짜 저장된 것만 보여줘요.
+//
+// 비밀번호 방(가벼운 잠금): 비밀번호에서 나온 값(net/roomKey.ts)을 채널 이름 끝에 붙여서, 비밀번호를 아는 사람끼리만 같은 채널에 모여요.
+//   서버(room_key_ok)에는 확인값만 맡겨요. 로그인은 없어요.
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import {
   BUILTIN_ROOMS,
@@ -21,8 +24,10 @@ import {
   placeMeta,
   type RoomInfo,
 } from '../config';
-import type { Commit, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
+import * as store from '../store';
+import type { Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
 import { maskBadWords } from './badwords';
+import { deriveRoomKey } from './roomKey';
 import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
 
 interface RoomRow {
@@ -34,9 +39,10 @@ interface RoomRow {
   noise: string | null;
   creator: string | null;
   created_at: string;
+  has_password: boolean | null;
 }
 
-const ROOM_COLUMNS = 'slug,name,tags,is_public,place,noise,creator,created_at';
+const ROOM_COLUMNS = 'slug,name,tags,is_public,place,noise,creator,created_at,has_password';
 /** 한 방에서 받아들이는 최대 인원 (가짜 Presence를 잔뜩 띄우는 공격 대비) */
 const MAX_PEERS = 60;
 /** 내 상태가 바뀐 뒤 Presence로 보내기 전에 모아두는 시간 */
@@ -63,6 +69,7 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
     name: maskBadWords(text(r.name, 24)) || r.slug,
     tags: Array.isArray(r.tags) ? r.tags.filter((t) => typeof t === 'string').slice(0, 3) : [],
     isPublic: r.is_public === true,
+    hasPassword: r.has_password === true,
     place: isPlaceId(r.place) ? r.place : 'cafe',
     noise: isNoiseId(r.noise) ? r.noise : DEFAULT_NOISE,
     creator: maskBadWords(text(r.creator, 20)) || undefined,
@@ -72,9 +79,12 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
 
 export class OnlineNet implements Net {
   readonly mode = 'online' as const;
+  readonly canLockRooms = true;
   instance = 1;
   room = '';
   private roomPublic = true;
+  /** 지금 방이 비밀번호 방인지 */
+  private roomLocked = false;
   private cap = 20;
   private sb: SupabaseClient;
   private ch: RealtimeChannel | null = null;
@@ -140,11 +150,17 @@ export class OnlineNet implements Net {
   async createRoom(r: NewRoom): Promise<RoomInfo> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const slug = newRoomSlug();
+      // 비밀번호 방: 방 주소를 소금으로 열쇠를 만들어 확인값만 맡겨요 (원문은 안 보내요)
+      const key = r.password ? await deriveRoomKey(slug, r.password) : null;
       // 비공개 방은 select 권한이 없어서 insert 결과를 돌려받지 않음
       const { error } = await this.sb
         .from('rooms')
-        .insert({ slug, name: r.name, tags: r.tags, is_public: r.isPublic, place: r.place, noise: r.noise, creator: r.creator });
-      if (!error) return { slug, name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, noise: r.noise, creator: r.creator, createdAt: Date.now() };
+        .insert({ slug, name: r.name, tags: r.tags, is_public: r.isPublic, place: r.place, noise: r.noise, creator: r.creator, ...(key && { pw_check: key.check }) });
+      if (!error) {
+        // 만든 사람은 비밀번호를 다시 묻지 않아요
+        if (key) store.setRoomKey(slug, key);
+        return { slug, name: r.name, tags: r.tags, isPublic: r.isPublic, hasPassword: !!key, place: r.place, noise: r.noise, creator: r.creator, createdAt: Date.now() };
+      }
       if (error.code !== '23505') throw new Error(error.message); // 23505 = slug 겹침 → 다시
     }
     throw new Error('방 주소를 만들지 못했어요');
@@ -270,6 +286,7 @@ export class OnlineNet implements Net {
   private setRoom(room: RoomInfo) {
     this.room = room.slug;
     this.roomPublic = room.isPublic;
+    this.roomLocked = room.hasPassword === true;
     this.cap = placeMeta(room.place).cap;
     // 보내려고 기다리던 track은 새 채널이 연결될 때 최신 상태로 나가요
     clearTimeout(this.trackTimer);
@@ -281,11 +298,25 @@ export class OnlineNet implements Net {
     this.pendingCommits.clear();
   }
 
-  private join(): Promise<void> {
+  /** 방 채널 이름. 비밀번호 방은 끝에 열쇠 값이 붙어서, 비밀번호를 모르면 어느 채널인지 알 수 없어요. 열쇠가 없으면 null */
+  private roomTopic(): string | null {
+    const base = `mogakco:${this.room}:${this.instance}`;
+    if (!this.roomLocked) return base;
+    const key = store.getRoomKey(this.room);
+    return key ? `${base}:${key.topic}` : null;
+  }
+
+  private async join(): Promise<void> {
+    const topic = this.roomTopic();
+    if (!topic) {
+      // 비밀번호를 맞히기 전에는 들어올 수 없어요 (화면이 먼저 물어보니까 보통은 여기 안 와요)
+      this.h.onStatus?.('offline');
+      return;
+    }
     return new Promise((resolve) => {
       this.checkedCap = false;
       this.h.onStatus?.('connecting');
-      const ch = this.sb.channel(`mogakco:${this.room}:${this.instance}`, {
+      const ch = this.sb.channel(topic, {
         config: { presence: { key: this.self.id }, broadcast: { self: false } },
       });
       this.ch = ch;
@@ -417,26 +448,49 @@ export class OnlineNet implements Net {
 
   async loadCommits(room: string): Promise<Commit[]> {
     if (!ROOM_SLUG_RE.test(room)) return [];
-    const { data, error } = await this.sb
-      .from('commits')
-      .select('hash,name,msg,lang,created_at')
-      .eq('room', room)
-      .order('created_at', { ascending: false })
-      .limit(30);
+    // 비밀번호 방(이 브라우저에 열쇠가 있는 방)은 표를 직접 못 읽어서 확인값을 실어 함수로 읽어요
+    const key = store.getRoomKey(room);
+    const { data, error } = key
+      ? await this.sb.rpc('locked_commits', { p_slug: room, p_check: key.check })
+      : await this.sb
+          .from('commits')
+          .select('hash,name,msg,lang,created_at')
+          .eq('room', room)
+          .order('created_at', { ascending: false })
+          .limit(30);
     if (error || !data) {
       console.warn('[commits] 불러오기 실패', error?.message);
       return [];
     }
-    return data
-      .map((r) => cleanCommit({ hash: r.hash, name: r.name, msg: r.msg, lang: r.lang ?? '', at: new Date(r.created_at as string).getTime() }))
+    return (data as { hash: string; name: string; msg: string; lang: string | null; created_at: string }[])
+      .map((r) => cleanCommit({ hash: r.hash, name: r.name, msg: r.msg, lang: r.lang ?? '', at: new Date(r.created_at).getTime() }))
       .filter((c): c is Commit => !!c);
   }
 
   async postCommit(c: Commit) {
-    const { error } = await this.sb
-      .from('commits')
-      .insert({ room: this.room, hash: c.hash, name: c.name, msg: c.msg, lang: c.lang });
+    const key = store.getRoomKey(this.room);
+    const { error } = key
+      ? await this.sb.rpc('locked_commit', { p_slug: this.room, p_check: key.check, p_hash: c.hash, p_name: c.name, p_msg: c.msg, p_lang: c.lang })
+      : await this.sb.from('commits').insert({ room: this.room, hash: c.hash, name: c.name, msg: c.msg, lang: c.lang });
     if (error) throw new Error(error.message);
     this.send({ type: 'commit', commit: c });
+  }
+
+  // ── 비밀번호 방 ───────────────────────────────
+  async hasRoomAccess(room: RoomInfo): Promise<boolean> {
+    return !room.hasPassword || store.getRoomKey(room.slug) !== null;
+  }
+
+  async joinRoom(slug: string, password: string): Promise<JoinResult> {
+    if (!ROOM_SLUG_RE.test(slug)) return 'error';
+    const key = await deriveRoomKey(slug, password);
+    const { data, error } = await this.sb.rpc('room_key_ok', { p_slug: slug, p_check: key.check });
+    if (error) {
+      console.warn('[rooms] 비밀번호 확인 실패', error.message);
+      return 'error';
+    }
+    if (data !== true) return 'wrong';
+    store.setRoomKey(slug, key);
+    return 'ok';
   }
 }

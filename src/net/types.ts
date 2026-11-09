@@ -42,6 +42,8 @@ export type NetEvent =
   | { type: 'typing'; id: string }
   | { type: 'coffee'; id: string };
 
+export type JoinResult = 'ok' | 'wrong' | 'error';
+
 export interface NetHandlers {
   /** 지금 방에 있는 사람 전체(나 제외). 들어오고 나갈 때마다 호출 */
   onPeers(peers: PeerState[]): void;
@@ -57,10 +59,14 @@ export interface NewRoom {
   place: PlaceId;
   noise: NoiseId;
   creator: string;
+  /** 정하면 비밀번호 방이 돼요 */
+  password?: string;
 }
 
 export interface Net {
   readonly mode: 'online' | 'demo';
+  /** 비밀번호 방을 만들 수 있는지 (실시간 서버에 연결된 모드에서만) */
+  readonly canLockRooms: boolean;
   readonly instance: number;
   /** 지금 들어가 있는 방 */
   readonly room: string;
@@ -83,4 +89,10 @@ export interface Net {
   send(e: NetEvent): void;
   loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
+
+  // ── 비밀번호 방 ────────────────────────────────
+  /** 이 방에 들어갈 수 있는지: 비밀번호가 없는 방이거나, 이 브라우저에서 이미 비밀번호를 맞힌 방 */
+  hasRoomAccess(room: RoomInfo): Promise<boolean>;
+  /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
+  joinRoom(slug: string, password: string): Promise<JoinResult>;
 }
