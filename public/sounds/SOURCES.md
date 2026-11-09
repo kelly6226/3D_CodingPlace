@@ -7,7 +7,7 @@
 
 | 파일 | 원본 | 올린 사람 |
 |---|---|---|
-| fire.mp3 | [Nighttime Bonfire 2](https://freesound.org/people/samararaine/sounds/187079/) | samararaine |
+| fire.mp3 | [Campfire (Position 1)](https://freesound.org/people/SKrafft/sounds/681366/) | SKrafft |
 | fireplace.mp3 | [Fireplace crackling wood little flame](https://freesound.org/people/BonnyOrbit/sounds/484338/) | BonnyOrbit |
 | rain.mp3 | [Rain ambience](https://freesound.org/people/SoundDesigner0101/sounds/765980/) | SoundDesigner0101 |
 | ocean.mp3 | [Ocean Waves on Beach](https://freesound.org/people/goochiano/sounds/623052/) | goochiano |
