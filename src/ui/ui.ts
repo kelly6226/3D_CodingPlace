@@ -3,9 +3,11 @@ import {
   ACTIONS,
   CHAT_MAX_LENGTH,
   COMMIT_TYPES,
+  DEFAULT_NOISE,
   EMOTES,
   FEEDBACK_URL,
   LANGS,
+  NOISES,
   PLACES,
   PRIVATE_ROOMS_ENABLED,
   ROOM_TAGS,
@@ -16,13 +18,14 @@ import {
   statusById,
   tagLabel,
   type ActionId,
+  type NoiseId,
   type PlaceId,
   type RoomInfo,
   type ViewCommand,
   type ViewState,
 } from '../config';
 import type { Look } from '../look';
-import type { Commit, PeerState } from '../net/types';
+import type { Commit, NewRoom, PeerState } from '../net/types';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
@@ -43,7 +46,16 @@ export interface ChatLine {
   mine: boolean;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise';
+
+/** 방 만들기 화면에서 고른 것 (만든 사람 이름은 main.ts가 채워요) */
+export type RoomDraft = Omit<NewRoom, 'creator'>;
+
+/** 배경 소리 시트에 보여줄 것: 지금 듣는 소리와 이 방의 기본값 */
+export interface NoiseState {
+  current: NoiseId;
+  roomDefault: NoiseId;
+}
 
 export interface UIHandlers {
   onEnter(p: Profile): void;
@@ -62,6 +74,8 @@ export interface UIHandlers {
   /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
   onChatPin(text: string): Promise<string | null>;
   onSound(on: boolean): void;
+  /** 이 방에서 나만 들을 배경 소리 고르기 */
+  onNoise(id: NoiseId): void;
   onShare(): void;
   /** 시점 버튼: 내 캐릭터 따라 보기 / 방 전체 보기 */
   onView(cmd: ViewCommand): void;
@@ -71,7 +85,7 @@ export interface UIHandlers {
   /** 방 고르기: 입장 전이면 선택만, 입장 후면 그 방으로 이동 */
   onPickRoom(slug: string): void;
   /** 새 방 만들기. 실패하면 이유를 돌려줌 */
-  onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null>;
+  onCreateRoom(draft: RoomDraft): Promise<string | null>;
 }
 
 export class UI {
@@ -82,6 +96,7 @@ export class UI {
   private self!: PeerState;
   private toastBox: HTMLElement;
   private soundOn = true;
+  private noise: NoiseState = { current: 'place', roomDefault: 'place' };
   private rooms: RoomInfo[] = [];
   private counts: Record<string, number> = {};
   private room: RoomInfo | null = null;
@@ -136,6 +151,7 @@ export class UI {
         'div',
         { class: 'hud hud-tools' },
         h('button', { class: 'icon-btn', id: 'sound-btn', onclick: () => this.toggleSound(), 'aria-label': '소리 켜고 끄기' }, '🔊'),
+        h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
         h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '⚙️'),
       ),
@@ -426,6 +442,49 @@ export class UI {
   private toggleSound() {
     this.setSound(!this.soundOn);
     this.h.onSound(this.soundOn);
+    // 배경 소리 시트의 '소리가 꺼져 있어요' 줄을 맞춰요
+    if (this.sheet === 'noise') this.renderSheet();
+  }
+
+  setNoise(state: NoiseState) {
+    this.noise = state;
+    if (this.sheet === 'noise') this.renderSheet();
+  }
+
+  private renderNoise(el: HTMLElement, head: (title: string, sub?: string) => HTMLElement) {
+    const { current, roomDefault } = this.noise;
+    el.append(head('배경 소리', '나에게만 들려요. 방마다 고른 소리를 이 브라우저에 기억해요'));
+    if (!this.soundOn) {
+      el.append(
+        h(
+          'div',
+          { class: 'noise-muted' },
+          h('span', {}, '🔈 소리가 꺼져 있어요'),
+          h('button', { type: 'button', class: 'chip-sm on', onclick: () => this.toggleSound() }, '소리 켜기'),
+        ),
+      );
+    }
+    el.append(
+      h(
+        'div',
+        { class: 'grid', role: 'radiogroup', 'aria-label': '배경 소리' },
+        ...NOISES.map((n) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              role: 'radio',
+              'aria-checked': String(n.id === current),
+              class: 'chip' + (n.id === current ? ' on' : ''),
+              onclick: () => this.h.onNoise(n.id),
+            },
+            h('span', { class: 'e' }, n.emoji),
+            n.name,
+            n.id === roomDefault ? h('small', { class: 'noise-default' }, '방 기본') : null,
+          ),
+        ),
+      ),
+    );
   }
 
   // ── 커밋 ───────────────────────────────────────
@@ -603,6 +662,10 @@ export class UI {
     switch (this.sheet) {
       case 'rooms': {
         this.renderRooms(el, head);
+        break;
+      }
+      case 'noise': {
+        this.renderNoise(el, head);
         break;
       }
       case 'status': {
@@ -887,6 +950,29 @@ export class UI {
         );
       };
       paintPlaces();
+      let noise: NoiseId = DEFAULT_NOISE;
+      const noiseBox = h('div', { class: 'tag-pick', role: 'radiogroup', 'aria-label': '배경 소리' });
+      const paintNoises = () => {
+        noiseBox.replaceChildren(
+          ...NOISES.map((n) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String(n.id === noise),
+                class: 'chip-sm' + (n.id === noise ? ' on' : ''),
+                onclick: () => {
+                  noise = n.id;
+                  paintNoises();
+                },
+              },
+              `${n.emoji} ${n.name}`,
+            ),
+          ),
+        );
+      };
+      paintNoises();
       const pub = h('input', { type: 'radio', name: 'vis', id: 'vis-pub', value: 'pub', checked: true });
       const priv = h('input', { type: 'radio', name: 'vis', id: 'vis-priv', value: 'priv' });
       const err = h('p', { class: 'err', hidden: true });
@@ -905,7 +991,7 @@ export class UI {
                 return;
               }
               submit.disabled = true;
-              const problem = await this.h.onCreateRoom(n, [...picked], pub.checked, place);
+              const problem = await this.h.onCreateRoom({ name: n, tags: [...picked], isPublic: pub.checked, place, noise });
               submit.disabled = false;
               if (problem) {
                 err.hidden = false;
@@ -919,6 +1005,8 @@ export class UI {
           name,
           h('span', { class: 'lbl' }, '장소'),
           placeBox,
+          h('span', { class: 'lbl' }, '배경 소리 (들어온 사람이 각자 바꿀 수 있어요)'),
+          noiseBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
           ...(PRIVATE_ROOMS_ENABLED

@@ -282,18 +282,52 @@ export interface RoomInfo {
   isPublic: boolean;
   /** 어느 장소인지 (PLACES의 id) */
   place: PlaceId;
+  /** 방에 처음 들어온 사람이 듣는 배경 소리 (NOISES의 id). 각자 바꿀 수 있어요 */
+  noise: NoiseId;
   builtin?: boolean;
   creator?: string;
   createdAt?: number;
 }
 
+// ── 배경 소리 (백색소음) ──────────────────────────
+// 맥 '배경 사운드'(설정 → 손쉬운 사용 → 오디오)의 macOS Sequoia 목록 8개를 참고했어요.
+// 애플 녹음 파일을 쓰는 게 아니라 audio.ts에서 Web Audio로 비슷하게 합성해요.
+// id는 supabase/schema.sql의 rooms_noise_check와 같아야 해요.
+
+export type NoiseId = 'place' | 'off' | 'balanced' | 'bright' | 'dark' | 'ocean' | 'rain' | 'stream' | 'night' | 'fire';
+
+export interface NoiseMeta {
+  id: NoiseId;
+  emoji: string;
+  name: string;
+}
+
+export const NOISES: NoiseMeta[] = [
+  { id: 'place', emoji: '🏠', name: '장소 소리' },
+  { id: 'balanced', emoji: '〰️', name: '균형 잡힌 소음' },
+  { id: 'bright', emoji: '✨', name: '밝은 소음' },
+  { id: 'dark', emoji: '🌑', name: '어두운 소음' },
+  { id: 'ocean', emoji: '🌊', name: '바다' },
+  { id: 'rain', emoji: '🌧️', name: '비' },
+  { id: 'stream', emoji: '🏞️', name: '시냇물' },
+  { id: 'night', emoji: '🌙', name: '밤' },
+  { id: 'fire', emoji: '🔥', name: '모닥불' },
+  { id: 'off', emoji: '🔇', name: '없음' },
+];
+
+/** 장소마다 원래 있던 소리(빗소리·웅성임·팬). 예전에 만든 방과 기본 방은 이걸 써요 */
+export const DEFAULT_NOISE: NoiseId = 'place';
+
+export const noiseMeta = (id?: string | null): NoiseMeta => NOISES.find((n) => n.id === id) ?? NOISES[0];
+export const isNoiseId = (id: unknown): id is NoiseId => NOISES.some((n) => n.id === id);
+
 /** 처음부터 있는 방들. DB에 없어도 늘 목록에 떠요 */
 export const BUILTIN_ROOMS: RoomInfo[] = [
-  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true, place: 'cafe' },
-  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true, place: 'cafe' },
-  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true, place: 'serverroom' },
-  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true, place: 'studio' },
-  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon' },
+  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true, place: 'cafe', noise: DEFAULT_NOISE },
+  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true, place: 'cafe', noise: DEFAULT_NOISE },
+  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true, place: 'serverroom', noise: DEFAULT_NOISE },
+  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true, place: 'studio', noise: DEFAULT_NOISE },
+  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon', noise: DEFAULT_NOISE },
 ];
 
 export const DEFAULT_ROOM = 'pangyo';

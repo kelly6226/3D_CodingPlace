@@ -5,6 +5,7 @@ import {
   BOT_COMMITS,
   BUILTIN_ROOMS,
   DEFAULT_NAMES,
+  DEFAULT_NOISE,
   EMOTES,
   HAIR_COLORS,
   HOODIE_COLORS,
@@ -12,6 +13,7 @@ import {
   SKIN_TONES,
   STATUSES,
   builtinRoom,
+  isNoiseId,
   isPlaceId,
   newRoomSlug,
   placeMeta,
@@ -52,8 +54,12 @@ export class DemoNet implements Net {
 
   // ── 방 목록 (이 브라우저에만 저장) ────────────────
   private savedRooms(): RoomInfo[] {
-    // 예전에 저장한 방에는 place가 없을 수 있어서 카페로 채움
-    return getDemoRooms<RoomInfo>().map((r) => ({ ...r, place: isPlaceId(r.place) ? r.place : 'cafe' }));
+    // 예전에 저장한 방에는 place·noise가 없을 수 있어서 카페와 장소 소리로 채움
+    return getDemoRooms<RoomInfo>().map((r) => ({
+      ...r,
+      place: isPlaceId(r.place) ? r.place : 'cafe',
+      noise: isNoiseId(r.noise) ? r.noise : DEFAULT_NOISE,
+    }));
   }
 
   async listRooms(): Promise<RoomInfo[]> {
@@ -65,7 +71,7 @@ export class DemoNet implements Net {
   }
 
   async createRoom(r: NewRoom): Promise<RoomInfo> {
-    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, creator: r.creator, createdAt: Date.now() };
+    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, noise: r.noise, creator: r.creator, createdAt: Date.now() };
     setDemoRooms([room, ...this.savedRooms()]);
     return room;
   }

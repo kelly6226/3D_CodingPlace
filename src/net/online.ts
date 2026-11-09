@@ -9,11 +9,13 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import {
   BUILTIN_ROOMS,
+  DEFAULT_NOISE,
   MAX_INSTANCE,
   PRESENCE_MIN_GAP_MS,
   REJOIN_DELAY_MS,
   ROOM_SLUG_RE,
   builtinRoom,
+  isNoiseId,
   isPlaceId,
   newRoomSlug,
   placeMeta,
@@ -29,11 +31,12 @@ interface RoomRow {
   tags: string[] | null;
   is_public: boolean;
   place: string | null;
+  noise: string | null;
   creator: string | null;
   created_at: string;
 }
 
-const ROOM_COLUMNS = 'slug,name,tags,is_public,place,creator,created_at';
+const ROOM_COLUMNS = 'slug,name,tags,is_public,place,noise,creator,created_at';
 /** 한 방에서 받아들이는 최대 인원 (가짜 Presence를 잔뜩 띄우는 공격 대비) */
 const MAX_PEERS = 60;
 /** 내 상태가 바뀐 뒤 Presence로 보내기 전에 모아두는 시간 */
@@ -61,6 +64,7 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
     tags: Array.isArray(r.tags) ? r.tags.filter((t) => typeof t === 'string').slice(0, 3) : [],
     isPublic: r.is_public === true,
     place: isPlaceId(r.place) ? r.place : 'cafe',
+    noise: isNoiseId(r.noise) ? r.noise : DEFAULT_NOISE,
     creator: maskBadWords(text(r.creator, 20)) || undefined,
     createdAt: new Date(r.created_at).getTime() || undefined,
   };
@@ -139,8 +143,8 @@ export class OnlineNet implements Net {
       // 비공개 방은 select 권한이 없어서 insert 결과를 돌려받지 않음
       const { error } = await this.sb
         .from('rooms')
-        .insert({ slug, name: r.name, tags: r.tags, is_public: r.isPublic, place: r.place, creator: r.creator });
-      if (!error) return { slug, name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, creator: r.creator, createdAt: Date.now() };
+        .insert({ slug, name: r.name, tags: r.tags, is_public: r.isPublic, place: r.place, noise: r.noise, creator: r.creator });
+      if (!error) return { slug, name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, noise: r.noise, creator: r.creator, createdAt: Date.now() };
       if (error.code !== '23505') throw new Error(error.message); // 23505 = slug 겹침 → 다시
     }
     throw new Error('방 주소를 만들지 못했어요');

@@ -1,4 +1,7 @@
 // 소리는 전부 Web Audio로 합성 (빗소리, 웅성임, 팬 소리, 타자 소리, 사이렌, 꽥, 야옹)
+// 고를 수 있는 배경 소리(백색소음)는 noiseBeds.ts에 있어요.
+import type { NoiseId } from './config';
+import { makeNoiseBuffers, playBed, type NoiseBuffers } from './noiseBeds';
 
 export type Ambience = 'cafe' | 'server' | 'studio' | 'hackathon';
 
@@ -29,6 +32,10 @@ class Sound {
   private mix: { rain: GainNode; hum: GainNode; fan: GainNode } | null = null;
   private amb: Ambience = 'cafe';
   private noise!: AudioBuffer;
+  /** 지금 고른 배경 소리. 'place'면 장소 소리(MIX), 나머지는 noiseBeds.ts */
+  private noiseId: NoiseId = 'place';
+  private bedBuffers: NoiseBuffers | null = null;
+  private stopBed: (() => void) | null = null;
   enabled = true;
 
   /** 사용자가 버튼을 누른 뒤에만 호출 (브라우저 자동재생 정책) */
@@ -54,6 +61,7 @@ class Sound {
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
 
     this.startAmbience();
+    this.playNoiseBed();
   }
 
   setEnabled(on: boolean) {
@@ -138,7 +146,7 @@ class Sound {
     const drip = () => {
       if (!this.ctx) return;
       const m = MIX[this.amb];
-      if (m.drip > 0) this.burst(3000 + Math.random() * 3000, 0.02, 0.025 * Math.random() * m.drip);
+      if (this.noiseId === 'place' && m.drip > 0) this.burst(3000 + Math.random() * 3000, 0.02, 0.025 * Math.random() * m.drip);
       window.setTimeout(drip, 200 + Math.random() * 900);
     };
     drip();
@@ -150,13 +158,32 @@ class Sound {
     this.applyMix(0.8);
   }
 
+  /** 배경 소리 고르기. 'place'는 장소 소리, 'off'는 아무것도 안 깔아요 */
+  setNoise(id: NoiseId) {
+    if (id === this.noiseId) return;
+    this.noiseId = id;
+    this.applyMix(0.3);
+    this.playNoiseBed();
+  }
+
   private applyMix(tc: number) {
     if (!this.ctx || !this.mix) return;
-    const m = MIX[this.amb];
+    // 장소 소리가 아닌 걸 골랐으면 장소 소리는 꺼요 (키보드·커피 같은 효과음은 그대로)
+    const m = this.noiseId === 'place' ? MIX[this.amb] : { rain: 0, hum: 0, fan: 0 };
     const t = this.ctx.currentTime;
     this.mix.rain.gain.setTargetAtTime(m.rain, t, tc);
     this.mix.hum.gain.setTargetAtTime(m.hum, t, tc);
     this.mix.fan.gain.setTargetAtTime(m.fan, t, tc);
+  }
+
+  /** 지금 고른 배경 소리로 갈아끼워요. 소리를 켜기 전(ctx 없음)엔 고른 것만 기억해요 */
+  private playNoiseBed() {
+    this.stopBed?.();
+    this.stopBed = null;
+    const id = this.noiseId;
+    if (!this.ctx || !this.ambience || id === 'place' || id === 'off') return;
+    this.bedBuffers ??= makeNoiseBuffers(this.ctx);
+    this.stopBed = playBed(this.ctx, this.ambience, id, this.bedBuffers);
   }
 
   private burst(freq: number, dur: number, vol: number, type: BiquadFilterType = 'bandpass') {

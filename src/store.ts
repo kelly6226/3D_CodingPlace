@@ -1,5 +1,5 @@
 // 브라우저에만 남는 개인 기록 (프로필, 커피, 소리 설정)
-import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS } from './config';
+import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS, isNoiseId, type NoiseId } from './config';
 import { DEFAULT_OUTFIT, normalizeOutfit, type Outfit } from './look';
 
 const KEY = 'mogakco:v1';
@@ -18,6 +18,8 @@ export interface Profile {
 interface Saved {
   profile?: Profile;
   sound?: boolean;
+  /** 방마다 내가 고른 배경 소리 (방 slug → 소리). 방 기본값과 같으면 지워요 */
+  noise?: Record<string, string>;
   /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
   wardrobeOpened?: boolean;
   coffee?: { date: string; count: number };
@@ -85,6 +87,34 @@ export function getSound(): boolean {
 
 export function setSound(on: boolean) {
   cache.sound = on;
+  persist();
+}
+
+/** 방마다 기억하는 배경 소리는 최근 이만큼만 (오래된 것부터 지움) */
+const MAX_SAVED_NOISES = 50;
+
+/** 이 방에서 내가 고른 배경 소리. 고른 적 없으면 null (방 기본값을 써요) */
+export function getRoomNoise(slug: string): NoiseId | null {
+  const id = cache.noise?.[slug];
+  return isNoiseId(id) ? id : null;
+}
+
+export function setRoomNoise(slug: string, id: NoiseId) {
+  const saved = { ...cache.noise };
+  // 지웠다 다시 넣어서 '최근에 고른 방'이 맨 뒤로 가게 해요
+  delete saved[slug];
+  saved[slug] = id;
+  const slugs = Object.keys(saved);
+  for (const old of slugs.slice(0, Math.max(0, slugs.length - MAX_SAVED_NOISES))) delete saved[old];
+  cache.noise = saved;
+  persist();
+}
+
+export function clearRoomNoise(slug: string) {
+  if (!cache.noise || !(slug in cache.noise)) return;
+  const saved = { ...cache.noise };
+  delete saved[slug];
+  cache.noise = saved;
   persist();
 }
 
