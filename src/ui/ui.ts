@@ -1,28 +1,36 @@
 // 화면 위 UI (HUD, 하단 액션바, 시트, 토스트)
 import {
   ACTIONS,
+  BUILTIN_ROOMS,
   CHAT_MAX_LENGTH,
   COMMIT_TYPES,
+  DEFAULT_NOISE,
   EMOTES,
   FEEDBACK_URL,
   LANGS,
+  NOISE_GROUPS,
+  NOISES,
   PLACES,
   PRIVATE_ROOMS_ENABLED,
+  ROOM_PASSWORD_MIN_LENGTH,
   ROOM_TAGS,
   SITE,
   STATUSES,
+  isLockedRoom,
   langById,
   placeMeta,
   statusById,
   tagLabel,
   type ActionId,
+  type NoiseId,
   type PlaceId,
   type RoomInfo,
   type ViewCommand,
   type ViewState,
 } from '../config';
 import type { Look } from '../look';
-import type { Commit, PeerState } from '../net/types';
+import type { Commit, NewRoom, PeerState } from '../net/types';
+import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
 import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
@@ -36,6 +44,8 @@ import {
 const CHAT_LOG_MAX = 30;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const CHAT_FOCUS_DELAY_MS = 30;
+/** 대화상자가 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
+const MODAL_FOCUS_DELAY_MS = 30;
 
 export interface ChatLine {
   name: string;
@@ -44,7 +54,16 @@ export interface ChatLine {
   mine: boolean;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'privacy';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'privacy';
+
+/** 방 만들기 화면에서 고른 것 (만든 사람 이름은 main.ts가 채워요) */
+export type RoomDraft = Omit<NewRoom, 'creator'>;
+
+/** 배경 소리 시트에 보여줄 것: 지금 듣는 소리와 이 방의 기본값 */
+export interface NoiseState {
+  current: NoiseId;
+  roomDefault: NoiseId;
+}
 
 export interface UIHandlers {
   onEnter(p: Profile): void;
@@ -63,16 +82,24 @@ export interface UIHandlers {
   /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
   onChatPin(text: string): Promise<string | null>;
   onSound(on: boolean): void;
+  /** 이 방에서 나만 들을 배경 소리 고르기 */
+  onNoise(id: NoiseId): void;
   onShare(): void;
   /** 시점 버튼: 내 캐릭터 따라 보기 / 방 전체 보기 */
   onView(cmd: ViewCommand): void;
   onProfileSave(p: Profile): void;
   onWave(id: string): void;
+  /** ⚙️의 '처음 안내 다시 보기' */
+  onReplayTips(): void;
+  /** 커밋 신고 버튼을 눌렀을 때 (확인 창은 main.ts가 띄워요) */
+  onReportCommit(c: Commit): void;
   onFocusPeer(id: string): void;
   /** 방 고르기: 입장 전이면 선택만, 입장 후면 그 방으로 이동 */
   onPickRoom(slug: string): void;
-  /** 새 방 만들기. 실패하면 이유를 돌려줌 */
-  onCreateRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null>;
+  /** 새 방 만들기. password가 비어 있지 않으면 비밀번호 방이에요. 실패하면 이유를 돌려줌 */
+  onCreateRoom(draft: RoomDraft): Promise<string | null>;
+  /** 입장 버튼을 눌렀을 때, 입장 화면을 닫기 전에 불러요. 비밀번호 방이면 비밀번호를 확인하고, 못 들어가면 false */
+  onUnlockRoom(): Promise<boolean>;
 }
 
 export class UI {
@@ -83,6 +110,11 @@ export class UI {
   private self!: PeerState;
   private toastBox: HTMLElement;
   private soundOn = true;
+  /** 이번에 내가 남긴 커밋 (신고할 수 없어서 줄을 펼치지 않아요) */
+  private myCommits = new Set<string>();
+  /** 방명록에서 펼친 줄(신고 버튼이 보이는 줄)의 해시 */
+  private openCommit: string | null = null;
+  private noise: NoiseState = { current: 'place', roomDefault: 'place' };
   private rooms: RoomInfo[] = [];
   private counts: Record<string, number> = {};
   private room: RoomInfo | null = null;
@@ -97,6 +129,8 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  /** 비밀번호 방을 만들 수 있는지 (실시간 모드에서만) */
+  private lockRoomOk = false;
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
   /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
   private introWardrobe: Wardrobe | null = null;
@@ -137,6 +171,7 @@ export class UI {
         'div',
         { class: 'hud hud-tools' },
         h('button', { class: 'icon-btn', id: 'sound-btn', onclick: () => this.toggleSound(), 'aria-label': '소리 켜고 끄기' }, '🔊'),
+        h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '친구에게 공유' }, '🔗'),
         h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '⚙️'),
       ),
@@ -223,9 +258,15 @@ export class UI {
       'form',
       {
         class: 'intro-card',
-        onsubmit: (e: Event) => {
+        onsubmit: async (e: Event) => {
           e.preventDefault();
           if (btn.disabled) return;
+          if (this.rejectBadNick(nick)) return;
+          // 비밀번호 방이면 입장 화면을 닫기 전에 비밀번호부터 확인해요 (못 들어가면 여기 그대로)
+          btn.disabled = true;
+          const unlocked = await this.h.onUnlockRoom();
+          btn.disabled = false;
+          if (!unlocked) return;
           p.name = nick.value.trim().slice(0, 12) || p.name;
           p.lang = lang.value;
           this.introWardrobe?.close();
@@ -239,6 +280,7 @@ export class UI {
       h('div', { class: 'intro-kicker', id: 'intro-kicker' }, placeMeta(this.room?.place).tagline),
       h('h1', {}, '온라인 모각코'),
       h('p', { class: 'intro-lead' }, '모여서 각자 코딩해요. 빈자리에 앉아 할 일을 하면 돼요.', h('br'), '말은 안 해도 괜찮아요.'),
+      h('div', { class: 'intro-places', id: 'intro-places' }),
       h('div', { class: 'intro-room', id: 'intro-room' }),
       h(
         'div',
@@ -264,7 +306,43 @@ export class UI {
     this.introBtn = btn;
     this.introBar = bar;
     this.returning = returning;
+    this.renderIntroPlaces();
     this.renderIntroRoom();
+  }
+
+  /**
+   * 입장 화면의 장소 네 곳. 눌러 보면 그 장소의 기본 방으로 바뀌어서 뒤의 3D 장면을 미리 볼 수 있어요.
+   * 지금 보이는 장소에 표시해요.
+   */
+  private renderIntroPlaces() {
+    const el = document.getElementById('intro-places');
+    if (!el) return;
+    const current = this.room?.place;
+    el.replaceChildren(
+      h('div', { class: 'ip-head' }, h('span', { class: 'ip-title' }, `장소는 ${PLACES.length}곳이에요`), h('small', {}, '눌러서 미리 둘러봐요')),
+      h(
+        'div',
+        { class: 'ip-list' },
+        ...PLACES.map((pm) => {
+          const here = pm.id === current;
+          const room = BUILTIN_ROOMS.find((r) => r.place === pm.id);
+          return h(
+            'button',
+            {
+              type: 'button',
+              class: 'ip-place' + (here ? ' on' : ''),
+              'aria-pressed': String(here),
+              title: pm.desc,
+              onclick: () => {
+                if (!here && room) this.h.onPickRoom(room.slug);
+              },
+            },
+            h('span', { class: 'ip-emoji', 'aria-hidden': 'true' }, pm.emoji),
+            h('span', { class: 'ip-name' }, pm.name),
+          );
+        }),
+      ),
+    );
   }
 
   /** 입장 화면의 "들어갈 방" 줄 */
@@ -286,11 +364,12 @@ export class UI {
         h(
           'div',
           { class: 'ir-main' },
-          h('b', {}, r.isPublic ? '' : '🔒 ', r.name),
+          h('b', {}, isLockedRoom(r) ? '🔒 ' : '', r.name),
           h(
             'span',
             { class: 'ir-meta' },
             r.name === placeMeta(r.place).name ? null : this.placeChip(r.place),
+            r.hasPassword ? h('span', { class: 'tag lock' }, '입장할 때 비밀번호가 필요해요') : null,
             ...this.tagChips(r.tags),
             r.isPublic && n !== undefined ? h('span', { class: 'cnt' + (n ? ' on' : '') }, n ? `● ${n}명` : '비어 있음') : null,
           ),
@@ -343,11 +422,12 @@ export class UI {
     this.room = r;
     if (invited !== undefined) this.invited = invited;
     $('#room-name').textContent = r.name;
-    $('#room-lock').hidden = r.isPublic;
+    $('#room-lock').hidden = !isLockedRoom(r);
     const kicker = document.getElementById('intro-kicker');
     if (kicker) kicker.textContent = placeMeta(r.place).tagline;
     this.paintUse();
     if (!r.isPublic && !this.rooms.some((x) => x.slug === r.slug)) this.rooms = [r, ...this.rooms];
+    this.renderIntroPlaces();
     this.renderIntroRoom();
     if ((this.sheet === 'rooms' && this.roomsView === 'list') || this.sheet === 'people') this.renderSheet();
   }
@@ -382,6 +462,7 @@ export class UI {
   }
 
   setMode(mode: 'online' | 'demo') {
+    this.lockRoomOk = mode === 'online';
     const el = $('#mode');
     el.hidden = mode === 'online';
     el.textContent = '데모 모드 · 지금은 봇들이랑 있어요';
@@ -427,11 +508,104 @@ export class UI {
   private toggleSound() {
     this.setSound(!this.soundOn);
     this.h.onSound(this.soundOn);
+    // 배경 소리 시트의 '소리가 꺼져 있어요' 줄을 맞춰요
+    if (this.sheet === 'noise') this.renderSheet();
+  }
+
+  setNoise(state: NoiseState) {
+    this.noise = state;
+    if (this.sheet === 'noise') this.renderSheet();
+  }
+
+  private renderNoise(el: HTMLElement, head: (title: string, sub?: string) => HTMLElement) {
+    const { current, roomDefault } = this.noise;
+    el.append(head('배경 소리', '나에게만 들려요. 방마다 고른 소리를 이 브라우저에 기억해요'));
+    if (!this.soundOn) {
+      el.append(
+        h(
+          'div',
+          { class: 'noise-muted' },
+          h('span', {}, '🔈 소리가 꺼져 있어요'),
+          h('button', { type: 'button', class: 'chip-sm on', onclick: () => this.toggleSound() }, '소리 켜기'),
+        ),
+      );
+    }
+    for (const g of NOISE_GROUPS) {
+      el.append(
+        h('h3', { class: 'noise-group' }, g.label),
+        h(
+          'div',
+          { class: 'grid', role: 'radiogroup', 'aria-label': g.label },
+          ...NOISES.filter((n) => n.group === g.id).map((n) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String(n.id === current),
+                class: 'chip' + (n.id === current ? ' on' : ''),
+                onclick: () => this.h.onNoise(n.id),
+              },
+              h('span', { class: 'e' }, n.emoji),
+              n.name,
+              n.id === roomDefault ? h('small', { class: 'noise-default' }, '방 기본') : null,
+            ),
+          ),
+        ),
+      );
+    }
+    el.append(h('p', { class: 'noise-credit' }, '자연·공간 소리는 Freesound의 CC0 녹음이에요'));
   }
 
   // ── 커밋 ───────────────────────────────────────
-  setCommits(list: Commit[]) {
+  /**
+   * 방명록 한 줄. 평소엔 내용만 보이고, 줄을 누르면 아래에 신고 버튼이 펼쳐져요 (한 번에 한 줄만).
+   * 내가 남긴 커밋은 펼치지 않아요.
+   */
+  private commitRow(c: Commit) {
+    const body = [
+      h('code', { class: 'hash' }, c.hash),
+      h('span', { class: 'msg' }, c.msg),
+      h('span', { class: 'who', style: `--c:${langById(c.lang).color}` }, c.name),
+      h('time', {}, ago(c.at)),
+    ];
+    if (this.myCommits.has(c.hash)) return h('li', {}, h('div', { class: 'log-main' }, ...body));
+    const open = this.openCommit === c.hash;
+    const actionsId = `commit-actions-${c.hash}`;
+    return h(
+      'li',
+      { class: open ? 'open' : undefined },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'log-main',
+          'aria-expanded': String(open),
+          'aria-controls': actionsId,
+          onclick: () => {
+            this.openCommit = open ? null : c.hash;
+            this.renderSheet();
+          },
+        },
+        ...body,
+      ),
+      h(
+        'div',
+        { class: 'log-actions', id: actionsId, hidden: !open },
+        h(
+          'button',
+          { type: 'button', class: 'report-btn', onclick: () => this.h.onReportCommit(c) },
+          h('span', { 'aria-hidden': 'true' }, '🚩'),
+          '이 커밋 신고하기',
+        ),
+      ),
+    );
+  }
+
+  /** mine: 이번에 내가 남긴 커밋 해시 (신고할 수 없어서 줄을 펼치지 않아요) */
+  setCommits(list: Commit[], mine: Set<string>) {
     this.commits = list;
+    this.myCommits = mine;
     if (this.sheet === 'commit') this.renderSheet();
   }
 
@@ -577,6 +751,7 @@ export class UI {
 
   closeSheet() {
     this.sheet = '';
+    this.openCommit = null;
     this.wardrobe.close();
     delete $('#sheet').dataset.sheetKey; // 다시 열면 맨 위부터
     $('#sheet').hidden = true;
@@ -604,6 +779,10 @@ export class UI {
     switch (this.sheet) {
       case 'rooms': {
         this.renderRooms(el, head);
+        break;
+      }
+      case 'noise': {
+        this.renderNoise(el, head);
         break;
       }
       case 'status': {
@@ -722,16 +901,7 @@ export class UI {
           h(
             'ol',
             { class: 'log' },
-            ...this.commits.slice(0, 30).map((c) =>
-              h(
-                'li',
-                {},
-                h('code', { class: 'hash' }, c.hash),
-                h('span', { class: 'msg' }, c.msg),
-                h('span', { class: 'who', style: `--c:${langById(c.lang).color}` }, c.name),
-                h('time', {}, ago(c.at)),
-              ),
-            ),
+            ...this.commits.slice(0, 30).map((c) => this.commitRow(c)),
           ),
         );
         if (keptDraft) {
@@ -800,6 +970,7 @@ export class UI {
               class: 'intro-form',
               onsubmit: (e: Event) => {
                 e.preventDefault();
+                if (this.rejectBadNick(nick)) return;
                 p.name = nick.value.trim().slice(0, 12) || p.name;
                 p.lang = lang.value;
                 this.h.onProfileSave(p);
@@ -811,6 +982,18 @@ export class UI {
             h('label', { for: 'p-lang' }, '주력 언어'),
             lang,
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'ghost wide tips-again',
+              onclick: () => {
+                this.closeSheet();
+                this.h.onReplayTips();
+              },
+            },
+            '처음 안내 다시 보기',
           ),
           h(
             'small',
@@ -907,8 +1090,32 @@ export class UI {
         );
       };
       paintPlaces();
+      let noise: NoiseId = DEFAULT_NOISE;
+      const noiseBox = h('div', { class: 'tag-pick', role: 'radiogroup', 'aria-label': '배경 소리' });
+      const paintNoises = () => {
+        noiseBox.replaceChildren(
+          ...NOISES.map((n) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String(n.id === noise),
+                class: 'chip-sm' + (n.id === noise ? ' on' : ''),
+                onclick: () => {
+                  noise = n.id;
+                  paintNoises();
+                },
+              },
+              `${n.emoji} ${n.name}`,
+            ),
+          ),
+        );
+      };
+      paintNoises();
       const pub = h('input', { type: 'radio', name: 'vis', id: 'vis-pub', value: 'pub', checked: true });
       const priv = h('input', { type: 'radio', name: 'vis', id: 'vis-priv', value: 'priv' });
+      const pw = h('input', { id: 'room-pw', type: 'password', maxlength: 40, placeholder: '비워 두면 누구나 들어와요', autocomplete: 'new-password', spellcheck: 'false' });
       const err = h('p', { class: 'err', hidden: true });
       const submit = h('button', { class: 'primary wide', type: 'submit' }, '방 만들기');
       el.append(
@@ -925,7 +1132,7 @@ export class UI {
                 return;
               }
               submit.disabled = true;
-              const problem = await this.h.onCreateRoom(n, [...picked], pub.checked, place);
+              const problem = await this.h.onCreateRoom({ name: n, tags: [...picked], isPublic: pub.checked, place, noise, password: pw.value });
               submit.disabled = false;
               if (problem) {
                 err.hidden = false;
@@ -939,8 +1146,21 @@ export class UI {
           name,
           h('span', { class: 'lbl' }, '장소'),
           placeBox,
+          h('span', { class: 'lbl' }, '배경 소리 (들어온 사람이 각자 바꿀 수 있어요)'),
+          noiseBox,
           h('span', { class: 'lbl' }, '주제 (3개까지)'),
           tagBox,
+          ...(this.lockRoomOk
+            ? [
+                h('label', { for: 'room-pw' }, '🔒 입장 비밀번호 (선택)'),
+                pw,
+                h(
+                  'small',
+                  { class: 'form-hint' },
+                  `정하면 방 목록에 🔒로 보이고, 비밀번호를 아는 사람끼리 모여요. 가벼운 잠금이라 ${ROOM_PASSWORD_MIN_LENGTH}글자 이상으로 정해 주세요. 만든 뒤에는 바꾸거나 풀 수 없고, 잊어버리면 찾을 수 없어요.`,
+                ),
+              ]
+            : []),
           ...(PRIVATE_ROOMS_ENABLED
             ? [
                 h('span', { class: 'lbl' }, '공개 여부'),
@@ -989,7 +1209,7 @@ export class UI {
         h(
           'div',
           { class: 'cur-room' },
-          h('div', { class: 'cr-top' }, h('b', {}, cur.isPublic ? '' : '🔒 ', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
+          h('div', { class: 'cr-top' }, h('b', {}, isLockedRoom(cur) ? '🔒 ' : '', cur.name), h('span', { class: 'cr-badge' }, '지금 여기')),
           h(
             'div',
             { class: 'cr-place' },
@@ -1034,34 +1254,46 @@ export class UI {
     el.append(tagFilter);
     tagFilter.scrollLeft = this.tagFilterScroll;
     enableDragScroll(tagFilter);
-    el.append(
-      h(
-        'ul',
-        { class: 'room-list' },
-        ...(list.length
-          ? list.map((r) => {
-              const n = counts[r.slug] ?? 0;
-              const here = cur?.slug === r.slug;
-              const label = here ? (this.entered ? '지금 여기' : '선택됨') : !r.isPublic ? '비공개' : n ? `● ${n}명` : '비어 있음';
-              return h(
-                'li',
-                {},
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    class: 'room-item' + (here ? ' here' : ''),
-                    onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
-                  },
-                  h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.isPublic ? '' : '🔒 ', r.name),
-                  h('span', { class: 'ri-tags' }, h('span', { class: 'tag place' }, placeMeta(r.place).name), ...this.tagChips(r.tags)),
-                  h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
-                ),
-              );
-            })
-          : [h('li', { class: 'empty' }, '이 주제의 방이 아직 없어요. 하나 만들어볼까요?')]),
-      ),
-    );
+    const roomRow = (r: RoomInfo) => {
+      const n = counts[r.slug] ?? 0;
+      const here = cur?.slug === r.slug;
+      const locked = isLockedRoom(r);
+      const label = roomCountLabel(r, n, here, this.entered);
+      return h(
+        'li',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'room-item' + (here ? ' here' : '') + (locked ? ' locked' : ''),
+            onclick: () => (here ? this.closeSheet() : this.h.onPickRoom(r.slug)),
+          },
+          h('span', { class: 'ri-name' }, h('span', { class: 'ri-emoji', 'aria-hidden': 'true' }, placeMeta(r.place).emoji), r.name),
+          h(
+            'span',
+            { class: 'ri-tags' },
+            locked ? h('span', { class: 'tag lock' }, r.hasPassword ? '🔒 비밀번호' : '🔒 링크로만') : null,
+            h('span', { class: 'tag place' }, placeMeta(r.place).name),
+            ...this.tagChips(r.tags),
+          ),
+          h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
+        ),
+      );
+    };
+    const groupHead = (kind: 'open' | 'locked', title: string, sub: string) =>
+      h('li', { class: `room-group ${kind}`, role: 'presentation' }, h('b', {}, title), h('small', {}, sub));
+    // 🔒 방이 하나라도 있으면 "열린 방"과 "🔒 방"으로 나눠서 보여줘요 (거르기 전 전체 기준)
+    const split = this.rooms.some(isLockedRoom);
+    const openRooms = list.filter((r) => !isLockedRoom(r));
+    const lockedRooms = list.filter(isLockedRoom);
+    const rows = split
+      ? [
+          ...(openRooms.length ? [groupHead('open', '열린 방', '누구나 바로 들어와요'), ...openRooms.map(roomRow)] : []),
+          ...(lockedRooms.length ? [groupHead('locked', '🔒 비밀번호 · 비공개 방', '비밀번호를 알거나 링크를 받은 사람만 들어와요'), ...lockedRooms.map(roomRow)] : []),
+        ]
+      : list.map(roomRow);
+    el.append(h('ul', { class: 'room-list' }, ...(rows.length ? rows : [h('li', { class: 'empty' }, '이 주제의 방이 아직 없어요. 하나 만들어볼까요?')])));
     el.append(
       h(
         'button',
@@ -1075,7 +1307,7 @@ export class UI {
         },
         h('b', {}, '+'),
         h('span', {}, '새 방 만들기'),
-        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : '링크로 초대'),
+        h('i', {}, PRIVATE_ROOMS_ENABLED ? '공개 · 비공개' : this.lockRoomOk ? '링크 · 🔒 비밀번호' : '링크로 초대'),
       ),
     );
   }
@@ -1122,6 +1354,14 @@ export class UI {
   }
 
   // ── 토스트 / 모달 / 경보 ─────────────────────────
+  /** 닉네임에 쓸 수 없는 말이 있으면 알려주고 true. 다른 사람 화면에서 ***로 가려지기 전에 입력할 때 막아요 */
+  private rejectBadNick(input: HTMLInputElement): boolean {
+    if (!hasBadWord(input.value)) return false;
+    this.toast(`${BLOCKED_WORDS_REASON} 다른 닉네임으로 적어주세요.`, 'bad', 4200);
+    input.focus();
+    return true;
+  }
+
   toast(text: string, kind: 'info' | 'good' | 'bad' = 'info', ms = 3200) {
     const el = h('div', { class: `toast ${kind}` }, text);
     this.toastBox.append(el);
@@ -1163,12 +1403,84 @@ export class UI {
     });
   }
 
+  /**
+   * 비밀번호 방에 들어가기 전에 비밀번호를 물어봐요.
+   * verify가 이유(글)를 돌려주면 그 자리에서 다시 입력받고, null을 돌려주면 통과예요. 취소하면 false.
+   */
+  askRoomPassword(roomName: string, verify: (password: string) => Promise<string | null>): Promise<boolean> {
+    return new Promise((resolve) => {
+      const m = $('#modal');
+      const done = (v: boolean) => {
+        m.hidden = true;
+        m.innerHTML = '';
+        m.onclick = null;
+        resolve(v);
+      };
+      const input = h('input', { type: 'password', maxlength: 40, placeholder: '비밀번호', autocomplete: 'off', spellcheck: 'false', 'aria-label': '방 비밀번호' });
+      const err = h('p', { class: 'err', hidden: true, role: 'alert' });
+      const cancel = h('button', { class: 'ghost', type: 'button', onclick: () => done(false) }, '취소');
+      const submit = h('button', { class: 'primary', type: 'submit' }, '들어가기');
+      const form = h(
+        'form',
+        {
+          class: 'modal-card pw-ask',
+          role: 'dialog',
+          'aria-label': `${roomName} 비밀번호`,
+          onkeydown: (e: Event) => {
+            if ((e as KeyboardEvent).key === 'Escape') done(false);
+          },
+          onsubmit: async (e: Event) => {
+            e.preventDefault();
+            const value = input.value;
+            if (!value) {
+              input.focus();
+              return;
+            }
+            submit.disabled = true;
+            cancel.disabled = true;
+            input.readOnly = true;
+            const problem = await verify(value);
+            if (!problem) {
+              done(true);
+              return;
+            }
+            err.hidden = false;
+            err.textContent = problem;
+            submit.disabled = false;
+            cancel.disabled = false;
+            input.readOnly = false;
+            input.select();
+          },
+        },
+        h('h2', {}, `🔒 ${roomName}`),
+        h('p', {}, '이 방은 비밀번호를 아는 사람끼리 모이는 방이에요.'),
+        input,
+        err,
+        h('div', { class: 'modal-actions' }, cancel, submit),
+      );
+      m.innerHTML = '';
+      m.append(form);
+      m.onclick = (e) => {
+        if (e.target === m) done(false);
+      };
+      m.hidden = false;
+      window.setTimeout(() => input.focus(), MODAL_FOCUS_DELAY_MS);
+    });
+  }
+
   alarm(text: string, seconds: number) {
     const a = $('#alarm');
     $('#alarm-text').textContent = text;
     a.hidden = false;
     window.setTimeout(() => (a.hidden = true), seconds * 1000);
   }
+}
+
+/** 방 목록 오른쪽 글자: 지금 여기 / 선택됨 / 비공개 / ● 3명 / 비어 있음 */
+function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean): string {
+  if (here) return entered ? '지금 여기' : '선택됨';
+  if (!r.isPublic) return '비공개';
+  return n ? `● ${n}명` : '비어 있음';
 }
 
 /** 얼마나 오래 있었는지: 방금 / 23분 / 1시간 / 1시간 23분 */

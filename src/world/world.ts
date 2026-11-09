@@ -9,6 +9,7 @@ import { ROOM, useLayout } from './layout';
 import { buildGrid } from './pathfinding';
 import { disposeTree, type InteractData } from './places/kit';
 import type { PlaceBuild, PlaceDef, PlaceEnv } from './places/types';
+import { ResolutionGovernor } from './quality';
 import { codeScreen } from './textures';
 
 export interface WorldHandlers {
@@ -49,6 +50,11 @@ const FOLLOW_POLAR = 1.05;
 const FOLLOW_FOCUS_Y = 0.9;
 /** 캐릭터가 걸을 때 화면 중심이 따라붙는 빠르기 (클수록 빨리 따라와요) */
 const FOLLOW_EASE_PER_SEC = 6;
+/**
+ * 그림자를 몇 프레임마다 다시 그릴지. 그림자 패스는 그림자를 드리우는 물체를 한 번 더 그려서 비싸요.
+ * 조명은 안 움직이고 캐릭터만 천천히 움직여서, 초당 20번(60fps 기준)이면 차이가 거의 안 보여요
+ */
+const SHADOW_EVERY_FRAMES = 3;
 /** 한 번의 클릭으로 보는 최대 이동 거리(px)와 시간(ms) */
 const CLICK_MAX_MOVE_PX = 8;
 const CLICK_MAX_MS = 600;
@@ -84,6 +90,8 @@ export class World {
   private hemiBase = new THREE.Color('#5a6a9a');
   private hemiAlarm = new THREE.Color('#9a2a2a');
   private leaving: Avatar[] = [];
+  private governor: ResolutionGovernor;
+  private frame = 0;
 
   constructor(
     private el: HTMLElement,
@@ -98,6 +106,10 @@ export class World {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // 그림자는 SHADOW_EVERY_FRAMES마다만 다시 그려요 (start()의 loop)
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
+    this.governor = new ResolutionGovernor(this.renderer);
     el.appendChild(this.renderer.domElement);
 
     this.labels = new CSS2DRenderer();
@@ -200,6 +212,7 @@ export class World {
     this.applyEnv(def.env);
     this.place = def.build(this.scene, this.mobile);
     this.placeId = def.id;
+    this.renderer.shadowMap.needsUpdate = true;
     this.resetCamera();
     return true;
   }
@@ -516,6 +529,8 @@ export class World {
         this.marker.scale.setScalar(1 + (1 - this.markerT) * 1.2);
       }
       onFrame?.(dt);
+      if (++this.frame % SHADOW_EVERY_FRAMES === 0) this.renderer.shadowMap.needsUpdate = true;
+      this.governor.tick();
       this.renderer.render(this.scene, this.camera);
       this.labels.render(this.scene, this.camera);
     };

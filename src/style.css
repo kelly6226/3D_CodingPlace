@@ -448,6 +448,36 @@ button {
 .chip .e {
   font-size: 18px;
 }
+/* 배경 소리 시트: 방 기본값 표시와 '소리가 꺼져 있어요' 줄 */
+.noise-default {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.noise-group {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.noise-group:first-of-type {
+  margin-top: 0;
+}
+.noise-credit {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.noise-muted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
 .chip .e.big {
   font-size: 26px;
 }
@@ -581,12 +611,33 @@ button {
   font-size: 13px;
 }
 .log li {
+  border-bottom: 1px solid var(--line);
+}
+/* 줄 내용. 남의 커밋은 버튼이라 누르면 신고 버튼이 펼쳐져요 */
+.log-main {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-areas: 'hash msg time' 'hash who who';
   column-gap: 10px;
+  row-gap: 4px;
   padding: 8px 4px;
-  border-bottom: 1px solid var(--line);
+  border-radius: 8px;
+}
+button.log-main:hover,
+.log li.open button.log-main {
+  background: rgba(255, 255, 255, 0.04);
+}
+.log-actions {
+  display: flex;
+  justify-content: flex-end;
+  /* 커밋 내용과 신고 버튼 사이를 조금 띄워요 */
+  padding: 8px 4px 10px;
 }
 .log .hash {
   grid-area: hash;
@@ -601,6 +652,7 @@ button {
 }
 .log .who {
   grid-area: who;
+  align-self: center;
   font-size: 11.5px;
   color: var(--muted);
 }
@@ -615,6 +667,7 @@ button {
 }
 .log time {
   grid-area: time;
+  justify-self: end;
   font-size: 11.5px;
   color: var(--muted);
   white-space: nowrap;
@@ -858,6 +911,10 @@ button {
   font-size: 14px;
   line-height: 1.6;
   color: var(--muted);
+  /* 본문의 줄바꿈(\n)을 그대로 보여요 */
+  white-space: pre-line;
+  /* 한국어가 단어 중간에서 줄바뀌지 않게 */
+  word-break: keep-all;
 }
 .modal-actions {
   display: flex;
@@ -1196,8 +1253,88 @@ button.place-name {
 }
 
 /* 입장 화면의 방 줄 */
+/* 입장 화면의 장소 네 곳: 지금 보이는 곳은 전구색 테두리.
+   소개 문단(.intro-lead, 아래 여백 20px)과 "들어갈 방" 상자 사이에서 위아래 숨 쉴 틈을 같게 둬요 */
+.intro-places {
+  margin: 0 0 18px;
+}
+.ip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 2px 10px;
+}
+.ip-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.ip-head small {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ip-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ip-place {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 78px;
+  padding: 12px 6px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  transition: border-color 160ms, background-color 160ms, color 160ms;
+}
+.ip-place:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--fg);
+}
+.ip-place:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.ip-place.on {
+  border-color: var(--amber);
+  background: rgba(242, 180, 90, 0.1);
+  color: var(--fg);
+}
+.ip-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+.ip-name {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  word-break: keep-all;
+}
+@media (max-width: 400px) {
+  .ip-list {
+    gap: 6px;
+  }
+  .ip-place {
+    min-height: 74px;
+    padding: 10px 4px 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ip-place {
+    transition: none;
+  }
+}
 .intro-room {
-  margin: -4px 0 18px;
+  margin: 0 0 18px;
   padding: 12px 12px 12px 14px;
   border-radius: 14px;
   border: 1px solid rgba(242, 180, 90, 0.35);
@@ -1671,6 +1808,26 @@ button.place-name {
 .chat-log .pin:hover:not(:disabled) {
   opacity: 1;
 }
+/* 방명록 신고 버튼: 줄을 눌렀을 때만 그 줄 아래에 보여요. 누르면 확인 창 (main.ts reportCommit) */
+.report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 83, 80, 0.45);
+  background: rgba(239, 83, 80, 0.1);
+  color: #ff8a80;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.report-btn:hover,
+.report-btn:focus-visible {
+  background: rgba(239, 83, 80, 0.22);
+  border-color: rgba(239, 83, 80, 0.8);
+}
 .chat-form {
   display: flex;
   gap: 8px;
@@ -1854,6 +2011,63 @@ button.place-name {
   }
 }
 
+/* ── 방 목록: 열린 방 / 🔒 방 구분 ─────────────────── */
+.room-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 4px 4px;
+  font-size: 12.5px;
+}
+.room-group:first-child {
+  padding-top: 2px;
+}
+.room-group b {
+  color: var(--fg);
+}
+.room-group small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.room-group.locked b {
+  color: var(--amber);
+}
+.room-item.locked {
+  border-left: 3px solid rgba(242, 180, 90, 0.55);
+  background: rgba(242, 180, 90, 0.04);
+}
+.room-item.locked:hover {
+  background: rgba(242, 180, 90, 0.1);
+}
+.tag.lock {
+  color: var(--amber);
+  border-color: rgba(242, 180, 90, 0.45);
+  background: rgba(242, 180, 90, 0.1);
+}
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pw-ask input {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0a0d16;
+  color: var(--fg);
+  font-size: 15px;
+  outline: 0;
+}
+.pw-ask input:focus {
+  border-color: var(--amber);
+}
+.pw-ask .err {
+  margin: 8px 0 0;
+}
+
 /* ── 모바일 키보드가 올라왔을 때 (src/ui/viewport.ts) ──────
    하단 바와 안내는 지금 필요 없어서 숨기고, 채팅 입력란은 키보드 바로 위에 붙여요 */
 .kb-open .actions,
@@ -1968,4 +2182,162 @@ button.place-name {
   font: 11px/1.35 var(--mono);
   white-space: pre-wrap;
   pointer-events: none;
+}
+
+/* ⚙️ 프로필의 '처음 안내 다시 보기' */
+.tips-again {
+  margin-top: 8px;
+  min-height: 40px;
+  border-radius: 12px;
+}
+
+/* ── 처음 안내 메모 (ui/tips.ts) ──────────────────────
+   카페 직원이 손으로 써서 붙여 둔 메모지. 제목은 손글씨, 설명은 본문 글꼴.
+   종이색과 잉크색은 이 메모에만 써요 */
+.tip {
+  --paper: #f7e4a6;
+  --paper-edge: #e9cf7f;
+  --ink: #2a1c08;
+  --ink-soft: rgba(42, 28, 8, 0.72);
+  position: fixed;
+  z-index: 25;
+  width: min(272px, calc(100vw - 24px));
+  padding: 16px 16px 12px;
+  border-radius: 4px 4px 14px 4px;
+  background: linear-gradient(180deg, var(--paper) 0%, var(--paper) 86%, var(--paper-edge) 100%);
+  color: var(--ink);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 14px 30px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+  rotate: -1.2deg;
+  animation: tip-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+/* 왼쪽 위 반투명 테이프 (꼬리가 위로 날 때 겹치지 않게 모서리에) */
+.tip-tape {
+  position: absolute;
+  top: -8px;
+  left: -10px;
+  width: 58px;
+  height: 18px;
+  rotate: -32deg;
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.tip-title {
+  margin: 0 0 4px;
+  font-family: var(--hand);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.15;
+  word-break: keep-all;
+}
+.tip-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  word-break: keep-all;
+}
+.tip-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+/* 몇 번째 안내인지: 지금 것만 길게 */
+.tip-dots {
+  display: flex;
+  gap: 4px;
+  margin-right: auto;
+}
+.tip-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(42, 28, 8, 0.22);
+  transition: width 200ms;
+}
+.tip-dots i.on {
+  width: 16px;
+  background: var(--ink);
+}
+.tip-skip,
+.tip-next {
+  min-height: 36px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tip-skip {
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+}
+.tip-next {
+  padding: 0 14px;
+  border: 0;
+  background: var(--ink);
+  color: var(--paper);
+}
+.tip-skip:hover {
+  color: var(--ink);
+}
+.tip-skip:focus-visible,
+.tip-next:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+/* 가리키는 곳을 향한 꼬리 (위에 붙으면 아래로, 아래에 붙으면 위로) */
+.tip-tail {
+  position: absolute;
+  left: var(--tail-x, 50%);
+  width: 14px;
+  height: 14px;
+  translate: -50% 0;
+  rotate: 45deg;
+  background: var(--paper-edge);
+}
+.tip[data-side='above'] .tip-tail {
+  bottom: -6px;
+}
+.tip[data-side='below'] .tip-tail {
+  top: -6px;
+  background: var(--paper);
+}
+.tip[data-side='none'] .tip-tail {
+  display: none;
+}
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+/* 안내가 가리키는 버튼: 전구색 빛이 두 번 번지고 은은하게 남아요 */
+.tip-lit {
+  box-shadow:
+    0 0 0 2px var(--amber),
+    0 0 18px 2px rgba(242, 180, 90, 0.45);
+  animation: tip-glow 1.4s ease-out 2;
+}
+@keyframes tip-glow {
+  0% {
+    box-shadow:
+      0 0 0 2px var(--amber),
+      0 0 0 0 rgba(242, 180, 90, 0.6);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px var(--amber),
+      0 0 0 14px rgba(242, 180, 90, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip,
+  .tip-lit {
+    animation: none;
+  }
 }

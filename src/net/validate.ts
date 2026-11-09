@@ -4,10 +4,19 @@
 // 그래서 Presence·Broadcast로 받은 값은 "믿을 수 없는 입력"으로 보고,
 // 화면에 그리기 전에 모양·길이·범위를 확인하고 모르는 필드는 버려요.
 // (DB에 저장되는 값은 supabase/schema.sql의 제약조건이 서버에서 한 번 더 막아요)
-import { ACT_RECEIVE_GAP_MS, CHAT_MAX_LENGTH, CHAT_RECEIVE_GAP_MS, EMOTES, HEX_RE, LANGS, STATUSES, actionById } from '../config';
+import {
+  ACT_RECEIVE_GAP_MS,
+  CHAT_MAX_LENGTH,
+  CHAT_RECEIVE_GAP_MS,
+  EMOTES,
+  HEX_RE,
+  LANGS,
+  STATUSES,
+  actionById,
+} from '../config';
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
-import { maskBadWords } from './badwords';
+import { maskIfBad } from './badwords';
 import type { Commit, NetEvent, PeerState } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
@@ -53,7 +62,7 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
   const seat = seatId(raw.seat);
   return {
     id: pid,
-    name: maskBadWords(text(raw.name, 20)) || '익명의 개발자',
+    name: maskIfBad(text(raw.name, 20)) || '익명의 개발자',
     color: hex(raw.color, '#3b4a6b'),
     hair: hex(raw.hair, '#1d1a18'),
     skin: hex(raw.skin, '#eac3a3'),
@@ -91,11 +100,11 @@ export function cleanEvent(raw: unknown): NetEvent | null {
     case 'deploy': {
       const pid = id(raw.id);
       if (!pid) return null;
-      return { type: 'deploy', id: pid, name: maskBadWords(text(raw.name, 20)) || '누군가' };
+      return { type: 'deploy', id: pid, name: maskIfBad(text(raw.name, 20)) || '누군가' };
     }
     case 'chat': {
       const pid = id(raw.id);
-      const msg = maskBadWords(text(raw.text, CHAT_MAX_LENGTH));
+      const msg = maskIfBad(text(raw.text, CHAT_MAX_LENGTH));
       return pid && msg ? { type: 'chat', id: pid, text: msg } : null;
     }
     case 'act': {
@@ -103,6 +112,8 @@ export function cleanEvent(raw: unknown): NetEvent | null {
       const act = actionById(raw.act);
       return pid && act ? { type: 'act', id: pid, act: act.id } : null;
     }
+    case 'commitHidden':
+      return typeof raw.hash === 'string' && HASH_RE.test(raw.hash) ? { type: 'commitHidden', hash: raw.hash } : null;
     case 'commit': {
       const c = cleanCommit(raw.commit);
       return c ? { type: 'commit', commit: c } : null;
@@ -123,8 +134,8 @@ export function cleanCommit(raw: unknown): Commit | null {
   if (!name || !msg) return null;
   return {
     hash: raw.hash,
-    name: maskBadWords(name),
-    msg: maskBadWords(msg),
+    name: maskIfBad(name),
+    msg: maskIfBad(msg),
     lang: LANGS.some((l) => l.id === raw.lang) ? (raw.lang as string) : '',
     at: clamp(num(raw.at, Date.now()), 0, Date.now() + 60e3),
   };
@@ -141,7 +152,7 @@ export function cleanCommit(raw: unknown): Commit | null {
  */
 export const COMMIT_REFRESH_GAP_MS = 5000;
 
-const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit'>, number> = {
+const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit' | 'commitHidden'>, number> = {
   move: 120,
   emote: 700,
   chat: CHAT_RECEIVE_GAP_MS,
@@ -153,7 +164,7 @@ const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit'>, number> = {
 
 export class RateLimiter {
   private last = new Map<string, number>();
-  allow(sender: string, type: Exclude<NetEvent['type'], 'commit'>, now = Date.now()): boolean {
+  allow(sender: string, type: Exclude<NetEvent['type'], 'commit' | 'commitHidden'>, now = Date.now()): boolean {
     const k = `${sender}:${type}`;
     const prev = this.last.get(k) ?? 0;
     if (now - prev < MIN_GAP[type]) return false;
