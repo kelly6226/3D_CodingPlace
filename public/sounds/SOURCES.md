@@ -1,14 +1,14 @@
 # 배경 소리 출처
 
 모두 [Freesound](https://freesound.org)에서 받은 **CC0 1.0 (퍼블릭 도메인)** 녹음이에요. 출처 표기 의무는 없지만 기록해 둬요.
-2026-11-09에 각 페이지에서 라이선스가 `creativecommons.org/publicdomain/zero/1.0/`인 것을 확인했어요.
+2026-11-09에 각 페이지에서(모닥불·벽난로는 같은 날 더 나은 녹음으로 교체) 라이선스가 `creativecommons.org/publicdomain/zero/1.0/`인 것을 확인했어요.
 
 받은 파일은 Freesound 미리듣기(hq mp3)이고, `scripts/make-sound-loops.py`로 구간을 골라 끊김 없는 루프로 만든 뒤 모노 96kbps로 다시 인코딩했어요.
 
 | 파일 | 원본 | 올린 사람 |
 |---|---|---|
-| fire.mp3 | [Campfire Close Crackling Sticks](https://freesound.org/people/FunWithSound/sounds/588401/) | FunWithSound |
-| fireplace.mp3 | [The Fireplace 3](https://freesound.org/people/NoOneIsReal/sounds/387128/) | NoOneIsReal |
+| fire.mp3 | [Nighttime Bonfire 2](https://freesound.org/people/samararaine/sounds/187079/) | samararaine |
+| fireplace.mp3 | [Fireplace crackling wood little flame](https://freesound.org/people/BonnyOrbit/sounds/484338/) | BonnyOrbit |
 | rain.mp3 | [Rain ambience](https://freesound.org/people/SoundDesigner0101/sounds/765980/) | SoundDesigner0101 |
 | ocean.mp3 | [Ocean Waves on Beach](https://freesound.org/people/goochiano/sounds/623052/) | goochiano |
 | stream.mp3 | [Brook farther-soft](https://freesound.org/people/rubindaniel/sounds/844816/) | rubindaniel |
