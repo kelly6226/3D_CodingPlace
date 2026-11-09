@@ -455,6 +455,20 @@ button {
   font-weight: 600;
   color: var(--muted);
 }
+.noise-group {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.noise-group:first-of-type {
+  margin-top: 0;
+}
+.noise-credit {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
 .noise-muted {
   display: flex;
   align-items: center;

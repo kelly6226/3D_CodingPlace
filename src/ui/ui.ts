@@ -7,6 +7,7 @@ import {
   EMOTES,
   FEEDBACK_URL,
   LANGS,
+  NOISE_GROUPS,
   NOISES,
   PLACES,
   PRIVATE_ROOMS_ENABLED,
@@ -479,27 +480,31 @@ export class UI {
         ),
       );
     }
-    el.append(
-      h(
-        'div',
-        { class: 'grid', role: 'radiogroup', 'aria-label': '배경 소리' },
-        ...NOISES.map((n) =>
-          h(
-            'button',
-            {
-              type: 'button',
-              role: 'radio',
-              'aria-checked': String(n.id === current),
-              class: 'chip' + (n.id === current ? ' on' : ''),
-              onclick: () => this.h.onNoise(n.id),
-            },
-            h('span', { class: 'e' }, n.emoji),
-            n.name,
-            n.id === roomDefault ? h('small', { class: 'noise-default' }, '방 기본') : null,
+    for (const g of NOISE_GROUPS) {
+      el.append(
+        h('h3', { class: 'noise-group' }, g.label),
+        h(
+          'div',
+          { class: 'grid', role: 'radiogroup', 'aria-label': g.label },
+          ...NOISES.filter((n) => n.group === g.id).map((n) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String(n.id === current),
+                class: 'chip' + (n.id === current ? ' on' : ''),
+                onclick: () => this.h.onNoise(n.id),
+              },
+              h('span', { class: 'e' }, n.emoji),
+              n.name,
+              n.id === roomDefault ? h('small', { class: 'noise-default' }, '방 기본') : null,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    }
+    el.append(h('p', { class: 'noise-credit' }, '자연·공간 소리는 Freesound의 CC0 녹음이에요'));
   }
 
   // ── 커밋 ───────────────────────────────────────

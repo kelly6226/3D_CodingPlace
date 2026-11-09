@@ -291,30 +291,62 @@ export interface RoomInfo {
   createdAt?: number;
 }
 
-// ── 배경 소리 (백색소음) ──────────────────────────
-// 맥 '배경 사운드'(설정 → 손쉬운 사용 → 오디오)의 macOS Sequoia 목록 8개를 참고했어요.
-// 애플 녹음 파일을 쓰는 게 아니라 audio.ts에서 Web Audio로 비슷하게 합성해요.
+// ── 배경 소리 ─────────────────────────────────────
+// 맥 '배경 사운드'(설정 → 손쉬운 사용 → 오디오)를 참고했어요.
+// 소음 세 가지는 noiseBeds.ts에서 합성하고, 자연·공간 소리는 Freesound의 CC0 녹음(public/sounds, 출처는 SOURCES.md)을 써요.
 // id는 supabase/schema.sql의 rooms_noise_check와 같아야 해요.
 
-export type NoiseId = 'place' | 'off' | 'balanced' | 'bright' | 'dark' | 'ocean' | 'rain' | 'stream' | 'night' | 'fire';
+export type NoiseId =
+  | 'place'
+  | 'off'
+  | 'balanced'
+  | 'bright'
+  | 'dark'
+  | 'fire'
+  | 'fireplace'
+  | 'rain'
+  | 'ocean'
+  | 'stream'
+  | 'forest'
+  | 'night'
+  | 'cafe'
+  | 'library'
+  | 'typing'
+  | 'clock';
+
+/** 배경 소리 시트에서 묶어 보여주는 단위 */
+export type NoiseGroup = 'basic' | 'nature' | 'space';
 
 export interface NoiseMeta {
   id: NoiseId;
   emoji: string;
   name: string;
+  group: NoiseGroup;
 }
 
+export const NOISE_GROUPS: { id: NoiseGroup; label: string }[] = [
+  { id: 'basic', label: '기본 · 소음' },
+  { id: 'nature', label: '자연' },
+  { id: 'space', label: '공간 · 생활' },
+];
+
 export const NOISES: NoiseMeta[] = [
-  { id: 'place', emoji: '🏠', name: '장소 소리' },
-  { id: 'balanced', emoji: '〰️', name: '균형 잡힌 소음' },
-  { id: 'bright', emoji: '✨', name: '밝은 소음' },
-  { id: 'dark', emoji: '🌑', name: '어두운 소음' },
-  { id: 'ocean', emoji: '🌊', name: '바다' },
-  { id: 'rain', emoji: '🌧️', name: '비' },
-  { id: 'stream', emoji: '🏞️', name: '시냇물' },
-  { id: 'night', emoji: '🌙', name: '밤' },
-  { id: 'fire', emoji: '🔥', name: '모닥불' },
-  { id: 'off', emoji: '🔇', name: '없음' },
+  { id: 'place', emoji: '🏠', name: '장소 소리', group: 'basic' },
+  { id: 'off', emoji: '🔇', name: '없음', group: 'basic' },
+  { id: 'balanced', emoji: '〰️', name: '균형 잡힌 소음', group: 'basic' },
+  { id: 'bright', emoji: '✨', name: '밝은 소음', group: 'basic' },
+  { id: 'dark', emoji: '🌑', name: '어두운 소음', group: 'basic' },
+  { id: 'fire', emoji: '🔥', name: '장작·모닥불', group: 'nature' },
+  { id: 'rain', emoji: '🌧️', name: '비', group: 'nature' },
+  { id: 'ocean', emoji: '🌊', name: '바다', group: 'nature' },
+  { id: 'stream', emoji: '🏞️', name: '시냇물', group: 'nature' },
+  { id: 'forest', emoji: '🐦', name: '숲 새소리', group: 'nature' },
+  { id: 'night', emoji: '🦗', name: '밤 풀벌레', group: 'nature' },
+  { id: 'cafe', emoji: '☕', name: '카페 웅성임', group: 'space' },
+  { id: 'library', emoji: '📚', name: '도서관', group: 'space' },
+  { id: 'fireplace', emoji: '🪵', name: '벽난로', group: 'space' },
+  { id: 'typing', emoji: '⌨️', name: '키보드 타자', group: 'space' },
+  { id: 'clock', emoji: '🕰️', name: '시계 초침', group: 'space' },
 ];
 
 /** 장소마다 원래 있던 소리(빗소리·웅성임·팬). 예전에 만든 방과 기본 방은 이걸 써요 */
