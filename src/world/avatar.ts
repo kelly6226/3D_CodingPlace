@@ -7,6 +7,7 @@ import type { PeerState } from '../net/types';
 import { FlippedTable, ThrownLaptop, makeLaptopMesh, makeStars, type Prop } from './actionProps';
 import { FLIP_RELEASE_S, THROW_RELEASE_S, applyActionPose, emptyPose, faintStarsAt } from './actions';
 import { seatById, type Seat } from './layout';
+import { bakeStatic, type Baked } from './bake';
 import { HALO_Y, buildBack, buildHair, buildHat, buildNeck, hatCoversHair } from './outfit';
 import { findPath } from './pathfinding';
 
@@ -140,6 +141,9 @@ export class Avatar {
 
   laptop: THREE.Group | null = null;
   private screenTex: THREE.Texture | null = null;
+  /** 몸·팔다리·머리마다 합쳐 둔 메시 (색·옷이 바뀌면 다시 합쳐요) */
+  private baked: Baked[] = [];
+  private laptopBaked: Baked | null = null;
 
   constructor(
     state: PeerState,
@@ -229,6 +233,7 @@ export class Avatar {
 
     this.body.scale.setScalar(SCALE);
     this.root.add(this.body);
+    this.rebake();
 
     if (isSelf) {
       this.ring = new THREE.Mesh(
@@ -284,7 +289,26 @@ export class Avatar {
     if (!sameOutfit(prev.outfit, next.outfit)) this.applyOutfit(next.outfit);
     this.glasses.visible = next.glasses;
     if (prev.lang !== next.lang && this.laptop) this.paintSticker();
+    // 위치·자리·상태만 바뀌는 일이 훨씬 잦아서, 겉모습이 바뀔 때만 다시 합쳐요
+    const looksChanged =
+      prev.color !== next.color || prev.skin !== next.skin || prev.hair !== next.hair || prev.glasses !== next.glasses || !sameOutfit(prev.outfit, next.outfit);
+    if (looksChanged) this.rebake();
     this.renderTag();
+  }
+
+  /**
+   * 같이 움직이는 부품끼리 합쳐요 (그리기 호출 줄이기, bake.ts).
+   * 따로 움직이거나 깜빡이는 것(팔다리·머리 묶음, 숨쉬는 몸통, 컵, 눈, 프로펠러·고리·망토·날개)은 합치지 않아요.
+   */
+  private rebake() {
+    for (const b of this.baked) b.undo();
+    const moving = new Set<THREE.Object3D>([
+      this.legL, this.legR, this.armL, this.armR, this.headG, this.torso, this.cup, ...this.eyes,
+      ...[this.propeller, this.halo, this.cape, ...this.wings].filter((o): o is THREE.Object3D => !!o),
+    ]);
+    const stop = (o: THREE.Object3D) => moving.has(o);
+    const tag = { avatarId: this.id };
+    this.baked = [this.body, this.legL, this.legR, this.armL, this.armR, this.headG].map((g) => bakeStatic(g, stop, tag));
   }
 
   /** 바지·신발 색을 바꾸고 모자·머리 모양·등/목 장식을 새로 입힘 */
@@ -598,13 +622,20 @@ export class Avatar {
     this.scene.add(g);
   }
 
+  /** 노트북 스티커를 주력 언어 색으로 칠하고, 노트북 부품을 다시 합쳐요 */
   private paintSticker() {
-    const st = this.laptop?.getObjectByName('sticker') as THREE.Mesh | undefined;
+    const laptop = this.laptop;
+    if (!laptop) return;
+    this.laptopBaked?.undo();
+    const st = laptop.getObjectByName('sticker') as THREE.Mesh | undefined;
     if (st) (st.material as THREE.MeshBasicMaterial).color.set(langById(this.state.lang).color);
+    this.laptopBaked = bakeStatic(laptop, () => false, { avatarId: this.id });
   }
 
   private removeLaptop() {
     if (!this.laptop) return;
+    this.laptopBaked?.undo();
+    this.laptopBaked = null;
     this.scene.remove(this.laptop);
     this.laptop.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material | undefined;
@@ -623,6 +654,8 @@ export class Avatar {
 
   dispose() {
     this.removeLaptop();
+    for (const b of this.baked) b.undo();
+    this.baked = [];
     for (const p of this.props) this.scene.remove(p.group);
     this.props = [];
     this.scene.remove(this.root);
