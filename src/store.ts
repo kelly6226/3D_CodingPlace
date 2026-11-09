@@ -23,8 +23,6 @@ interface Saved {
   coffee?: { date: string; count: number };
   demoCommits?: unknown[];
   demoRooms?: unknown[];
-  /** 1:1 채팅을 막아 둔 사람들의 아바타 id */
-  dmBlocked?: string[];
   /** 비밀번호를 맞힌 방의 열쇠 (방 주소 → 열쇠). 오래된 것부터 밀려나요 */
   roomKeys?: Record<string, StoredRoomKey>;
 }
@@ -36,9 +34,6 @@ export interface StoredRoomKey {
 
 /** 열쇠를 기억해 둘 방 수. 넘으면 오래된 것부터 잊어서, 다시 비밀번호를 물어요 */
 const ROOM_KEYS_MAX = 30;
-
-/** 막아 둘 수 있는 사람 수. 넘으면 오래된 것부터 풀려요 */
-const DM_BLOCKED_MAX = 200;
 
 let cache: Saved = {};
 try {
@@ -141,22 +136,6 @@ export function getDemoRooms<T>(): T[] {
 
 export function setDemoRooms<T>(list: T[]) {
   cache.demoRooms = list.slice(0, 30);
-  persist();
-}
-
-export function getDmBlocked(): string[] {
-  return Array.isArray(cache.dmBlocked) ? cache.dmBlocked.filter((x): x is string => typeof x === 'string') : [];
-}
-
-export function addDmBlocked(avatarId: string) {
-  const list = getDmBlocked();
-  if (list.includes(avatarId)) return;
-  cache.dmBlocked = [...list, avatarId].slice(-DM_BLOCKED_MAX);
-  persist();
-}
-
-export function clearDmBlocked() {
-  cache.dmBlocked = [];
   persist();
 }
 
