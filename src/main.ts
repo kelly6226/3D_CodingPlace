@@ -6,6 +6,7 @@ import {
   DEFAULT_ROOM,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
+  REPORTS_TO_HIDE,
   ROOM_SLUG_RE,
   builtinRoom,
   emoteById,
@@ -46,6 +47,7 @@ const ui = new UI(app);
 const profile = store.getProfile();
 ui.showIntro(profile, store.hasSavedProfile());
 ui.setSound(store.getSound());
+ui.setMuted(store.getMuted());
 sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
@@ -69,6 +71,8 @@ let self: PeerState;
 let room: RoomInfo = builtinRoom(DEFAULT_ROOM)!;
 let startInstance = 1;
 let commits: Commit[] = [];
+/** 내가 가린 사람 id (채팅·말풍선을 안 보여요) */
+let mutedIds = store.getMuted();
 let enteredAt = 0;
 let connWarned = false;
 
@@ -148,10 +152,16 @@ async function loadRoomCommits() {
   const slug = room.slug;
   const list = await Promise.race([net.loadCommits(slug), wait(5000).then(() => [] as Commit[])]);
   if (slug !== room.slug) return; // 그 사이 방을 옮겼으면 버림
-  commits = list;
+  showCommits(list);
+  document.title = pageTitle(room);
+}
+
+/** 방명록을 TV와 시트에 그려요. 내가 신고한 커밋은 빼요 */
+function showCommits(list: Commit[]) {
+  const reported = store.getReportedCommits(room.slug);
+  commits = list.filter((c) => !reported.has(c.hash));
   world.room.gitlog.draw(commits, room.name);
   ui.setCommits(commits);
-  document.title = pageTitle(room);
 }
 
 // ── 2. 입장 ──────────────────────────────────────
@@ -177,6 +187,7 @@ async function enter(p: store.Profile) {
     {
       onPeers,
       onEvent,
+      onCommits: showCommits,
       onStatus: (s) => {
         ui.setConn(s);
         if (s === 'offline' && !connWarned) {
@@ -479,7 +490,7 @@ function chat(text: string): string | null {
   lastChat = Date.now();
   meAvatar().say(msg);
   sound.pop();
-  ui.addChat({ name: self.name, lang: self.lang, text: msg, mine: true });
+  ui.addChat({ id: self.id, name: self.name, lang: self.lang, text: msg, mine: true });
   net.send({ type: 'chat', id: self.id, text: msg });
   return null;
 }
@@ -557,6 +568,44 @@ function triggerDeploy(name: string) {
 }
 
 let lastCommit = 0;
+/** 이번에 내가 남긴 커밋 (내 커밋은 신고하지 않게) */
+const myCommitHashes = new Set<string>();
+
+/** 커밋 신고: 나에게는 바로 가리고, 서로 다른 사람 REPORTS_TO_HIDE명이 신고하면 DB가 모두에게서 숨겨요 */
+async function reportCommit(hash: string) {
+  if (myCommitHashes.has(hash)) {
+    ui.toast('내가 남긴 커밋은 신고할 수 없어요.');
+    return;
+  }
+  const slug = room.slug;
+  store.addReportedCommit(slug, hash);
+  showCommits(commits);
+  try {
+    const hidden = await net.reportCommit(hash, self.id);
+    ui.toast(
+      hidden
+        ? `🚩 신고했어요. ${REPORTS_TO_HIDE}명이 신고해서 모두에게서 가렸어요.`
+        : `🚩 신고했어요. 나에게는 바로 가려지고, ${REPORTS_TO_HIDE}명이 신고하면 모두에게서 가려져요.`,
+      'good',
+      4200,
+    );
+  } catch (e) {
+    console.warn(e);
+    const tooMany = e instanceof Error && e.message.includes('too many reports');
+    ui.toast(tooMany ? '신고가 너무 잦아요. 잠시 후 다시 해주세요. (나에게는 가려졌어요)' : '신고를 보내지 못했어요. 나에게만 가려졌어요.', 'bad', 4200);
+  }
+}
+
+/** 이 사람의 채팅·말풍선을 나에게서 가리거나 다시 보여요 */
+function toggleMute(id: string) {
+  const muted = !mutedIds.has(id);
+  store.setMuted(id, muted);
+  mutedIds = store.getMuted();
+  ui.setMuted(mutedIds);
+  const name = world.avatars.get(id)?.state.name ?? '그 사람';
+  ui.toast(muted ? `🙈 ${name}님의 채팅을 가렸어요. 아바타를 눌러 다시 풀 수 있어요.` : `${name}님의 채팅을 다시 보여요.`);
+}
+
 async function commit(type: string, msg: string): Promise<string | null> {
   if (Date.now() - lastCommit < 30e3) return `커밋은 30초에 한 번씩 남길 수 있어요. ${Math.ceil((30e3 - (Date.now() - lastCommit)) / 1000)}초 남았어요.`;
   if (hasBadWord(msg)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
@@ -571,6 +620,7 @@ async function commit(type: string, msg: string): Promise<string | null> {
     return '커밋을 저장하지 못했어요. 잠시 후 다시 해주세요.';
   }
   lastCommit = Date.now();
+  myCommitHashes.add(c.hash);
   addCommit(c);
   meAvatar().emote('⎇', 'commit!');
   ui.toast(`[main ${c.hash}] ${c.msg}`, 'good');
@@ -578,7 +628,7 @@ async function commit(type: string, msg: string): Promise<string | null> {
 }
 
 function addCommit(c: Commit) {
-  if (commits.some((x) => x.hash === c.hash)) return;
+  if (commits.some((x) => x.hash === c.hash) || store.getReportedCommits(room.slug).has(c.hash)) return;
   commits = [c, ...commits].slice(0, 30);
   world.room.gitlog.draw(commits, room.name);
   ui.setCommits(commits);
@@ -676,9 +726,9 @@ function onEvent(e: NetEvent) {
     }
     case 'chat': {
       const a = world.avatars.get(e.id);
-      if (!a || a.isSelf) return;
+      if (!a || a.isSelf || mutedIds.has(e.id)) return;
       a.say(e.text);
-      ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false });
+      ui.addChat({ id: e.id, name: a.state.name, lang: a.state.lang, text: e.text, mine: false });
       break;
     }
     case 'deploy':
@@ -853,6 +903,8 @@ ui.bind({
     net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
     ui.toast('프로필을 바꿨어요');
   },
+  onReportCommit: (hash) => void reportCommit(hash),
+  onToggleMute: toggleMute,
   onWave: (id) => {
     emote('wave', id);
     const a = world.avatars.get(id);

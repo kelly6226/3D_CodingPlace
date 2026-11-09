@@ -37,6 +37,8 @@ export type NetEvent =
   | { type: 'emote'; id: string; emote: string; to?: string }
   | { type: 'deploy'; id: string; name: string }
   | { type: 'commit'; commit: Commit }
+  /** 신고로 숨겨진 커밋이 있으니 방명록을 다시 읽으라는 알림 (내용은 믿지 않고 DB에서 다시 읽어요) */
+  | { type: 'commitHidden'; hash: string }
   | { type: 'chat'; id: string; text: string }
   | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
@@ -48,6 +50,8 @@ export interface NetHandlers {
   /** 지금 방에 있는 사람 전체(나 제외). 들어오고 나갈 때마다 호출 */
   onPeers(peers: PeerState[]): void;
   onEvent(e: NetEvent): void;
+  /** 방명록을 DB에서 다시 읽었을 때 (신고로 숨겨진 커밋이 빠진 목록) */
+  onCommits?(list: Commit[]): void;
   onRoomChange?(instance: number): void;
   onStatus?(s: 'connecting' | 'online' | 'offline'): void;
 }
@@ -89,6 +93,8 @@ export interface Net {
   send(e: NetEvent): void;
   loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
+  /** 커밋 신고. 신고가 쌓여 모두에게서 숨겨졌으면 true */
+  reportCommit(hash: string, reporter: string): Promise<boolean>;
 
   // ── 비밀번호 방 ────────────────────────────────
   /** 이 방에 들어갈 수 있는지: 비밀번호가 없는 방이거나, 이 브라우저에서 이미 비밀번호를 맞힌 방 */

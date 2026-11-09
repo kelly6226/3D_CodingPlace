@@ -110,13 +110,16 @@ alter table public.commits add constraint commits_text_clean check (
 
 create index if not exists commits_room_created_idx on public.commits (room, created_at desc);
 
+-- 신고가 쌓여 숨긴 커밋 (아래 5번 report_commit이 켜요). 다시 보이게 하려면 Table Editor에서 false로
+alter table public.commits add column if not exists hidden boolean not null default false;
+
 alter table public.commits enable row level security;
 
 drop policy if exists "commits are public" on public.commits;
 create policy "commits are public"
   on public.commits for select
   to anon, authenticated
-  using (not public.room_is_locked(room));
+  using (not hidden and not public.room_is_locked(room));
 
 drop policy if exists "anyone can commit" on public.commits;
 create policy "anyone can commit"
@@ -317,7 +320,9 @@ create trigger rooms_guard
 -- Supabase는 새 테이블에 anon/authenticated 권한을 넓게 주기 때문에,
 -- RLS와 별개로 "읽기 + 추가"만 남기고 나머지는 회수해요 (이중 잠금).
 revoke all on public.commits, public.rooms from anon, authenticated;
-grant select, insert on public.commits to anon, authenticated;
+grant select on public.commits to anon, authenticated;
+-- hidden은 직접 못 쓰게 컬럼을 정해서 (숨기는 건 신고 함수만)
+grant insert (room, hash, name, msg, lang) on public.commits to anon, authenticated;
 -- rooms 는 컬럼별로: pw_check 는 쓰기만 되고 읽을 수 없어요 (select * 도 막혀서 컬럼을 하나하나 적어요)
 grant select (id, created_at, slug, name, tags, is_public, creator, place, noise, has_password) on public.rooms to anon, authenticated;
 grant insert (slug, name, tags, is_public, creator, place, noise, pw_check) on public.rooms to anon, authenticated;
@@ -357,7 +362,7 @@ set search_path = public
 as $$
   select c.hash, c.name, c.msg, c.lang, c.created_at
   from public.commits c
-  where c.room = p_slug and public.room_key_ok(p_slug, p_check)
+  where c.room = p_slug and not c.hidden and public.room_key_ok(p_slug, p_check)
   order by c.created_at desc, c.id desc
   limit 30;
 $$;
@@ -385,3 +390,63 @@ revoke all on function public.locked_commits(text, text) from public, anon, auth
 grant execute on function public.locked_commits(text, text) to anon, authenticated;
 revoke all on function public.locked_commit(text, text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.locked_commit(text, text, text, text, text, text) to anon, authenticated;
+
+
+-- ── 5. 커밋 신고 ───────────────────────────────────
+-- 서로 다른 사람(브라우저 id) 2명이 신고하면 그 커밋을 숨겨요 (src/config.ts REPORTS_TO_HIDE와 같아야 해요).
+-- 로그인이 없어서 한 사람이 id를 바꿔 가며 신고할 수도 있어요. 그래서 숨기기만 하고 지우지는 않아요.
+-- 잘못 숨겨진 커밋은 Table Editor에서 commits.hidden을 false로 바꾸면 돌아와요. 신고 내역은 commit_reports에 있어요.
+create table if not exists public.commit_reports (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  commit_id bigint not null references public.commits (id) on delete cascade,
+  reporter text not null check (reporter ~ '^[0-9a-z-]{8,64}$'),
+  unique (commit_id, reporter)
+);
+
+alter table public.commit_reports enable row level security;
+revoke all on public.commit_reports from anon, authenticated;
+
+-- 신고하기. 숨겨졌으면 true. 비밀번호 방은 확인값(p_check)이 맞아야 해요
+create or replace function public.report_commit(p_room text, p_hash text, p_reporter text, p_check text default null)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  reports_to_hide constant int := 2;
+  target bigint;
+  is_hidden boolean;
+begin
+  if p_reporter is null or p_reporter !~ '^[0-9a-z-]{8,64}$' then
+    raise exception 'bad reporter';
+  end if;
+  if public.room_is_locked(p_room) and not public.room_key_ok(p_room, p_check) then
+    raise exception 'wrong key';
+  end if;
+  -- 도배 방지: 한 사람 1분에 5번, 전체 1분에 60번
+  if (select count(*) from public.commit_reports where reporter = p_reporter and created_at > now() - interval '1 minute') >= 5
+     or (select count(*) from public.commit_reports where created_at > now() - interval '1 minute') >= 60 then
+    raise exception 'too many reports, slow down';
+  end if;
+  select id into target from public.commits
+  where room = p_room and hash = p_hash and not hidden
+  order by created_at desc, id desc
+  limit 1;
+  if target is null then
+    return false;
+  end if;
+  insert into public.commit_reports (commit_id, reporter) values (target, p_reporter)
+  on conflict (commit_id, reporter) do nothing;
+  update public.commits set hidden = true
+  where id = target and (select count(*) from public.commit_reports where commit_id = target) >= reports_to_hide
+  returning hidden into is_hidden;
+  return coalesce(is_hidden, false);
+end;
+$$;
+
+create index if not exists commit_reports_created_idx on public.commit_reports (created_at desc);
+
+revoke all on function public.report_commit(text, text, text, text) from public, anon, authenticated;
+grant execute on function public.report_commit(text, text, text, text) to anon, authenticated;

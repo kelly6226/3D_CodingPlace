@@ -104,6 +104,8 @@ export class OnlineNet implements Net {
   private present = new Set<string>();
   private limiter = new RateLimiter();
   private pendingCommits = new Set<string>();
+  /** 숨겨진 커밋 알림을 받아서 다음에 읽을 때 목록 전체를 바꿔야 하는지 */
+  private reloadAllCommits = false;
   private commitTimer = 0;
   private lastCommitFlushAt = 0;
 
@@ -296,6 +298,7 @@ export class OnlineNet implements Net {
     clearTimeout(this.commitTimer);
     this.commitTimer = 0;
     this.pendingCommits.clear();
+    this.reloadAllCommits = false;
   }
 
   /** 방 채널 이름. 비밀번호 방은 끝에 열쇠 값이 붙어서, 비밀번호를 모르면 어느 채널인지 알 수 없어요. 열쇠가 없으면 null */
@@ -368,6 +371,11 @@ export class OnlineNet implements Net {
       this.queueCommit(e.commit.hash, ch);
       return;
     }
+    if (e.type === 'commitHidden') {
+      this.reloadAllCommits = true;
+      this.queueCommit(null, ch);
+      return;
+    }
     if (!this.present.has(e.id) || e.id === this.self.id) return;
     if (!this.limiter.allow(e.id, e.type)) return;
     this.h.onEvent(e);
@@ -377,8 +385,8 @@ export class OnlineNet implements Net {
    * 커밋 알림은 버리지 않고 모아 두되, DB를 읽는 건 COMMIT_REFRESH_GAP_MS에 한 번만.
    * (알림을 간격으로 버리면 진짜 커밋도 놓치고, 안 버리면 가짜 알림이 DB 읽기로 번져요)
    */
-  private queueCommit(hash: string, ch: RealtimeChannel) {
-    if (this.pendingCommits.size < MAX_PENDING_COMMITS) this.pendingCommits.add(hash);
+  private queueCommit(hash: string | null, ch: RealtimeChannel) {
+    if (hash && this.pendingCommits.size < MAX_PENDING_COMMITS) this.pendingCommits.add(hash);
     if (this.commitTimer) return;
     const wait = Math.max(COMMIT_FLUSH_DELAY_MS, this.lastCommitFlushAt + COMMIT_REFRESH_GAP_MS - Date.now());
     this.commitTimer = window.setTimeout(() => void this.flushCommits(ch), wait);
@@ -390,8 +398,11 @@ export class OnlineNet implements Net {
     this.lastCommitFlushAt = Date.now();
     const want = new Set(this.pendingCommits);
     this.pendingCommits.clear();
+    const reloadAll = this.reloadAllCommits;
+    this.reloadAllCommits = false;
     const list = await this.loadCommits(this.room);
     if (this.ch !== ch) return;
+    if (reloadAll) this.h.onCommits?.(list);
     for (const c of list.filter((x) => want.has(x.hash)).reverse()) this.h.onEvent({ type: 'commit', commit: c });
   }
 
@@ -474,6 +485,16 @@ export class OnlineNet implements Net {
       : await this.sb.from('commits').insert({ room: this.room, hash: c.hash, name: c.name, msg: c.msg, lang: c.lang });
     if (error) throw new Error(error.message);
     this.send({ type: 'commit', commit: c });
+  }
+
+  async reportCommit(hash: string, reporter: string): Promise<boolean> {
+    const key = store.getRoomKey(this.room);
+    const { data, error } = await this.sb.rpc('report_commit', { p_room: this.room, p_hash: hash, p_reporter: reporter, p_check: key?.check ?? null });
+    if (error) throw new Error(error.message);
+    const hidden = data === true;
+    // 모두에게서 숨겨졌으면 방 사람들에게 다시 읽으라고 알려요
+    if (hidden) this.send({ type: 'commitHidden', hash });
+    return hidden;
   }
 
   // ── 비밀번호 방 ───────────────────────────────

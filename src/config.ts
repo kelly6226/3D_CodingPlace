@@ -367,6 +367,9 @@ export const BUILTIN_ROOMS: RoomInfo[] = [
 /** 방 목록·방 이름 옆에 🔒를 붙일지: 링크로만 들어오는 방이거나 비밀번호가 있는 방 */
 export const isLockedRoom = (r: Pick<RoomInfo, 'isPublic' | 'hasPassword'>) => !r.isPublic || !!r.hasPassword;
 
+/** 서로 다른 사람 몇 명이 신고하면 커밋을 모두에게서 숨기는지. supabase/schema.sql report_commit의 reports_to_hide와 같아야 해요 */
+export const REPORTS_TO_HIDE = 2;
+
 export const DEFAULT_ROOM = 'pangyo';
 export const ROOM_SLUG_RE = /^[a-z0-9-]{3,32}$/;
 

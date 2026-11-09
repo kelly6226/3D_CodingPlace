@@ -18,6 +18,10 @@ export interface Profile {
 interface Saved {
   profile?: Profile;
   sound?: boolean;
+  /** 내가 신고한 커밋 (방 slug → 해시들). 신고한 사람에게는 바로 안 보여요 */
+  reported?: Record<string, string[]>;
+  /** 내가 가린 사람 id (그 사람의 채팅·말풍선이 안 보여요) */
+  muted?: string[];
   /** 방마다 내가 고른 배경 소리 (방 slug → 소리). 방 기본값과 같으면 지워요 */
   noise?: Record<string, string>;
   /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
@@ -125,6 +129,33 @@ export function clearRoomNoise(slug: string) {
   const saved = { ...cache.noise };
   delete saved[slug];
   cache.noise = saved;
+  persist();
+}
+
+/** 방마다 기억하는 신고한 커밋 수 (오래된 것부터 지움) */
+const MAX_REPORTED_PER_ROOM = 50;
+/** 기억하는 가린 사람 수 */
+const MAX_MUTED = 200;
+
+export function getReportedCommits(slug: string): Set<string> {
+  return new Set(cache.reported?.[slug] ?? []);
+}
+
+export function addReportedCommit(slug: string, hash: string) {
+  const list = (cache.reported?.[slug] ?? []).filter((h) => h !== hash);
+  list.push(hash);
+  cache.reported = { ...cache.reported, [slug]: list.slice(-MAX_REPORTED_PER_ROOM) };
+  persist();
+}
+
+export function getMuted(): Set<string> {
+  return new Set(Array.isArray(cache.muted) ? cache.muted : []);
+}
+
+export function setMuted(id: string, muted: boolean) {
+  const list = (cache.muted ?? []).filter((x) => x !== id);
+  if (muted) list.push(id);
+  cache.muted = list.slice(-MAX_MUTED);
   persist();
 }
 

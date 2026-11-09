@@ -112,6 +112,8 @@ export function cleanEvent(raw: unknown): NetEvent | null {
       const act = actionById(raw.act);
       return pid && act ? { type: 'act', id: pid, act: act.id } : null;
     }
+    case 'commitHidden':
+      return typeof raw.hash === 'string' && HASH_RE.test(raw.hash) ? { type: 'commitHidden', hash: raw.hash } : null;
     case 'commit': {
       const c = cleanCommit(raw.commit);
       return c ? { type: 'commit', commit: c } : null;
@@ -150,7 +152,7 @@ export function cleanCommit(raw: unknown): Commit | null {
  */
 export const COMMIT_REFRESH_GAP_MS = 5000;
 
-const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit'>, number> = {
+const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit' | 'commitHidden'>, number> = {
   move: 120,
   emote: 700,
   chat: CHAT_RECEIVE_GAP_MS,
@@ -162,7 +164,7 @@ const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit'>, number> = {
 
 export class RateLimiter {
   private last = new Map<string, number>();
-  allow(sender: string, type: Exclude<NetEvent['type'], 'commit'>, now = Date.now()): boolean {
+  allow(sender: string, type: Exclude<NetEvent['type'], 'commit' | 'commitHidden'>, now = Date.now()): boolean {
     const k = `${sender}:${type}`;
     const prev = this.last.get(k) ?? 0;
     if (now - prev < MIN_GAP[type]) return false;
