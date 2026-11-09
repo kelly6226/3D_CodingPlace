@@ -9,12 +9,14 @@ import {
   ROOM_SLUG_RE,
   builtinRoom,
   emoteById,
+  isNoiseId,
   isPlaceId,
   pageTitle,
   placeMeta,
   roomUrl,
   statusById,
   type ActionId,
+  type NoiseId,
   type PlaceId,
   type RoomInfo,
 } from './config';
@@ -24,7 +26,7 @@ import { hasBadWord } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
-import { UI } from './ui/ui';
+import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
 import { watchContextLoss } from './world/contextWatch';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
@@ -118,6 +120,7 @@ async function boot() {
   const def = places.placeDef(room.place);
   world = new World(stage, def);
   sound.setAmbience(def.ambience);
+  applyNoise(room);
   world.start(onFrame);
   watchContextLoss(world.renderer.domElement, {
     lost: () => ui.toast(`3D 화면이 멈췄어요 (접속 ${secondsSincePageLoad()}초 후)`, 'bad', CONTEXT_LOSS_TOAST_MS),
@@ -226,6 +229,20 @@ function applyPlace(r: RoomInfo) {
   return changed;
 }
 
+/** 이 방에서 들을 배경 소리: 내가 고른 게 있으면 그것, 없으면 방 기본값 */
+function applyNoise(r: RoomInfo) {
+  const current = store.getRoomNoise(r.slug) ?? r.noise;
+  sound.setNoise(current);
+  ui.setNoise({ current, roomDefault: r.noise });
+}
+
+function pickNoise(id: NoiseId) {
+  // 방 기본값을 다시 고르면 '내가 고른 것'을 지워요. 나중에 방 기본값이 바뀌면 그걸 따라가게
+  if (id === room.noise) store.clearRoomNoise(room.slug);
+  else store.setRoomNoise(room.slug, id);
+  applyNoise(room);
+}
+
 // ── 방 고르기 · 옮기기 · 만들기 ─────────────────────
 async function pickRoom(slug: string, push = true) {
   const r = roomsCache.find((x) => x.slug === slug) ?? (await net.getRoom(slug));
@@ -239,6 +256,7 @@ async function pickRoom(slug: string, push = true) {
     room = r;
     startInstance = 1;
     applyPlace(r);
+    applyNoise(r);
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
     history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
@@ -261,6 +279,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   ui.setPeers([]);
   // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
   applyPlace(r);
+  applyNoise(r);
   useBusy = false;
   self.seat = null;
   self.x = SPAWN.x;
@@ -281,16 +300,17 @@ async function switchRoom(r: RoomInfo, push = true) {
 }
 
 let lastRoomCreate = 0;
-async function createRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null> {
+async function createRoom({ name, tags, isPublic, place, noise }: RoomDraft): Promise<string | null> {
   const nm = name.trim().slice(0, 24);
   if (!nm) return '방 이름을 적어주세요.';
   if (hasBadWord(nm)) return '욕설이 들어 있어서 쓸 수 없어요. 다른 이름으로 적어주세요.';
   if (!isPlaceId(place)) return '장소를 골라주세요.';
+  if (!isNoiseId(noise)) return '배경 소리를 골라주세요.';
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
   let r: RoomInfo;
   try {
     // 비공개 방이 꺼져 있으면 화면과 상관없이 항상 공개 방으로 만듦
-    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: isPublic || !PRIVATE_ROOMS_ENABLED, place, creator: self?.name ?? profile.name });
+    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: isPublic || !PRIVATE_ROOMS_ENABLED, place, noise, creator: self?.name ?? profile.name });
   } catch (e) {
     console.warn(e);
     return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
@@ -761,6 +781,7 @@ ui.bind({
     sound.setEnabled(on);
     if (on) sound.start();
   },
+  onNoise: pickNoise,
   onShare: async () => {
     const link = roomUrl(room.slug);
     if (!(await copyText(link))) {

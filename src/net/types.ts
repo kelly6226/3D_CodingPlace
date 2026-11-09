@@ -1,5 +1,5 @@
 // 실시간 연결(온라인/데모)이 공통으로 지키는 약속
-import type { ActionId, PlaceId, RoomInfo } from '../config';
+import type { ActionId, NoiseId, PlaceId, RoomInfo } from '../config';
 import type { Outfit } from '../look';
 
 export interface PeerState {
@@ -55,6 +55,7 @@ export interface NewRoom {
   tags: string[];
   isPublic: boolean;
   place: PlaceId;
+  noise: NoiseId;
   creator: string;
 }
 

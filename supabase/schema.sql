@@ -123,6 +123,13 @@ alter table public.rooms drop constraint if exists rooms_place_check;
 alter table public.rooms add constraint rooms_place_check
   check (place in ('cafe', 'serverroom', 'studio', 'hackathon'));
 
+-- 방마다 기본 배경 소리 (src/config.ts의 NOISES와 같아야 해요). 들어온 사람은 각자 바꿀 수 있어요
+-- 'place'는 장소마다 원래 있던 소리라서, 이미 만든 방은 지금과 똑같이 들려요
+alter table public.rooms add column if not exists noise text not null default 'place';
+alter table public.rooms drop constraint if exists rooms_noise_check;
+alter table public.rooms add constraint rooms_noise_check
+  check (noise in ('place', 'off', 'balanced', 'bright', 'dark', 'ocean', 'rain', 'stream', 'night', 'fire'));
+
 alter table public.rooms drop constraint if exists rooms_text_clean;
 alter table public.rooms add constraint rooms_text_clean check (
   btrim(name) <> '' and name !~ '[[:cntrl:]]'
@@ -157,6 +164,7 @@ returns table (
   tags text[],
   is_public boolean,
   place text,
+  noise text,
   creator text,
   created_at timestamptz
 )
@@ -165,7 +173,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select r.slug, r.name, r.tags, r.is_public, r.place, r.creator, r.created_at
+  select r.slug, r.name, r.tags, r.is_public, r.place, r.noise, r.creator, r.created_at
   from public.rooms r
   where r.slug = p_slug
   limit 1;
