@@ -5,3 +5,5 @@ dist
 !.env.example
 .vercel
 .DS_Store
+# 배경 소리 원본 (Freesound에서 받은 그대로). 루프로 만든 건 public/sounds
+sounds-raw

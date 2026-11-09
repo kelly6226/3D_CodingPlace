@@ -1,7 +1,8 @@
 // 소리는 전부 Web Audio로 합성 (빗소리, 웅성임, 팬 소리, 타자 소리, 사이렌, 꽥, 야옹)
-// 고를 수 있는 배경 소리(백색소음)는 noiseBeds.ts에 있어요.
+// 고를 수 있는 배경 소리는 noiseBeds.ts(합성 소음)와 noiseRecordings.ts(녹음)에 있어요.
 import type { NoiseId } from './config';
-import { makeNoiseBuffers, playBed, type NoiseBuffers } from './noiseBeds';
+import { isBed, makeNoiseBuffers, playBed, type NoiseBuffers } from './noiseBeds';
+import { isRecording, playRecording } from './noiseRecordings';
 
 export type Ambience = 'cafe' | 'server' | 'studio' | 'hackathon';
 
@@ -32,7 +33,7 @@ class Sound {
   private mix: { rain: GainNode; hum: GainNode; fan: GainNode } | null = null;
   private amb: Ambience = 'cafe';
   private noise!: AudioBuffer;
-  /** 지금 고른 배경 소리. 'place'면 장소 소리(MIX), 나머지는 noiseBeds.ts */
+  /** 지금 고른 배경 소리. 'place'면 장소 소리(MIX), 'off'면 없음, 나머지는 합성 소음이나 녹음 */
   private noiseId: NoiseId = 'place';
   private bedBuffers: NoiseBuffers | null = null;
   private stopBed: (() => void) | null = null;
@@ -181,9 +182,13 @@ class Sound {
     this.stopBed?.();
     this.stopBed = null;
     const id = this.noiseId;
-    if (!this.ctx || !this.ambience || id === 'place' || id === 'off') return;
-    this.bedBuffers ??= makeNoiseBuffers(this.ctx);
-    this.stopBed = playBed(this.ctx, this.ambience, id, this.bedBuffers);
+    if (!this.ctx || !this.ambience) return;
+    if (isRecording(id)) {
+      this.stopBed = playRecording(this.ctx, this.ambience, id);
+    } else if (isBed(id)) {
+      this.bedBuffers ??= makeNoiseBuffers(this.ctx);
+      this.stopBed = playBed(this.ctx, this.ambience, id, this.bedBuffers);
+    }
   }
 
   private burst(freq: number, dur: number, vol: number, type: BiquadFilterType = 'bandpass') {

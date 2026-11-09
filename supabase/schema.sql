@@ -143,7 +143,11 @@ alter table public.rooms add constraint rooms_place_check
 alter table public.rooms add column if not exists noise text not null default 'place';
 alter table public.rooms drop constraint if exists rooms_noise_check;
 alter table public.rooms add constraint rooms_noise_check
-  check (noise in ('place', 'off', 'balanced', 'bright', 'dark', 'ocean', 'rain', 'stream', 'night', 'fire'));
+  check (noise in (
+    'place', 'off', 'balanced', 'bright', 'dark',
+    'fire', 'fireplace', 'rain', 'ocean', 'stream', 'forest', 'night',
+    'cafe', 'library', 'typing', 'clock'
+  ));
 
 -- 비밀번호 방 (가벼운 잠금).
 -- 비밀번호는 브라우저에서 PBKDF2로 늘려서 두 값으로 나눠요: 확인값(pw_check)과 채널 이름.
