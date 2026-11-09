@@ -280,21 +280,95 @@ export interface RoomInfo {
   name: string;
   tags: string[];
   isPublic: boolean;
+  /** 비밀번호를 맞힌 사람만 들어오는 방인지. 목록에는 보이되 🔒로 구분해요 */
+  hasPassword?: boolean;
   /** 어느 장소인지 (PLACES의 id) */
   place: PlaceId;
+  /** 방에 처음 들어온 사람이 듣는 배경 소리 (NOISES의 id). 각자 바꿀 수 있어요 */
+  noise: NoiseId;
   builtin?: boolean;
   creator?: string;
   createdAt?: number;
 }
 
+// ── 배경 소리 ─────────────────────────────────────
+// 맥 '배경 사운드'(설정 → 손쉬운 사용 → 오디오)를 참고했어요.
+// 소음 세 가지는 noiseBeds.ts에서 합성하고, 자연·공간 소리는 Freesound의 CC0 녹음(public/sounds, 출처는 SOURCES.md)을 써요.
+// id는 supabase/schema.sql의 rooms_noise_check와 같아야 해요.
+
+export type NoiseId =
+  | 'place'
+  | 'off'
+  | 'balanced'
+  | 'bright'
+  | 'dark'
+  | 'fire'
+  | 'fireplace'
+  | 'rain'
+  | 'ocean'
+  | 'stream'
+  | 'forest'
+  | 'night'
+  | 'cafe'
+  | 'library'
+  | 'typing'
+  | 'clock';
+
+/** 배경 소리 시트에서 묶어 보여주는 단위 */
+export type NoiseGroup = 'basic' | 'nature' | 'space';
+
+export interface NoiseMeta {
+  id: NoiseId;
+  emoji: string;
+  name: string;
+  group: NoiseGroup;
+}
+
+export const NOISE_GROUPS: { id: NoiseGroup; label: string }[] = [
+  { id: 'basic', label: '기본 · 소음' },
+  { id: 'nature', label: '자연' },
+  { id: 'space', label: '공간 · 생활' },
+];
+
+export const NOISES: NoiseMeta[] = [
+  { id: 'place', emoji: '🏠', name: '장소 소리', group: 'basic' },
+  { id: 'off', emoji: '🔇', name: '없음', group: 'basic' },
+  { id: 'balanced', emoji: '〰️', name: '균형 잡힌 소음', group: 'basic' },
+  { id: 'bright', emoji: '✨', name: '밝은 소음', group: 'basic' },
+  { id: 'dark', emoji: '🌑', name: '어두운 소음', group: 'basic' },
+  { id: 'fire', emoji: '🔥', name: '장작·모닥불', group: 'nature' },
+  { id: 'rain', emoji: '🌧️', name: '비', group: 'nature' },
+  { id: 'ocean', emoji: '🌊', name: '바다', group: 'nature' },
+  { id: 'stream', emoji: '🏞️', name: '시냇물', group: 'nature' },
+  { id: 'forest', emoji: '🐦', name: '숲 새소리', group: 'nature' },
+  { id: 'night', emoji: '🦗', name: '밤 풀벌레', group: 'nature' },
+  { id: 'cafe', emoji: '☕', name: '카페 웅성임', group: 'space' },
+  { id: 'library', emoji: '📚', name: '도서관', group: 'space' },
+  { id: 'fireplace', emoji: '🪵', name: '벽난로', group: 'space' },
+  { id: 'typing', emoji: '⌨️', name: '키보드 타자', group: 'space' },
+  { id: 'clock', emoji: '🕰️', name: '시계 초침', group: 'space' },
+];
+
+/** 장소마다 원래 있던 소리(빗소리·웅성임·팬). 예전에 만든 방과 기본 방은 이걸 써요 */
+export const DEFAULT_NOISE: NoiseId = 'place';
+
+export const noiseMeta = (id?: string | null): NoiseMeta => NOISES.find((n) => n.id === id) ?? NOISES[0];
+export const isNoiseId = (id: unknown): id is NoiseId => NOISES.some((n) => n.id === id);
+
 /** 처음부터 있는 방들. DB에 없어도 늘 목록에 떠요 */
 export const BUILTIN_ROOMS: RoomInfo[] = [
-  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true, place: 'cafe' },
-  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true, place: 'cafe' },
-  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true, place: 'serverroom' },
-  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true, place: 'studio' },
-  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon' },
+  { slug: 'pangyo', name: '판교 새벽 카페', tags: ['free'], isPublic: true, builtin: true, place: 'cafe', noise: DEFAULT_NOISE },
+  { slug: 'frontend', name: '프론트엔드 방', tags: ['frontend'], isPublic: true, builtin: true, place: 'cafe', noise: DEFAULT_NOISE },
+  { slug: 'backend', name: '백엔드 방', tags: ['backend'], isPublic: true, builtin: true, place: 'serverroom', noise: DEFAULT_NOISE },
+  { slug: 'algo', name: '코테 준비방', tags: ['algo', 'job'], isPublic: true, builtin: true, place: 'studio', noise: DEFAULT_NOISE },
+  { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon', noise: DEFAULT_NOISE },
 ];
+
+/** 방 목록·방 이름 옆에 🔒를 붙일지: 링크로만 들어오는 방이거나 비밀번호가 있는 방 */
+export const isLockedRoom = (r: Pick<RoomInfo, 'isPublic' | 'hasPassword'>) => !r.isPublic || !!r.hasPassword;
+
+/** 서로 다른 사람 몇 명이 신고하면 커밋을 모두에게서 숨기는지. supabase/schema.sql report_commit의 reports_to_hide와 같아야 해요 */
+export const REPORTS_TO_HIDE = 2;
 
 export const DEFAULT_ROOM = 'pangyo';
 export const ROOM_SLUG_RE = /^[a-z0-9-]{3,32}$/;
@@ -316,6 +390,21 @@ export function roomAddress(slug: string): string {
   // 웹에서 /r/<방>으로 들어온 경우 경로의 방이 ?room= 보다 먼저 읽히므로, 경로는 루트로 되돌림
   const base = location.pathname.replace(/^\/r\/[^/]+\/?$/, '/');
   return slug === DEFAULT_ROOM ? base : `${base}?room=${slug}`;
+}
+
+// ── 비밀번호 방 ───────────────────────────────────
+// 비밀번호는 브라우저에서 열쇠로 바꿔 쓰고(net/roomKey.ts) 원문은 서버로 가지 않아요.
+// 서버가 틀린 횟수를 세어 막지 않는 가벼운 잠금이라, 맞히기 어렵도록 짧은 건 받지 않아요.
+export const ROOM_PASSWORD_MIN_LENGTH = 6;
+export const ROOM_PASSWORD_MAX_LENGTH = 40;
+
+/** 비밀번호에 문제가 있으면 이유를 돌려줘요 */
+export function roomPasswordProblem(pw: string): string | null {
+  if (pw.trim() === '') return '비밀번호를 적어주세요.';
+  const length = [...pw].length;
+  if (length < ROOM_PASSWORD_MIN_LENGTH) return `비밀번호는 ${ROOM_PASSWORD_MIN_LENGTH}글자 이상이어야 해요.`;
+  if (length > ROOM_PASSWORD_MAX_LENGTH) return `비밀번호는 ${ROOM_PASSWORD_MAX_LENGTH}글자까지 쓸 수 있어요.`;
+  return null;
 }
 
 // ── 장소 ─────────────────────────────────────────

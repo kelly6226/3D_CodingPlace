@@ -1,5 +1,5 @@
 // 실시간 연결(온라인/데모)이 공통으로 지키는 약속
-import type { ActionId, PlaceId, RoomInfo } from '../config';
+import type { ActionId, NoiseId, PlaceId, RoomInfo } from '../config';
 import type { Outfit } from '../look';
 
 export interface PeerState {
@@ -37,15 +37,21 @@ export type NetEvent =
   | { type: 'emote'; id: string; emote: string; to?: string }
   | { type: 'deploy'; id: string; name: string }
   | { type: 'commit'; commit: Commit }
+  /** 신고로 숨겨진 커밋이 있으니 방명록을 다시 읽으라는 알림 (내용은 믿지 않고 DB에서 다시 읽어요) */
+  | { type: 'commitHidden'; hash: string }
   | { type: 'chat'; id: string; text: string }
   | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
   | { type: 'coffee'; id: string };
 
+export type JoinResult = 'ok' | 'wrong' | 'error';
+
 export interface NetHandlers {
   /** 지금 방에 있는 사람 전체(나 제외). 들어오고 나갈 때마다 호출 */
   onPeers(peers: PeerState[]): void;
   onEvent(e: NetEvent): void;
+  /** 방명록을 DB에서 다시 읽었을 때 (신고로 숨겨진 커밋이 빠진 목록) */
+  onCommits?(list: Commit[]): void;
   onRoomChange?(instance: number): void;
   onStatus?(s: 'connecting' | 'online' | 'offline'): void;
 }
@@ -55,11 +61,16 @@ export interface NewRoom {
   tags: string[];
   isPublic: boolean;
   place: PlaceId;
+  noise: NoiseId;
   creator: string;
+  /** 정하면 비밀번호 방이 돼요 */
+  password?: string;
 }
 
 export interface Net {
   readonly mode: 'online' | 'demo';
+  /** 비밀번호 방을 만들 수 있는지 (실시간 서버에 연결된 모드에서만) */
+  readonly canLockRooms: boolean;
   readonly instance: number;
   /** 지금 들어가 있는 방 */
   readonly room: string;
@@ -82,4 +93,12 @@ export interface Net {
   send(e: NetEvent): void;
   loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
+  /** 커밋 신고. 신고가 쌓여 모두에게서 숨겨졌으면 true */
+  reportCommit(hash: string, reporter: string): Promise<boolean>;
+
+  // ── 비밀번호 방 ────────────────────────────────
+  /** 이 방에 들어갈 수 있는지: 비밀번호가 없는 방이거나, 이 브라우저에서 이미 비밀번호를 맞힌 방 */
+  hasRoomAccess(room: RoomInfo): Promise<boolean>;
+  /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
+  joinRoom(slug: string, password: string): Promise<JoinResult>;
 }

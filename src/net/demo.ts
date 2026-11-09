@@ -5,6 +5,7 @@ import {
   BOT_COMMITS,
   BUILTIN_ROOMS,
   DEFAULT_NAMES,
+  DEFAULT_NOISE,
   EMOTES,
   HAIR_COLORS,
   HOODIE_COLORS,
@@ -12,6 +13,7 @@ import {
   SKIN_TONES,
   STATUSES,
   builtinRoom,
+  isNoiseId,
   isPlaceId,
   newRoomSlug,
   placeMeta,
@@ -21,7 +23,7 @@ import { randomOutfit } from '../look';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
-import type { Commit, Net, NetHandlers, NewRoom, PeerState } from './types';
+import type { Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState } from './types';
 
 type SavedCommit = Commit & { room?: string };
 
@@ -39,6 +41,8 @@ export const randomHash = () =>
 
 export class DemoNet implements Net {
   readonly mode = 'demo' as const;
+  /** 데모 모드엔 서버가 없어서 비밀번호 방을 만들 수 없어요 */
+  readonly canLockRooms = false;
   readonly instance = 1;
   room = '';
   private bots: PeerState[] = [];
@@ -52,8 +56,12 @@ export class DemoNet implements Net {
 
   // ── 방 목록 (이 브라우저에만 저장) ────────────────
   private savedRooms(): RoomInfo[] {
-    // 예전에 저장한 방에는 place가 없을 수 있어서 카페로 채움
-    return getDemoRooms<RoomInfo>().map((r) => ({ ...r, place: isPlaceId(r.place) ? r.place : 'cafe' }));
+    // 예전에 저장한 방에는 place·noise가 없을 수 있어서 카페와 장소 소리로 채움
+    return getDemoRooms<RoomInfo>().map((r) => ({
+      ...r,
+      place: isPlaceId(r.place) ? r.place : 'cafe',
+      noise: isNoiseId(r.noise) ? r.noise : DEFAULT_NOISE,
+    }));
   }
 
   async listRooms(): Promise<RoomInfo[]> {
@@ -65,7 +73,7 @@ export class DemoNet implements Net {
   }
 
   async createRoom(r: NewRoom): Promise<RoomInfo> {
-    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, creator: r.creator, createdAt: Date.now() };
+    const room: RoomInfo = { slug: newRoomSlug(), name: r.name, tags: r.tags, isPublic: r.isPublic, place: r.place, noise: r.noise, creator: r.creator, createdAt: Date.now() };
     setDemoRooms([room, ...this.savedRooms()]);
     return room;
   }
@@ -315,10 +323,22 @@ export class DemoNet implements Net {
     return this.commits.slice();
   }
 
+  /** 데모 모드는 신고를 모을 서버가 없어서, 신고한 사람 화면에서만 가려요 (main.ts) */
+  async reportCommit(): Promise<boolean> {
+    return false;
+  }
+
   async postCommit(c: Commit) {
     const mine = getDemoCommits<SavedCommit>();
     mine.unshift({ ...c, room: this.room });
     setDemoCommits(mine);
     this.commits.unshift(c);
+  }
+
+  async hasRoomAccess(): Promise<boolean> {
+    return true;
+  }
+  async joinRoom(): Promise<JoinResult> {
+    return 'error';
   }
 }

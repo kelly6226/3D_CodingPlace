@@ -1,5 +1,5 @@
 // 브라우저에만 남는 개인 기록 (프로필, 커피, 소리 설정)
-import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS } from './config';
+import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS, isNoiseId, type NoiseId } from './config';
 import { DEFAULT_OUTFIT, normalizeOutfit, type Outfit } from './look';
 
 const KEY = 'mogakco:v1';
@@ -18,12 +18,26 @@ export interface Profile {
 interface Saved {
   profile?: Profile;
   sound?: boolean;
+  /** 내가 신고한 커밋 (방 slug → 해시들). 신고한 사람에게는 바로 안 보여요 */
+  reported?: Record<string, string[]>;
+  /** 방마다 내가 고른 배경 소리 (방 slug → 소리). 방 기본값과 같으면 지워요 */
+  noise?: Record<string, string>;
   /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
   wardrobeOpened?: boolean;
   coffee?: { date: string; count: number };
   demoCommits?: unknown[];
   demoRooms?: unknown[];
+  /** 비밀번호를 맞힌 방의 열쇠 (방 주소 → 열쇠). 오래된 것부터 밀려나요 */
+  roomKeys?: Record<string, StoredRoomKey>;
 }
+
+export interface StoredRoomKey {
+  check: string;
+  topic: string;
+}
+
+/** 열쇠를 기억해 둘 방 수. 넘으면 오래된 것부터 잊어서, 다시 비밀번호를 물어요 */
+const ROOM_KEYS_MAX = 30;
 
 let cache: Saved = {};
 try {
@@ -88,6 +102,48 @@ export function setSound(on: boolean) {
   persist();
 }
 
+/** 방마다 기억하는 배경 소리는 최근 이만큼만 (오래된 것부터 지움) */
+const MAX_SAVED_NOISES = 50;
+
+/** 이 방에서 내가 고른 배경 소리. 고른 적 없으면 null (방 기본값을 써요) */
+export function getRoomNoise(slug: string): NoiseId | null {
+  const id = cache.noise?.[slug];
+  return isNoiseId(id) ? id : null;
+}
+
+export function setRoomNoise(slug: string, id: NoiseId) {
+  const saved = { ...cache.noise };
+  // 지웠다 다시 넣어서 '최근에 고른 방'이 맨 뒤로 가게 해요
+  delete saved[slug];
+  saved[slug] = id;
+  const slugs = Object.keys(saved);
+  for (const old of slugs.slice(0, Math.max(0, slugs.length - MAX_SAVED_NOISES))) delete saved[old];
+  cache.noise = saved;
+  persist();
+}
+
+export function clearRoomNoise(slug: string) {
+  if (!cache.noise || !(slug in cache.noise)) return;
+  const saved = { ...cache.noise };
+  delete saved[slug];
+  cache.noise = saved;
+  persist();
+}
+
+/** 방마다 기억하는 신고한 커밋 수 (오래된 것부터 지움) */
+const MAX_REPORTED_PER_ROOM = 50;
+
+export function getReportedCommits(slug: string): Set<string> {
+  return new Set(cache.reported?.[slug] ?? []);
+}
+
+export function addReportedCommit(slug: string, hash: string) {
+  const list = (cache.reported?.[slug] ?? []).filter((h) => h !== hash);
+  list.push(hash);
+  cache.reported = { ...cache.reported, [slug]: list.slice(-MAX_REPORTED_PER_ROOM) };
+  persist();
+}
+
 export function hasOpenedWardrobe(): boolean {
   return cache.wardrobeOpened === true;
 }
@@ -126,5 +182,17 @@ export function getDemoRooms<T>(): T[] {
 
 export function setDemoRooms<T>(list: T[]) {
   cache.demoRooms = list.slice(0, 30);
+  persist();
+}
+
+export function getRoomKey(slug: string): StoredRoomKey | null {
+  const k = cache.roomKeys?.[slug];
+  return k && typeof k.check === 'string' && typeof k.topic === 'string' ? k : null;
+}
+
+export function setRoomKey(slug: string, key: StoredRoomKey) {
+  // 객체는 넣은 순서를 기억하니까, 다시 넣을 땐 빼고 넣어서 맨 뒤(가장 최근)로 보내요
+  const { [slug]: _old, ...rest } = cache.roomKeys ?? {};
+  cache.roomKeys = Object.fromEntries([...Object.entries(rest), [slug, key]].slice(-ROOM_KEYS_MAX));
   persist();
 }

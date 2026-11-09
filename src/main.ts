@@ -6,26 +6,31 @@ import {
   DEFAULT_ROOM,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
+  REPORTS_TO_HIDE,
   ROOM_SLUG_RE,
   builtinRoom,
   emoteById,
+  isNoiseId,
   isPlaceId,
   pageTitle,
   placeMeta,
   roomAddress,
+  roomPasswordProblem,
   statusById,
   type ActionId,
+  type NoiseId,
   type PlaceId,
   type RoomInfo,
 } from './config';
 import { entryRoomParam, shareRoom } from './toss';
 import type { Look } from './look';
 import { sound } from './audio';
-import { hasBadWord } from './net/badwords';
+import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
-import { UI } from './ui/ui';
+import { Tips } from './ui/tips';
+import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
 import { watchContextLoss } from './world/contextWatch';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
@@ -125,6 +130,7 @@ async function boot() {
   const def = places.placeDef(room.place);
   world = new World(stage, def);
   sound.setAmbience(def.ambience);
+  applyNoise(room);
   world.start(onFrame);
   watchContextLoss(world.renderer.domElement, {
     lost: () => ui.toast(`3D 화면이 멈췄어요 (접속 ${secondsSincePageLoad()}초 후)`, 'bad', CONTEXT_LOSS_TOAST_MS),
@@ -151,14 +157,22 @@ async function loadRoomCommits() {
   const slug = room.slug;
   const list = await Promise.race([net.loadCommits(slug), wait(5000).then(() => [] as Commit[])]);
   if (slug !== room.slug) return; // 그 사이 방을 옮겼으면 버림
-  commits = list;
-  world.room.gitlog.draw(commits, room.name);
-  ui.setCommits(commits);
+  showCommits(list);
   document.title = pageTitle(room);
+}
+
+/** 방명록을 TV와 시트에 그려요. 내가 신고한 커밋은 빼요 */
+function showCommits(list: Commit[]) {
+  const reported = store.getReportedCommits(room.slug);
+  commits = list.filter((c) => !reported.has(c.hash));
+  world.room.gitlog.draw(commits, room.name);
+  ui.setCommits(commits, myCommitHashes);
 }
 
 // ── 2. 입장 ──────────────────────────────────────
 async function enter(p: store.Profile) {
+  // saveProfile 전에 봐야 해요. 저장하고 나면 항상 '저장된 프로필 있음'이 돼요
+  const firstVisit = !store.hasSavedProfile();
   store.saveProfile(p);
   sound.start();
   enteredAt = Date.now();
@@ -180,6 +194,7 @@ async function enter(p: store.Profile) {
     {
       onPeers,
       onEvent,
+      onCommits: showCommits,
       onStatus: (s) => {
         ui.setConn(s);
         if (s === 'offline' && !connWarned) {
@@ -205,7 +220,53 @@ async function enter(p: store.Profile) {
   if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', roomAddress(room.slug));
 
   await wait(700);
-  autoSeat(true);
+  // 처음 온 사람은 자리 안내를 토스트 대신 안내 메모 첫 장으로 보여줘요
+  autoSeat(!firstVisit);
+  if (firstVisit) {
+    await wait(TIPS_DELAY_MS);
+    showTips();
+  }
+}
+
+// ── 처음 안내 ──────────────────────────────────────
+/** 자리로 걸어가는 걸 잠깐 보여준 뒤 안내를 띄워요 */
+const TIPS_DELAY_MS = 1600;
+const tips = new Tips();
+
+/** 기능 옆에 하나씩 붙이는 안내. 처음 왔을 때 한 번, ⚙️에서 다시 볼 수 있어요 */
+function showTips() {
+  tips.start(
+    [
+      {
+        emoji: '🪑',
+        title: '여기가 오늘 자리예요',
+        body: '다른 빈자리를 누르면 옮겨 앉고, 바닥을 누르면 그쪽으로 걸어가요.',
+        target: () => {
+          const me = world.avatars.get(self.id);
+          return me ? world.toScreen(me.position.clone().setY(2)) : null;
+        },
+      },
+      {
+        emoji: '💬',
+        title: '한마디 걸어 보기',
+        body: '보낸 말은 머리 위 말풍선으로 잠깐 떠요. 남겨 두고 싶은 말은 📌로 방명록에 붙여요.',
+        target: () => document.getElementById('act-chat'),
+      },
+      {
+        emoji: '⎇',
+        title: '오늘 한 일 커밋하기',
+        body: '벽에 걸린 TV의 git log에 올라가요. 같은 방 사람들이 다 같이 봐요.',
+        target: () => document.getElementById('act-commit'),
+      },
+      {
+        emoji: '🎧',
+        title: '배경 소리 고르기',
+        body: '모닥불, 빗소리, 도서관 같은 소리로 바꿀 수 있어요. 나한테만 들려요.',
+        target: () => document.getElementById('noise-btn'),
+      },
+    ],
+    () => {},
+  );
 }
 
 /** 장소마다 먼저 앉혀줄 자리 (카페는 창가 바, 서버실은 랙 앞 바닥…) */
@@ -233,7 +294,36 @@ function applyPlace(r: RoomInfo) {
   return changed;
 }
 
+/** 이 방에서 들을 배경 소리: 내가 고른 게 있으면 그것, 없으면 방 기본값 */
+function applyNoise(r: RoomInfo) {
+  const current = store.getRoomNoise(r.slug) ?? r.noise;
+  sound.setNoise(current);
+  ui.setNoise({ current, roomDefault: r.noise });
+}
+
+function pickNoise(id: NoiseId) {
+  // 방 기본값을 다시 고르면 '내가 고른 것'을 지워요. 나중에 방 기본값이 바뀌면 그걸 따라가게
+  if (id === room.noise) store.clearRoomNoise(room.slug);
+  else store.setRoomNoise(room.slug, id);
+  applyNoise(room);
+}
+
 // ── 방 고르기 · 옮기기 · 만들기 ─────────────────────
+const JOIN_PROBLEM = {
+  wrong: '비밀번호가 맞지 않아요.',
+  error: '확인하지 못했어요. 잠시 뒤에 다시 해주세요.',
+} as const;
+
+/** 방에 들어갈 수 있는지. 비밀번호 방이고 아직 못 맞혔으면 비밀번호를 물어봐요. 못 들어가면 false */
+async function unlockRoom(r: RoomInfo): Promise<boolean> {
+  if (!r.hasPassword) return true;
+  if (await net.hasRoomAccess(r)) return true;
+  return ui.askRoomPassword(r.name, async (password) => {
+    const result = await net.joinRoom(r.slug, password);
+    return result === 'ok' ? null : JOIN_PROBLEM[result];
+  });
+}
+
 async function pickRoom(slug: string, push = true) {
   const r = roomsCache.find((x) => x.slug === slug) ?? (await net.getRoom(slug));
   if (!r) {
@@ -246,10 +336,16 @@ async function pickRoom(slug: string, push = true) {
     room = r;
     startInstance = 1;
     applyPlace(r);
+    applyNoise(r);
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
     history.replaceState(null, '', roomAddress(r.slug));
     await loadRoomCommits();
+    return;
+  }
+  if (!(await unlockRoom(r))) {
+    // 뒤로가기로 주소만 먼저 바뀐 경우, 지금 방 주소로 되돌려요
+    if (!push) history.replaceState(null, '', room.slug === DEFAULT_ROOM ? '/' : `/r/${room.slug}`);
     return;
   }
   await switchRoom(r, push);
@@ -268,6 +364,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   ui.setPeers([]);
   // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
   applyPlace(r);
+  applyNoise(r);
   useBusy = false;
   self.seat = null;
   self.x = SPAWN.x;
@@ -288,18 +385,28 @@ async function switchRoom(r: RoomInfo, push = true) {
 }
 
 let lastRoomCreate = 0;
-async function createRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null> {
+async function createRoom({ name, tags, isPublic, place, noise, password = '' }: RoomDraft): Promise<string | null> {
   const nm = name.trim().slice(0, 24);
   if (!nm) return '방 이름을 적어주세요.';
-  if (hasBadWord(nm)) return '욕설이 들어 있어서 쓸 수 없어요. 다른 이름으로 적어주세요.';
+  if (hasBadWord(nm)) return `${BLOCKED_WORDS_REASON} 다른 이름으로 적어주세요.`;
   if (!isPlaceId(place)) return '장소를 골라주세요.';
+  if (!isNoiseId(noise)) return '배경 소리를 골라주세요.';
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
+  const hasPassword = password !== '';
+  if (hasPassword) {
+    if (!net.canLockRooms) return '비밀번호 방은 지금 만들 수 없어요. 실시간 서버에 연결됐을 때 다시 해주세요.';
+    const problem = roomPasswordProblem(password);
+    if (problem) return problem;
+  }
   let r: RoomInfo;
   try {
     // 비공개 방이 꺼져 있으면 화면과 상관없이 항상 공개 방으로 만듦
-    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: isPublic || !PRIVATE_ROOMS_ENABLED, place, creator: self?.name ?? profile.name });
+    // 비밀번호 방은 목록에 보이는 공개 방이에요 (들어올 때 비밀번호로 막아요)
+    const listed = hasPassword || isPublic || !PRIVATE_ROOMS_ENABLED;
+    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: listed, place, noise, creator: self?.name ?? profile.name, password: hasPassword ? password : undefined });
   } catch (e) {
     console.warn(e);
+    if (isBlockedWordsError(e)) return `${BLOCKED_WORDS_REASON} 방 이름이나 닉네임을 바꿔주세요.`;
     return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
   }
   lastRoomCreate = Date.now();
@@ -308,8 +415,15 @@ async function createRoom(name: string, tags: string[], isPublic: boolean, place
   ui.closeSheet();
   if (self) await switchRoom(r);
   else await pickRoom(r.slug);
-  ui.toast(`"${r.name}" 방을 만들었어요. 🔗 버튼으로 친구에게 보내면 바로 이 방으로 들어와요.`, 'good', 6000);
+  ui.toast(createdMessage(r), 'good', 6000);
   return null;
+}
+
+/** 방을 만든 뒤 안내. 토스 앱은 주소창이 없어서 🔗(토스 공유 시트)로 보내게 해요 */
+function createdMessage(r: RoomInfo): string {
+  const head = `"${r.name}" 방을 만들었어요. 🔗 버튼으로 친구에게 보내면 바로 이 방으로 들어와요.`;
+  if (r.hasPassword) return `${head} 비밀번호도 함께 알려주세요. 비밀번호는 만든 뒤에 바꿀 수 없어요.`;
+  return head;
 }
 
 addEventListener('popstate', () => {
@@ -406,7 +520,7 @@ let lastChat = 0;
 function chat(text: string): string | null {
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
-  if (hasBadWord(text)) return '욕설이 들어 있어서 보낼 수 없어요. 다른 말로 적어주세요.';
+  if (hasBadWord(text)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
   const msg = text.slice(0, CHAT_MAX_LENGTH);
   lastChat = Date.now();
   meAvatar().say(msg);
@@ -489,18 +603,50 @@ function triggerDeploy(name: string) {
 }
 
 let lastCommit = 0;
+/** 이번에 내가 남긴 커밋 (내 커밋은 신고하지 않게) */
+const myCommitHashes = new Set<string>();
+
+/** 커밋 신고: 확인을 받고, 나에게는 바로 가리고, 서로 다른 사람 REPORTS_TO_HIDE명이 신고하면 DB가 모두에게서 숨겨요 */
+async function reportCommit(c: Commit) {
+  if (myCommitHashes.has(c.hash)) return;
+  const ok = await ui.confirm(
+    '이 커밋을 신고할까요?',
+    `"${c.msg}" (${c.name})\n\n신고하면 나에게는 바로 가려져요. 서로 다른 ${REPORTS_TO_HIDE}명이 신고하면 모두에게서 가려져요. 욕설, 성적인 말, 혐오 표현, 정치 이야기처럼 방명록에 맞지 않는 글을 신고해 주세요.`,
+    '신고하기',
+    '취소',
+  );
+  if (!ok) return;
+  store.addReportedCommit(room.slug, c.hash);
+  showCommits(commits);
+  try {
+    const hidden = await net.reportCommit(c.hash, self.id);
+    ui.toast(
+      hidden ? `🚩 신고했어요. ${REPORTS_TO_HIDE}명이 신고해서 모두에게서 가렸어요.` : '🚩 신고했어요. 고마워요. 나에게는 바로 가렸어요.',
+      'good',
+      4200,
+    );
+  } catch (e) {
+    console.warn(e);
+    const tooMany = e instanceof Error && e.message.includes('too many reports');
+    ui.toast(tooMany ? '신고가 너무 잦아요. 잠시 후 다시 해주세요. (나에게는 가려졌어요)' : '신고를 보내지 못했어요. 나에게만 가려졌어요.', 'bad', 4200);
+  }
+}
+
 async function commit(type: string, msg: string): Promise<string | null> {
   if (Date.now() - lastCommit < 30e3) return `커밋은 30초에 한 번씩 남길 수 있어요. ${Math.ceil((30e3 - (Date.now() - lastCommit)) / 1000)}초 남았어요.`;
-  if (hasBadWord(msg)) return '욕설이 들어 있어서 남길 수 없어요. 다른 말로 적어주세요.';
+  if (hasBadWord(msg)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
+  if (hasBadWord(self.name)) return `닉네임에 쓸 수 없는 말이 있어서 커밋을 남길 수 없어요. ⚙️에서 닉네임을 바꿔주세요.`;
   const full = type === 'wip' ? `wip: ${msg}` : `${type}: ${msg}`;
   const c: Commit = { hash: randomHash(), name: self.name, msg: full.slice(0, 72), lang: self.lang, at: Date.now() };
   try {
     await net.postCommit(c);
   } catch (e) {
     console.warn(e);
+    if (isBlockedWordsError(e)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
     return '커밋을 저장하지 못했어요. 잠시 후 다시 해주세요.';
   }
   lastCommit = Date.now();
+  myCommitHashes.add(c.hash);
   addCommit(c);
   meAvatar().emote('⎇', 'commit!');
   ui.toast(`[main ${c.hash}] ${c.msg}`, 'good');
@@ -508,10 +654,10 @@ async function commit(type: string, msg: string): Promise<string | null> {
 }
 
 function addCommit(c: Commit) {
-  if (commits.some((x) => x.hash === c.hash)) return;
+  if (commits.some((x) => x.hash === c.hash) || store.getReportedCommits(room.slug).has(c.hash)) return;
   commits = [c, ...commits].slice(0, 30);
   world.room.gitlog.draw(commits, room.name);
-  ui.setCommits(commits);
+  ui.setCommits(commits, myCommitHashes);
 }
 
 // ── 5. 다른 사람들 ───────────────────────────────
@@ -758,9 +904,11 @@ ui.bind({
     sound.setEnabled(on);
     if (on) sound.start();
   },
+  onNoise: pickNoise,
   onShare: async () => {
     try {
       await shareRoom(room.slug, room.name);
+      if (room.hasPassword) ui.toast('🔒 받은 사람이 들어오려면 비밀번호도 필요해요. 비밀번호는 따로 알려주세요.', 'info', 5000);
     } catch (e) {
       console.warn(e);
       ui.toast('공유 링크를 만들지 못했어요. 잠시 후 다시 해주세요.', 'bad');
@@ -768,6 +916,12 @@ ui.bind({
   },
   onPickRoom: (slug) => void pickRoom(slug),
   onCreateRoom: createRoom,
+  onUnlockRoom: async () => {
+    const unlocked = await unlockRoom(room);
+    // 비밀번호 방의 방명록은 열쇠가 있어야 읽혀서, 맞힌 직후에 다시 읽어요
+    if (unlocked && room.hasPassword) void loadRoomCommits();
+    return unlocked;
+  },
   onProfileSave: (p) => {
     store.saveProfile(p);
     Object.assign(self, p);
@@ -776,6 +930,8 @@ ui.bind({
     net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
     ui.toast('프로필을 바꿨어요');
   },
+  onReportCommit: (c) => void reportCommit(c),
+  onReplayTips: showTips,
   onWave: (id) => {
     emote('wave', id);
     const a = world.avatars.get(id);
