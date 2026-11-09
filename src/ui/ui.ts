@@ -87,6 +87,8 @@ export interface UIHandlers {
   onView(cmd: ViewCommand): void;
   onProfileSave(p: Profile): void;
   onWave(id: string): void;
+  /** ⚙️의 '처음 안내 다시 보기' */
+  onReplayTips(): void;
   /** 커밋 신고 버튼을 눌렀을 때 (확인 창은 main.ts가 띄워요) */
   onReportCommit(c: Commit): void;
   onFocusPeer(id: string): void;
@@ -926,6 +928,18 @@ export class UI {
             h('label', { for: 'p-lang' }, '주력 언어'),
             lang,
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'ghost wide tips-again',
+              onclick: () => {
+                this.closeSheet();
+                this.h.onReplayTips();
+              },
+            },
+            '처음 안내 다시 보기',
           ),
           h(
             'small',
