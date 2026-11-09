@@ -22,8 +22,6 @@ export interface WorldHandlers {
 
 /** 시점 조작 한도 (각도는 라디안, 길이는 월드 단위) */
 const VIEW = {
-  /** 좌우로 돌 수 있는 한도 (약 103°). 이보다 더 돌면 뒷벽 뒤, 창밖 도시 쪽으로 넘어가요 */
-  maxAzimuth: 1.8,
   /** 거의 바로 위에서 내려다보는 각도 */
   minPolar: 0.12,
   /** 바닥 아래로 내려가지 않게 수평 바로 위까지만 */
@@ -143,15 +141,15 @@ export class World {
     this.controls.minDistance = VIEW.minDistance;
     this.controls.minPolarAngle = VIEW.minPolar;
     this.controls.maxPolarAngle = VIEW.maxPolar;
-    this.controls.minAzimuthAngle = -VIEW.maxAzimuth;
-    this.controls.maxAzimuthAngle = VIEW.maxAzimuth;
+    // 좌우로는 제한 없이 한 바퀴 다 돌 수 있어요(OrbitControls 기본값). 뒷벽 쪽에서는 벽이 시야를 가리지 않게 places의 wallCutaway가 벽을 숨겨요
     // 사용자가 직접 만지기 시작하면 돌아가는 중이던 동작은 멈춤
     this.controls.addEventListener('start', () => (this.flight = null));
     this.controls.addEventListener('change', () => this.updateViewState());
 
     this.setPlace(first);
 
-    addEventListener('resize', () => this.resize());
+    // 창 크기 이벤트만으론 못 알아채는 변화도 잡으려고 그리는 영역 자체를 지켜봐요 (아이폰 Safari는 처음에 높이가 0일 때가 있어요)
+    new ResizeObserver(() => this.resize()).observe(el);
     const dom = this.labels.domElement;
     dom.addEventListener('pointerdown', (e) => {
       this.pointers.add(e.pointerId);
@@ -326,7 +324,7 @@ export class World {
     this.setFollowing(true);
     const focus = this.followFocus(me);
     const { pos, target } = this.viewBase();
-    const azimuth = THREE.MathUtils.clamp(Math.atan2(pos.x - target.x, pos.z - target.z), -VIEW.maxAzimuth, VIEW.maxAzimuth);
+    const azimuth = Math.atan2(pos.x - target.x, pos.z - target.z);
     const reach = THREE.MathUtils.clamp(FOLLOW_DISTANCE, this.controls.minDistance, this.controls.maxDistance);
     const offset = new THREE.Vector3(
       reach * Math.sin(FOLLOW_POLAR) * Math.sin(azimuth),
@@ -390,8 +388,18 @@ export class World {
     if (!f) return;
     f.t = Math.min(1, f.t + dt / f.seconds);
     const k = THREE.MathUtils.smootherstep(f.t, 0, 1);
-    this.camera.position.lerpVectors(f.fromPos, f.toPos, k);
     this.controls.target.lerpVectors(f.fromTarget, f.toTarget, k);
+    // 한 바퀴 다 돌 수 있어서, 위치를 직선으로 섞으면 뒤쪽에서 출발할 때 방 한가운데를 가로질러요.
+    // 화면 중심 둘레를 도는 각도(짧은 쪽)로 섞어요
+    const from = new THREE.Spherical().setFromVector3(f.fromPos.clone().sub(f.fromTarget));
+    const to = new THREE.Spherical().setFromVector3(f.toPos.clone().sub(f.toTarget));
+    const turn = Math.atan2(Math.sin(to.theta - from.theta), Math.cos(to.theta - from.theta));
+    const now = new THREE.Spherical(
+      THREE.MathUtils.lerp(from.radius, to.radius, k),
+      THREE.MathUtils.lerp(from.phi, to.phi, k),
+      from.theta + turn * k,
+    );
+    this.camera.position.copy(this.controls.target).add(new THREE.Vector3().setFromSpherical(now));
     if (f.t >= 1) this.flight = null;
   }
 
@@ -402,6 +410,8 @@ export class World {
   private resize() {
     const w = this.el.clientWidth;
     const h = this.el.clientHeight;
+    // 영역이 아직 0이면 그릴 곳이 없어요. 크기가 잡히면 지켜보던 쪽이 다시 불러줘요
+    if (w === 0 || h === 0) return;
     const wasPortrait = this.camera.aspect < 0.9;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
