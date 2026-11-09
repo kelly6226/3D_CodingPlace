@@ -888,6 +888,10 @@ button {
   font-size: 14px;
   line-height: 1.6;
   color: var(--muted);
+  /* 본문의 줄바꿈(\n)을 그대로 보여요 */
+  white-space: pre-line;
+  /* 한국어가 단어 중간에서 줄바뀌지 않게 */
+  word-break: keep-all;
 }
 .modal-actions {
   display: flex;
@@ -1711,31 +1715,35 @@ button.place-name {
 .chat-log .pin:hover:not(:disabled) {
   opacity: 1;
 }
-/* 신고·가리기: 한 번 누르면 확인 문구로 바뀌고 한 번 더 누르면 실행 (ui.ts confirmButton) */
-.confirm-btn {
-  flex: none;
-  align-self: start;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  font-size: 12px;
-  opacity: 0.45;
+/* 방명록 신고 버튼: 글자까지 보이게. 누르면 확인 창이 떠요 (main.ts reportCommit) */
+.report-btn,
+.log .mine-tag {
+  grid-area: report;
+  align-self: center;
+  margin-left: 2px;
   white-space: nowrap;
-}
-.confirm-btn:hover,
-.confirm-btn:focus-visible {
-  opacity: 1;
-}
-.confirm-btn.armed {
-  opacity: 1;
-  padding: 1px 6px;
-  background: rgba(239, 83, 80, 0.18);
-  color: #ff8a80;
+  font-size: 12px;
   font-weight: 700;
 }
-.log .confirm-btn {
-  grid-area: report;
+.report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 83, 80, 0.45);
+  background: rgba(239, 83, 80, 0.1);
+  color: #ff8a80;
+}
+.report-btn:hover,
+.report-btn:focus-visible {
+  background: rgba(239, 83, 80, 0.22);
+  border-color: rgba(239, 83, 80, 0.8);
+}
+.log .mine-tag {
+  color: var(--muted);
+  font-weight: 600;
 }
 .chat-form {
   display: flex;
