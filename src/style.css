@@ -1253,38 +1253,42 @@ button.place-name {
 }
 
 /* 입장 화면의 방 줄 */
-/* 입장 화면의 장소 네 곳: 지금 보이는 곳은 전구색 테두리 */
+/* 입장 화면의 장소 네 곳: 지금 보이는 곳은 전구색 테두리.
+   소개 문단(.intro-lead, 아래 여백 20px)과 "들어갈 방" 상자 사이에서 위아래 숨 쉴 틈을 같게 둬요 */
 .intro-places {
-  margin: -6px 0 14px;
+  margin: 0 0 18px;
 }
 .ip-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 12px;
+  margin: 0 2px 10px;
 }
 .ip-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .ip-head small {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
 }
 .ip-list {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 .ip-place {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-height: 64px;
-  padding: 8px 4px 7px;
-  border-radius: 12px;
+  justify-content: center;
+  gap: 6px;
+  min-height: 78px;
+  padding: 12px 6px 10px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--muted);
@@ -1295,21 +1299,34 @@ button.place-name {
   border-color: rgba(255, 255, 255, 0.25);
   color: var(--fg);
 }
+.ip-place:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
 .ip-place.on {
   border-color: var(--amber);
   background: rgba(242, 180, 90, 0.1);
   color: var(--fg);
 }
 .ip-emoji {
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
 }
 .ip-name {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.35;
   text-align: center;
   word-break: keep-all;
+}
+@media (max-width: 400px) {
+  .ip-list {
+    gap: 6px;
+  }
+  .ip-place {
+    min-height: 74px;
+    padding: 10px 4px 8px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .ip-place {
@@ -1317,7 +1334,7 @@ button.place-name {
   }
 }
 .intro-room {
-  margin: -4px 0 18px;
+  margin: 0 0 18px;
   padding: 12px 12px 12px 14px;
   border-radius: 14px;
   border: 1px solid rgba(242, 180, 90, 0.35);
