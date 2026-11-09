@@ -106,8 +106,10 @@ export class UI {
   private self!: PeerState;
   private toastBox: HTMLElement;
   private soundOn = true;
-  /** 이번에 내가 남긴 커밋 (신고 버튼 대신 '내 커밋'을 보여요) */
+  /** 이번에 내가 남긴 커밋 (신고할 수 없어서 줄을 펼치지 않아요) */
   private myCommits = new Set<string>();
+  /** 방명록에서 펼친 줄(신고 버튼이 보이는 줄)의 해시 */
+  private openCommit: string | null = null;
   private noise: NoiseState = { current: 'place', roomDefault: 'place' };
   private rooms: RoomInfo[] = [];
   private counts: Record<string, number> = {};
@@ -514,7 +516,51 @@ export class UI {
   }
 
   // ── 커밋 ───────────────────────────────────────
-  /** mine: 이번에 내가 남긴 커밋 해시 (신고 버튼 대신 '내 커밋'을 보여요) */
+  /**
+   * 방명록 한 줄. 평소엔 내용만 보이고, 줄을 누르면 아래에 신고 버튼이 펼쳐져요 (한 번에 한 줄만).
+   * 내가 남긴 커밋은 펼치지 않아요.
+   */
+  private commitRow(c: Commit) {
+    const body = [
+      h('code', { class: 'hash' }, c.hash),
+      h('span', { class: 'msg' }, c.msg),
+      h('span', { class: 'who', style: `--c:${langById(c.lang).color}` }, c.name),
+      h('time', {}, ago(c.at)),
+    ];
+    if (this.myCommits.has(c.hash)) return h('li', {}, h('div', { class: 'log-main' }, ...body));
+    const open = this.openCommit === c.hash;
+    const actionsId = `commit-actions-${c.hash}`;
+    return h(
+      'li',
+      { class: open ? 'open' : undefined },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'log-main',
+          'aria-expanded': String(open),
+          'aria-controls': actionsId,
+          onclick: () => {
+            this.openCommit = open ? null : c.hash;
+            this.renderSheet();
+          },
+        },
+        ...body,
+      ),
+      h(
+        'div',
+        { class: 'log-actions', id: actionsId, hidden: !open },
+        h(
+          'button',
+          { type: 'button', class: 'report-btn', onclick: () => this.h.onReportCommit(c) },
+          h('span', { 'aria-hidden': 'true' }, '🚩'),
+          '이 커밋 신고하기',
+        ),
+      ),
+    );
+  }
+
+  /** mine: 이번에 내가 남긴 커밋 해시 (신고할 수 없어서 줄을 펼치지 않아요) */
   setCommits(list: Commit[], mine: Set<string>) {
     this.commits = list;
     this.myCommits = mine;
@@ -663,6 +709,7 @@ export class UI {
 
   closeSheet() {
     this.sheet = '';
+    this.openCommit = null;
     this.wardrobe.close();
     delete $('#sheet').dataset.sheetKey; // 다시 열면 맨 위부터
     $('#sheet').hidden = true;
@@ -812,29 +859,7 @@ export class UI {
           h(
             'ol',
             { class: 'log' },
-            ...this.commits.slice(0, 30).map((c) =>
-              h(
-                'li',
-                {},
-                h('code', { class: 'hash' }, c.hash),
-                h('span', { class: 'msg' }, c.msg),
-                h('span', { class: 'who', style: `--c:${langById(c.lang).color}` }, c.name),
-                h('time', {}, ago(c.at)),
-                this.myCommits.has(c.hash)
-                  ? h('span', { class: 'mine-tag' }, '내 커밋')
-                  : h(
-                      'button',
-                      {
-                        type: 'button',
-                        class: 'report-btn',
-                        'aria-label': `${c.hash} 커밋 신고하기`,
-                        onclick: () => this.h.onReportCommit(c),
-                      },
-                      h('span', { 'aria-hidden': 'true' }, '🚩'),
-                      '신고',
-                    ),
-              ),
-            ),
+            ...this.commits.slice(0, 30).map((c) => this.commitRow(c)),
           ),
         );
         if (keptDraft) {
