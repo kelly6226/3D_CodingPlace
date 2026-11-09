@@ -28,6 +28,7 @@ import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/bad
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
+import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
 import { watchContextLoss } from './world/contextWatch';
@@ -163,6 +164,8 @@ function showCommits(list: Commit[]) {
 
 // ── 2. 입장 ──────────────────────────────────────
 async function enter(p: store.Profile) {
+  // saveProfile 전에 봐야 해요. 저장하고 나면 항상 '저장된 프로필 있음'이 돼요
+  const firstVisit = !store.hasSavedProfile();
   store.saveProfile(p);
   sound.start();
   enteredAt = Date.now();
@@ -210,7 +213,53 @@ async function enter(p: store.Profile) {
   if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', `/r/${room.slug}`);
 
   await wait(700);
-  autoSeat(true);
+  // 처음 온 사람은 자리 안내를 토스트 대신 안내 메모 첫 장으로 보여줘요
+  autoSeat(!firstVisit);
+  if (firstVisit) {
+    await wait(TIPS_DELAY_MS);
+    showTips();
+  }
+}
+
+// ── 처음 안내 ──────────────────────────────────────
+/** 자리로 걸어가는 걸 잠깐 보여준 뒤 안내를 띄워요 */
+const TIPS_DELAY_MS = 1600;
+const tips = new Tips();
+
+/** 기능 옆에 하나씩 붙이는 안내. 처음 왔을 때 한 번, ⚙️에서 다시 볼 수 있어요 */
+function showTips() {
+  tips.start(
+    [
+      {
+        emoji: '🪑',
+        title: '여기가 오늘 자리예요',
+        body: '다른 빈자리를 누르면 옮겨 앉고, 바닥을 누르면 그쪽으로 걸어가요.',
+        target: () => {
+          const me = world.avatars.get(self.id);
+          return me ? world.toScreen(me.position.clone().setY(2)) : null;
+        },
+      },
+      {
+        emoji: '💬',
+        title: '한마디 걸어 보기',
+        body: '보낸 말은 머리 위 말풍선으로 잠깐 떠요. 남겨 두고 싶은 말은 📌로 방명록에 붙여요.',
+        target: () => document.getElementById('act-chat'),
+      },
+      {
+        emoji: '⎇',
+        title: '오늘 한 일 커밋하기',
+        body: '벽에 걸린 TV의 git log에 올라가요. 같은 방 사람들이 다 같이 봐요.',
+        target: () => document.getElementById('act-commit'),
+      },
+      {
+        emoji: '🎧',
+        title: '배경 소리 고르기',
+        body: '모닥불, 빗소리, 도서관 같은 소리로 바꿀 수 있어요. 나한테만 들려요.',
+        target: () => document.getElementById('noise-btn'),
+      },
+    ],
+    () => {},
+  );
 }
 
 /** 장소마다 먼저 앉혀줄 자리 (카페는 창가 바, 서버실은 랙 앞 바닥…) */
@@ -892,6 +941,7 @@ ui.bind({
     ui.toast('프로필을 바꿨어요');
   },
   onReportCommit: (c) => void reportCommit(c),
+  onReplayTips: showTips,
   onWave: (id) => {
     emote('wave', id);
     const a = world.avatars.get(id);
