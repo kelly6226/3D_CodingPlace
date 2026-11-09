@@ -12,13 +12,6 @@ export const SITE = {
 export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent('[온라인 모각코] 피드백')}`;
 
 /**
- * GitHub 로그인 버튼을 보여줄지.
- * 지금은 로그인해도 다른 사람에게 보내는 게 없어서 숨겨 둠 (2026-11-05).
- * 접속 시간 기록·랭킹처럼 계정이 필요한 기능을 만들 때 true로 바꾸고 privacy.html도 같이 확인해요.
- */
-export const LOGIN_ENABLED = false;
-
-/**
  * 비공개 방을 만들 수 있게 할지.
  * 지금은 commits 테이블을 누구나 읽을 수 있어서 비공개 방 주소가 방명록으로 새어 나가요. 그래서 숨겨 둠 (2026-11-05).
  * 다시 켜기 전에 schema.sql에서 commits를 직접 읽지 못하게 하고, 방 주소를 받는 함수로 읽도록 바꿔야 해요.
@@ -284,6 +277,8 @@ export interface RoomInfo {
   name: string;
   tags: string[];
   isPublic: boolean;
+  /** 비밀번호를 맞힌 사람만 들어오는 방인지. 목록에는 보이되 🔒로 구분해요 */
+  hasPassword?: boolean;
   /** 어느 장소인지 (PLACES의 id) */
   place: PlaceId;
   builtin?: boolean;
@@ -300,6 +295,9 @@ export const BUILTIN_ROOMS: RoomInfo[] = [
   { slug: 'side', name: '사이드 프로젝트 방', tags: ['side'], isPublic: true, builtin: true, place: 'hackathon' },
 ];
 
+/** 방 목록·방 이름 옆에 🔒를 붙일지: 링크로만 들어오는 방이거나 비밀번호가 있는 방 */
+export const isLockedRoom = (r: Pick<RoomInfo, 'isPublic' | 'hasPassword'>) => !r.isPublic || !!r.hasPassword;
+
 export const DEFAULT_ROOM = 'pangyo';
 export const ROOM_SLUG_RE = /^[a-z0-9-]{3,32}$/;
 
@@ -311,6 +309,37 @@ export function newRoomSlug(): string {
   for (let i = 0; i < 8; i++) s += abc[Math.floor(Math.random() * abc.length)];
   return s;
 }
+
+// ── 비밀번호 방 ───────────────────────────────────
+// 비밀번호는 브라우저에서 열쇠로 바꿔 쓰고(net/roomKey.ts) 원문은 서버로 가지 않아요.
+// 서버가 틀린 횟수를 세어 막지 않는 가벼운 잠금이라, 맞히기 어렵도록 짧은 건 받지 않아요.
+export const ROOM_PASSWORD_MIN_LENGTH = 6;
+export const ROOM_PASSWORD_MAX_LENGTH = 40;
+
+/** 비밀번호에 문제가 있으면 이유를 돌려줘요 */
+export function roomPasswordProblem(pw: string): string | null {
+  if (pw.trim() === '') return '비밀번호를 적어주세요.';
+  const length = [...pw].length;
+  if (length < ROOM_PASSWORD_MIN_LENGTH) return `비밀번호는 ${ROOM_PASSWORD_MIN_LENGTH}글자 이상이어야 해요.`;
+  if (length > ROOM_PASSWORD_MAX_LENGTH) return `비밀번호는 ${ROOM_PASSWORD_MAX_LENGTH}글자까지 쓸 수 있어요.`;
+  return null;
+}
+
+// ── 1:1 채팅 ─────────────────────────────────────
+export const DM_MAX_LENGTH = 200;
+export const DM_SEND_GAP_MS = 700;
+/** 받는 쪽은 보내는 쪽 간격의 절반보다 빨리 오면 버려요 (네트워크로 몰려 도착하는 건 봐주려고) */
+export const DM_RECEIVE_GAP_MS = DM_SEND_GAP_MS / 2;
+/** 화면에 남겨두는 대화 줄 수 (대화마다) */
+export const DM_LOG_MAX = 100;
+/** 동시에 열어둘 수 있는 1:1 채팅. 채널마다 Presence 호출이 하나씩 나가서(PRESENCE_MIN_GAP_MS 설명) 적게 잡았어요 */
+export const DM_MAX_OPEN = 3;
+/** 대화 요청을 보낸 뒤 답을 기다리는 시간. 지나면 요청을 접어요 */
+export const DM_REQUEST_TTL_MS = 60_000;
+/** 같은 사람이 보내는 요청·응답 이벤트 사이 최소 간격 (받는 쪽 기준) */
+export const DM_EVENT_GAP_MS = 2000;
+/** 한꺼번에 받아둘 수 있는 대화 요청 수 (요청을 퍼부어 화면이 도배되는 걸 막으려고) */
+export const DM_MAX_INCOMING = 5;
 
 /** 방 주소: /r/<slug>. 기본 방은 루트에서도 열림 */
 export function roomUrl(slug: string): string {

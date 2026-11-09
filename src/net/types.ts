@@ -40,7 +40,43 @@ export type NetEvent =
   | { type: 'chat'; id: string; text: string }
   | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
-  | { type: 'coffee'; id: string };
+  | { type: 'coffee'; id: string }
+  | DmEvent;
+
+/**
+ * 1:1 채팅을 시작하는 약속. 방 채널(모두가 받는 곳)로 오가지만 대화 내용은 안 실려요.
+ *   req: 나랑 1:1로 얘기해요 (내 공개 키와 이름)  →  ok: 좋아요 (내 공개 키)  /  no: 안 할래요
+ * 서로의 공개 키로 둘만 아는 비밀값을 만들고, 거기서 나온 채널 이름·암호 키로 대화해요 (dm/crypto.ts).
+ * 이 이벤트의 id는 방 안의 아바타 id라서 믿을 수 없어요. 그래서 두 화면에 같은 확인 코드가 뜨는지 비교할 수 있게 했어요.
+ */
+export type DmStage = 'req' | 'ok' | 'no';
+export interface DmEvent {
+  type: 'dm';
+  /** 보낸 사람의 아바타 id */
+  id: string;
+  /** 받는 사람의 아바타 id */
+  to: string;
+  stage: DmStage;
+  /** 보낸 사람의 공개 키 (base64url). req·ok에만 있어요 */
+  key?: string;
+  name?: string;
+}
+
+/** 암호화된 1:1 채팅 한 줄 (둘 다 base64url). 서버와 같은 방 사람들은 이것만 봐요 */
+export interface DmCipher {
+  iv: string;
+  ct: string;
+}
+
+export interface DmHandlers {
+  onMessage(topic: string, c: DmCipher): void;
+  /** 상대가 이 대화에 들어와 있는지가 바뀔 때 */
+  onPresence(topic: string, online: boolean): void;
+  /** 연결이 끊겨서 이 대화를 더 못 쓸 때 */
+  onClosed(topic: string): void;
+}
+
+export type JoinResult = 'ok' | 'wrong' | 'error';
 
 export interface NetHandlers {
   /** 지금 방에 있는 사람 전체(나 제외). 들어오고 나갈 때마다 호출 */
@@ -56,22 +92,14 @@ export interface NewRoom {
   isPublic: boolean;
   place: PlaceId;
   creator: string;
-}
-
-/** GitHub로 로그인한 사람. 이메일은 일부러 안 담아요 (화면에도, 다른 사람에게도 안 쓰니까) */
-export interface AuthUser {
-  /** Supabase 계정 id */
-  id: string;
-  /** GitHub 아이디 */
-  login: string;
-  /** GitHub 프로필 사진 (avatars.githubusercontent.com만) */
-  avatar: string | null;
+  /** 정하면 비밀번호 방이 돼요 */
+  password?: string;
 }
 
 export interface Net {
   readonly mode: 'online' | 'demo';
-  /** GitHub 로그인을 쓸 수 있는지 (실시간 모드에서만) */
-  readonly canLogin: boolean;
+  /** 비밀번호 방과 1:1 채팅을 쓸 수 있는지 (실시간 서버에 연결된 모드에서만) */
+  readonly canPrivate: boolean;
   readonly instance: number;
   /** 지금 들어가 있는 방 */
   readonly room: string;
@@ -95,11 +123,16 @@ export interface Net {
   loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
 
-  // ── 로그인 (선택) ──────────────────────────────
-  /** 지금 로그인한 사람. GitHub에서 돌아온 직후면 로그인 처리가 끝날 때까지 기다려요 */
-  currentUser(): Promise<AuthUser | null>;
-  onAuthChange(cb: (u: AuthUser | null) => void): void;
-  /** GitHub 로그인 화면으로 이동. 끝나면 지금 주소로 돌아와요 */
-  signIn(): Promise<void>;
-  signOut(): Promise<void>;
+  // ── 비밀번호 방 ────────────────────────────────
+  /** 이 방에 들어갈 수 있는지: 비밀번호가 없는 방이거나, 이 브라우저에서 이미 비밀번호를 맞힌 방 */
+  hasRoomAccess(room: RoomInfo): Promise<boolean>;
+  /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
+  joinRoom(slug: string, password: string): Promise<JoinResult>;
+
+  // ── 1:1 채팅 ───────────────────────────────────
+  /** 이 이름의 채널을 열어요(이름은 둘만 알아요). 열었으면 true */
+  dmOpen(topic: string, h: DmHandlers): Promise<boolean>;
+  /** 보냈으면 true (채널이 안 열려 있으면 false) */
+  dmSend(topic: string, c: DmCipher): boolean;
+  dmClose(topic: string): void;
 }

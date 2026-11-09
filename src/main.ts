@@ -11,6 +11,7 @@ import {
   isPlaceId,
   pageTitle,
   placeMeta,
+  roomPasswordProblem,
   roomUrl,
   statusById,
   type ActionId,
@@ -19,9 +20,10 @@ import {
 } from './config';
 import type { Look } from './look';
 import { sound } from './audio';
+import { DmController } from './dm/controller';
 import { hasBadWord } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
-import type { AuthUser, Commit, Net, NetEvent, PeerState } from './net/types';
+import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { UI } from './ui/ui';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
@@ -41,9 +43,6 @@ ui.setSound(store.getSound());
 sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
-// GitHub 로그인에서 막 돌아왔는지 (supabase-js가 곧 주소에서 code를 지워서 미리 봐둠)
-const oauthReturn = params.has('code');
-const oauthError = params.get('error_description') ?? new URLSearchParams(location.hash.slice(1)).get('error_description');
 
 /** 주소에서 방 찾기: /r/<방>, 예전 형식 ?room=pangyo-2 도 받아줌 */
 function roomFromUrl(): { slug: string | null; instance: number } {
@@ -58,6 +57,8 @@ function roomFromUrl(): { slug: string | null; instance: number } {
 let world: World;
 let places: typeof import('./world/places');
 let net: Net;
+/** 1:1 채팅. 실시간 서버에 연결될 때만 쓸 수 있어서 net이 정해진 뒤에 만들어요 */
+let dm: DmController | null = null;
 let self: PeerState;
 let room: RoomInfo = builtinRoom(DEFAULT_ROOM)!;
 let startInstance = 1;
@@ -96,7 +97,15 @@ async function boot() {
     net = new DemoNet();
   }
   ui.setMode(net.mode);
-  if (net.canLogin) watchAccount();
+  if (net.canPrivate) {
+    dm = new DmController({
+      net,
+      view: ui.dmView,
+      me: () => ({ id: self.id, name: self.name }),
+      sendEvent: (e) => net.send(e),
+      toast: (text, kind) => ui.toast(text, kind),
+    });
+  }
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
   const fromUrl = roomFromUrl();
@@ -219,6 +228,21 @@ function applyPlace(r: RoomInfo) {
 }
 
 // ── 방 고르기 · 옮기기 · 만들기 ─────────────────────
+const JOIN_PROBLEM = {
+  wrong: '비밀번호가 맞지 않아요.',
+  error: '확인하지 못했어요. 잠시 뒤에 다시 해주세요.',
+} as const;
+
+/** 방에 들어갈 수 있는지. 비밀번호 방이고 아직 못 맞혔으면 비밀번호를 물어봐요. 못 들어가면 false */
+async function unlockRoom(r: RoomInfo): Promise<boolean> {
+  if (!r.hasPassword) return true;
+  if (await net.hasRoomAccess(r)) return true;
+  return ui.askRoomPassword(r.name, async (password) => {
+    const result = await net.joinRoom(r.slug, password);
+    return result === 'ok' ? null : JOIN_PROBLEM[result];
+  });
+}
+
 async function pickRoom(slug: string, push = true) {
   const r = roomsCache.find((x) => x.slug === slug) ?? (await net.getRoom(slug));
   if (!r) {
@@ -235,6 +259,11 @@ async function pickRoom(slug: string, push = true) {
     ui.setRoom(1);
     history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
     await loadRoomCommits();
+    return;
+  }
+  if (!(await unlockRoom(r))) {
+    // 뒤로가기로 주소만 먼저 바뀐 경우, 지금 방 주소로 되돌려요
+    if (!push) history.replaceState(null, '', room.slug === DEFAULT_ROOM ? '/' : `/r/${room.slug}`);
     return;
   }
   await switchRoom(r, push);
@@ -273,16 +302,24 @@ async function switchRoom(r: RoomInfo, push = true) {
 }
 
 let lastRoomCreate = 0;
-async function createRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId): Promise<string | null> {
+async function createRoom(name: string, tags: string[], isPublic: boolean, place: PlaceId, password: string): Promise<string | null> {
   const nm = name.trim().slice(0, 24);
   if (!nm) return '방 이름을 적어주세요.';
   if (hasBadWord(nm)) return '욕설이 들어 있어서 쓸 수 없어요. 다른 이름으로 적어주세요.';
   if (!isPlaceId(place)) return '장소를 골라주세요.';
   if (Date.now() - lastRoomCreate < 30e3) return '방은 30초에 하나씩 만들 수 있어요.';
+  const hasPassword = password !== '';
+  if (hasPassword) {
+    if (!net.canPrivate) return '비밀번호 방은 지금 만들 수 없어요. 실시간 서버에 연결됐을 때 다시 해주세요.';
+    const problem = roomPasswordProblem(password);
+    if (problem) return problem;
+  }
   let r: RoomInfo;
   try {
     // 비공개 방이 꺼져 있으면 화면과 상관없이 항상 공개 방으로 만듦
-    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: isPublic || !PRIVATE_ROOMS_ENABLED, place, creator: self?.name ?? profile.name });
+    // 비밀번호 방은 목록에 보이는 공개 방이에요 (들어올 때 비밀번호로 막아요)
+    const listed = hasPassword || isPublic || !PRIVATE_ROOMS_ENABLED;
+    r = await net.createRoom({ name: nm, tags: tags.slice(0, 3), isPublic: listed, place, creator: self?.name ?? profile.name, password: hasPassword ? password : undefined });
   } catch (e) {
     console.warn(e);
     return '방을 만들지 못했어요. 잠시 후 다시 해주세요.';
@@ -294,8 +331,23 @@ async function createRoom(name: string, tags: string[], isPublic: boolean, place
   ui.closeSheet();
   if (self) await switchRoom(r);
   else await pickRoom(r.slug);
-  ui.toast(copied ? `"${r.name}" 방을 만들고 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.` : `"${r.name}" 방을 만들었어요 · ${roomUrl(r.slug)}`, 'good', 6000);
+  ui.toast(createdMessage(r, copied), 'good', 6000);
   return null;
+}
+
+function createdMessage(r: RoomInfo, copied: boolean): string {
+  if (r.hasPassword) {
+    const head = copied ? `"${r.name}" 방을 만들고 링크를 복사했어요.` : `"${r.name}" 방을 만들었어요 · ${roomUrl(r.slug)}`;
+    return `${head} 링크와 비밀번호를 함께 알려주세요. 비밀번호는 만든 뒤에 바꿀 수 없어요.`;
+  }
+  if (copied) return `"${r.name}" 방을 만들고 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.`;
+  return `"${r.name}" 방을 만들었어요 · ${roomUrl(r.slug)}`;
+}
+
+function sharedMessage(r: RoomInfo): string {
+  if (r.hasPassword) return `🔒 "${r.name}" 링크를 복사했어요. 들어오려면 비밀번호도 필요해요.`;
+  if (r.isPublic) return `"${r.name}" 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.`;
+  return '🔒 비공개 방 링크를 복사했어요. 받은 사람만 들어올 수 있어요.';
 }
 
 /** 클립보드 복사. 브라우저가 권한을 묻느라 멈추는 경우가 있어서 1.5초만 기다림 */
@@ -320,54 +372,6 @@ function takenSeats() {
 
 function meAvatar() {
   return world.avatars.get(self.id)!;
-}
-
-// ── 로그인 (선택) ─────────────────────────────────
-let account: AuthUser | null = null;
-
-function watchAccount() {
-  if (oauthError) {
-    // 로그인 취소 등으로 돌아오면 주소에 붙은 오류 표시를 지움
-    const url = new URL(location.href);
-    for (const k of ['error', 'error_code', 'error_description']) url.searchParams.delete(k);
-    history.replaceState(history.state, '', url.pathname + url.search);
-    ui.toast('GitHub 로그인을 마치지 못했어요. 다시 해볼 수 있어요.', 'bad', 5000);
-  }
-  net.onAuthChange(setAccount);
-  void Promise.race([net.currentUser(), wait(6000).then(() => null)]).then((u) => {
-    setAccount(u);
-    if (u && oauthReturn) ui.toast(`👋 @${u.login} 계정으로 로그인했어요`, 'good');
-  });
-}
-
-function setAccount(u: AuthUser | null) {
-  const first = !account && u;
-  account = u;
-  ui.setAccount(u, net.canLogin);
-  if (first && u && !store.hasSavedProfile()) ui.suggestNick(u.login);
-}
-
-async function signIn() {
-  if (self) {
-    const ok = await ui.confirm('GitHub로 로그인할까요?', 'GitHub 화면으로 갔다가 지금 방으로 돌아와요. 잠깐 방에서 나갔다 들어오게 돼요.', '로그인', '나중에');
-    if (!ok) return;
-  }
-  try {
-    await net.signIn();
-  } catch (e) {
-    console.warn(e);
-    ui.toast('GitHub 로그인을 시작하지 못했어요. 잠시 후 다시 해주세요.', 'bad');
-  }
-}
-
-async function signOut() {
-  try {
-    await net.signOut();
-    ui.toast('로그아웃했어요');
-  } catch (e) {
-    console.warn(e);
-    ui.toast('로그아웃하지 못했어요. 새로고침 후 다시 해주세요.', 'bad');
-  }
 }
 
 // ── 3. 내 행동 ───────────────────────────────────
@@ -667,6 +671,9 @@ function onEvent(e: NetEvent) {
     case 'typing':
       world.avatars.get(e.id)?.typeBurst();
       break;
+    case 'dm':
+      dm?.onEvent(e);
+      break;
   }
 }
 
@@ -807,17 +814,28 @@ ui.bind({
       ui.toast(link, 'info', 8000);
       return;
     }
-    ui.toast(
-      room.isPublic
-        ? `"${room.name}" 링크를 복사했어요. 보내면 바로 이 방으로 들어와요.`
-        : `🔒 비공개 방 링크를 복사했어요. 받은 사람만 들어올 수 있어요.`,
-      'good',
-    );
+    ui.toast(sharedMessage(room), 'good');
   },
   onPickRoom: (slug) => void pickRoom(slug),
   onCreateRoom: createRoom,
-  onSignIn: () => void signIn(),
-  onSignOut: () => void signOut(),
+  onUnlockRoom: async () => {
+    const unlocked = await unlockRoom(room);
+    // 비밀번호 방의 방명록은 열쇠가 있어야 읽혀서, 맞힌 직후에 다시 읽어요
+    if (unlocked && room.hasPassword) void loadRoomCommits();
+    return unlocked;
+  },
+  dm: {
+    onStart: (id) => {
+      const name = world.avatars.get(id)?.state.name ?? known.get(id)?.name;
+      if (name) void dm?.start({ id, name });
+    },
+    onAccept: (key) => void dm?.accept(key),
+    onDecline: (key, block) => dm?.decline(key, block),
+    onBlock: (key) => dm?.block(key),
+    onClose: (key) => dm?.close(key),
+    onSend: async (key, text) => (await dm?.send(key, text)) ?? '지금은 1:1 채팅을 쓸 수 없어요.',
+    onUnblockAll: () => dm?.unblockAll(),
+  },
   onProfileSave: (p) => {
     store.saveProfile(p);
     Object.assign(self, p);
