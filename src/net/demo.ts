@@ -23,7 +23,7 @@ import { randomOutfit } from '../look';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
-import type { Commit, Net, NetHandlers, NewRoom, PeerState } from './types';
+import type { Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState } from './types';
 
 type SavedCommit = Commit & { room?: string };
 
@@ -41,6 +41,8 @@ export const randomHash = () =>
 
 export class DemoNet implements Net {
   readonly mode = 'demo' as const;
+  /** 데모 모드엔 서버가 없어서 비밀번호 방을 만들 수 없어요 */
+  readonly canLockRooms = false;
   readonly instance = 1;
   room = '';
   private bots: PeerState[] = [];
@@ -326,5 +328,12 @@ export class DemoNet implements Net {
     mine.unshift({ ...c, room: this.room });
     setDemoCommits(mine);
     this.commits.unshift(c);
+  }
+
+  async hasRoomAccess(): Promise<boolean> {
+    return true;
+  }
+  async joinRoom(): Promise<JoinResult> {
+    return 'error';
   }
 }

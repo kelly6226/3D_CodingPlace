@@ -25,7 +25,17 @@ interface Saved {
   coffee?: { date: string; count: number };
   demoCommits?: unknown[];
   demoRooms?: unknown[];
+  /** 비밀번호를 맞힌 방의 열쇠 (방 주소 → 열쇠). 오래된 것부터 밀려나요 */
+  roomKeys?: Record<string, StoredRoomKey>;
 }
+
+export interface StoredRoomKey {
+  check: string;
+  topic: string;
+}
+
+/** 열쇠를 기억해 둘 방 수. 넘으면 오래된 것부터 잊어서, 다시 비밀번호를 물어요 */
+const ROOM_KEYS_MAX = 30;
 
 let cache: Saved = {};
 try {
@@ -156,5 +166,17 @@ export function getDemoRooms<T>(): T[] {
 
 export function setDemoRooms<T>(list: T[]) {
   cache.demoRooms = list.slice(0, 30);
+  persist();
+}
+
+export function getRoomKey(slug: string): StoredRoomKey | null {
+  const k = cache.roomKeys?.[slug];
+  return k && typeof k.check === 'string' && typeof k.topic === 'string' ? k : null;
+}
+
+export function setRoomKey(slug: string, key: StoredRoomKey) {
+  // 객체는 넣은 순서를 기억하니까, 다시 넣을 땐 빼고 넣어서 맨 뒤(가장 최근)로 보내요
+  const { [slug]: _old, ...rest } = cache.roomKeys ?? {};
+  cache.roomKeys = Object.fromEntries([...Object.entries(rest), [slug, key]].slice(-ROOM_KEYS_MAX));
   persist();
 }
