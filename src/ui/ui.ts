@@ -53,6 +53,8 @@ export interface ChatLine {
   lang: string;
   text: string;
   mine: boolean;
+  /** 귓속말이면 상대방 이름 (내가 보냈으면 받는 사람, 받았으면 보낸 사람) */
+  whisperWith?: string;
 }
 
 export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise';
@@ -78,8 +80,8 @@ export interface UIHandlers {
   onLookPreview(look: Look): Promise<LookPreviewHandle | null>;
   onCoffee(): void;
   onCommit(type: string, msg: string): Promise<string | null>;
-  /** 방 사람들에게 한마디. 보낼 수 없으면 이유를 돌려줌 */
-  onChat(text: string): string | null;
+  /** 방 사람들에게 한마디. to가 있으면 그 사람에게만 귓속말. 보낼 수 없으면 이유를 돌려줌 */
+  onChat(text: string, to?: string): string | null;
   /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
   onChatPin(text: string): Promise<string | null>;
   onSound(on: boolean): void;
@@ -130,6 +132,11 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  private whisperPill!: HTMLElement;
+  private whisperName!: HTMLElement;
+  private chatSubmit!: HTMLButtonElement;
+  /** 지금 귓속말 모드로 고른 상대. 없으면 평소처럼 방 전체에 보여요 */
+  private whisperTarget: { id: string; name: string } | null = null;
   /** 비밀번호 방을 만들 수 있는지 (실시간 모드에서만) */
   private lockRoomOk = false;
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
@@ -659,6 +666,14 @@ export class UI {
     this.chatLog = h('ol', { class: 'chat-log' });
     this.chatErr = h('p', { class: 'err', hidden: true });
     this.chatInput = h('input', { id: 'chat-input', maxlength: CHAT_MAX_LENGTH, placeholder: '한마디 (Enter로 보내기)', autocomplete: 'off', enterkeyhint: 'send' });
+    this.whisperName = h('b', {}, '');
+    this.whisperPill = h(
+      'div',
+      { class: 'whisper-pill', hidden: true },
+      h('span', {}, '🤫 ', this.whisperName, '님에게만 보여요'),
+      h('button', { type: 'button', class: 'whisper-x', onclick: () => this.clearWhisper(), 'aria-label': '귓속말 그만하기' }, '✕'),
+    );
+    this.chatSubmit = h('button', { class: 'primary', type: 'submit' }, '보내기');
     const form = h(
       'form',
       {
@@ -669,7 +684,7 @@ export class UI {
         },
       },
       this.chatInput,
-      h('button', { class: 'primary', type: 'submit' }, '보내기'),
+      this.chatSubmit,
     );
     this.chatPanel = h(
       'section',
@@ -677,14 +692,34 @@ export class UI {
       h(
         'header',
         { class: 'chat-head' },
-        h('p', {}, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'),
+        h('p', {}, '말풍선으로 잠깐 보여요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
       this.chatLog,
       this.chatErr,
+      this.whisperPill,
       form,
     );
     return this.chatPanel;
+  }
+
+  /** 특정 사람에게만 보이는 귓속말 모드로 전환 (방을 나가거나 새로고침하면 상대를 다시 못 찾아요) */
+  startWhisper(id: string, name: string) {
+    this.whisperTarget = { id, name };
+    this.whisperName.textContent = name;
+    this.whisperPill.hidden = false;
+    this.chatPanel.classList.add('whispering');
+    this.chatInput.placeholder = `${name}님에게 귓속말`;
+    this.chatSubmit.textContent = '귓속말 보내기';
+    this.openChat();
+  }
+
+  private clearWhisper() {
+    this.whisperTarget = null;
+    this.whisperPill.hidden = true;
+    this.chatPanel.classList.remove('whispering');
+    this.chatInput.placeholder = '한마디 (Enter로 보내기)';
+    this.chatSubmit.textContent = '보내기';
   }
 
   toggleChat() {
@@ -707,6 +742,7 @@ export class UI {
     this.chatPanel.hidden = true;
     this.chatBtn.classList.remove('open');
     this.chatInput.blur();
+    this.clearWhisper();
   }
 
   /** 입력 칸·버튼·대화상자에 포커스가 없을 때만 Enter로 채팅을 열어요 */
@@ -718,30 +754,41 @@ export class UI {
   private sendChat() {
     const text = this.chatInput.value.trim();
     if (!text) return;
-    const problem = this.h.onChat(text);
+    const problem = this.h.onChat(text, this.whisperTarget?.id);
     this.chatErr.hidden = !problem;
     this.chatErr.textContent = problem ?? '';
     if (!problem) this.chatInput.value = '';
     this.chatInput.focus({ preventScroll: true });
   }
 
-  /** 대화 한 줄 추가. 내 글에만 방명록에 남기는 📌 버튼이 붙어요 (방명록에는 내 닉네임으로 남으니까) */
+  /**
+   * 대화 한 줄 추가. 내 글에만 방명록에 남기는 📌 버튼이 붙어요 (방명록에는 내 닉네임으로 남으니까) —
+   * 귓속말은 방명록이 공개라서 📌를 안 붙여요
+   */
   addChat(line: ChatLine) {
-    const pin = line.mine
-      ? h(
-          'button',
-          {
-            class: 'pin',
-            type: 'button',
-            title: '방명록에 남기기',
-            'aria-label': '방명록에 남기기',
-            onclick: (e: Event) => void this.pinChat(line.text, e.currentTarget as HTMLButtonElement),
-          },
-          '📌',
-        )
-      : null;
+    const pin =
+      line.mine && !line.whisperWith
+        ? h(
+            'button',
+            {
+              class: 'pin',
+              type: 'button',
+              title: '방명록에 남기기',
+              'aria-label': '방명록에 남기기',
+              onclick: (e: Event) => void this.pinChat(line.text, e.currentTarget as HTMLButtonElement),
+            },
+            '📌',
+          )
+        : null;
+    const who = line.whisperWith ? (line.mine ? `🤫 나 → ${line.whisperWith}` : `🤫 ${line.name}`) : line.name;
     this.chatLog.append(
-      h('li', { class: line.mine ? 'mine' : undefined }, h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, line.name), h('span', { class: 'msg' }, line.text), pin),
+      h(
+        'li',
+        { class: [line.mine && 'mine', line.whisperWith && 'whisper'].filter(Boolean).join(' ') || undefined },
+        h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, who),
+        h('span', { class: 'msg' }, line.text),
+        pin,
+      ),
     );
     while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
     this.chatLog.scrollTop = this.chatLog.scrollHeight;
@@ -1387,15 +1434,30 @@ export class UI {
       isSelf
         ? null
         : h(
-            'button',
-            {
-              class: 'primary',
-              onclick: () => {
-                this.h.onWave(p.id);
-                this.hidePop();
+            'div',
+            { class: 'pop-actions' },
+            h(
+              'button',
+              {
+                class: 'primary',
+                onclick: () => {
+                  this.h.onWave(p.id);
+                  this.hidePop();
+                },
               },
-            },
-            '👋 손 흔들기',
+              '👋 손 흔들기',
+            ),
+            h(
+              'button',
+              {
+                class: 'ghost',
+                onclick: () => {
+                  this.hidePop();
+                  this.startWhisper(p.id, p.name);
+                },
+              },
+              '💬 귓속말',
+            ),
           ),
     ];
     el.append(...(rows.filter(Boolean) as Node[]));

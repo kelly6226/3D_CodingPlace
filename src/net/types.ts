@@ -41,7 +41,8 @@ export type NetEvent =
   | { type: 'commit'; commit: Commit }
   /** 신고로 숨겨진 커밋이 있으니 방명록을 다시 읽으라는 알림 (내용은 믿지 않고 DB에서 다시 읽어요) */
   | { type: 'commitHidden'; hash: string }
-  | { type: 'chat'; id: string; text: string }
+  /** to가 있으면 귓속말. 지금 방에 있는 동안만 가고, 암호화는 안 돼요 */
+  | { type: 'chat'; id: string; text: string; to?: string }
   | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
   | { type: 'coffee'; id: string };
