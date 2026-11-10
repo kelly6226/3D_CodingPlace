@@ -1774,6 +1774,7 @@ button.place-name {
   max-height: min(30vh, 220px);
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
@@ -1820,7 +1821,6 @@ button.place-name {
   background: rgba(242, 180, 90, 0.08);
   border-radius: 8px;
   padding: 2px 6px;
-  margin: 0 -6px;
 }
 .chat-log li.whisper .msg {
   color: var(--amber);
