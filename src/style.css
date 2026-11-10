@@ -809,12 +809,21 @@ button.log-main:hover,
   height: 8px;
   border-radius: 50%;
 }
-.pop .primary {
+/* 팝업이 좁을 수 있어서(min-width 190px) 버튼은 옆이 아니라 위아래로 쌓아요 */
+.pop-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 6px;
-  font-family: var(--font);
-  min-height: 36px;
 }
-
+.pop-actions .primary,
+.pop-actions .ghost {
+  min-height: 38px;
+  margin-top: 0;
+  font-size: 13px;
+  font-family: var(--font);
+  white-space: nowrap;
+}
 /* ── 토스트 ───────────────────────────────────── */
 .toasts {
   position: absolute;
@@ -1817,6 +1826,16 @@ button.place-name {
 .chat-log .mine .msg {
   color: var(--amber);
 }
+.chat-log li.whisper {
+  background: rgba(242, 180, 90, 0.08);
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+}
+.chat-log li.whisper .msg {
+  color: var(--amber);
+  font-style: italic;
+}
 .chat-log .pin {
   flex: none;
   padding: 0 4px;
@@ -1848,9 +1867,38 @@ button.place-name {
   background: rgba(239, 83, 80, 0.22);
   border-color: rgba(239, 83, 80, 0.8);
 }
+.whisper-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(242, 180, 90, 0.4);
+  background: rgba(242, 180, 90, 0.1);
+  font-size: 12.5px;
+  color: var(--amber);
+}
+.whisper-x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
 .chat-form {
   display: flex;
   gap: 8px;
+}
+.chat-form button[type='submit'] {
+  padding: 0 12px;
+  min-height: 38px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 .chat-form input {
   flex: 1;
@@ -1865,6 +1913,11 @@ button.place-name {
 }
 .chat-form input:focus {
   border-color: var(--amber);
+}
+/* 귓속말 모드인 동안은 입력칸 전체가 그 상태를 계속 보여줘요 (알약 표시 하나로는 지나치기 쉬워서) */
+.chat.whispering .chat-form input {
+  border-color: rgba(242, 180, 90, 0.6);
+  background: rgba(242, 180, 90, 0.08);
 }
 .chat .err {
   margin: 0;

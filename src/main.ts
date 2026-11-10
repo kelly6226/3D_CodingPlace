@@ -245,7 +245,7 @@ function showTips() {
       {
         emoji: '💬',
         title: '한마디 걸어 보기',
-        body: '보낸 말은 머리 위 말풍선으로 잠깐 떠요. 남겨 두고 싶은 말은 📌로 방명록에 붙여요.',
+        body: '보낸 말은 머리 위 말풍선으로 잠깐 떠요. 다른 사람을 눌러 "💬 귓속말"을 고르면 그 사람에게만 보여요. 남겨 두고 싶은 말은 📌로 방명록에 붙여요.',
         target: () => document.getElementById('act-chat'),
       },
       {
@@ -531,8 +531,11 @@ function emote(id: string, to?: string) {
 const CHAT_PIN_COMMIT_TYPE = 'chore';
 
 let lastChat = 0;
-/** 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요 */
-function chat(text: string): string | null {
+/**
+ * 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요.
+ * to를 주면 그 사람에게만 보이는 귓속말이 돼요 (로그인이 없어서 이 방문 동안만 가요. 암호화는 안 돼요)
+ */
+function chat(text: string, to?: string): string | null {
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
   if (hasBadWord(text)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
@@ -540,8 +543,9 @@ function chat(text: string): string | null {
   lastChat = Date.now();
   meAvatar().say(msg);
   sound.pop();
-  ui.addChat({ name: self.name, lang: self.lang, text: msg, mine: true });
-  net.send({ type: 'chat', id: self.id, text: msg });
+  const whisperWith = to ? (world.avatars.get(to)?.state.name ?? '상대방') : undefined;
+  ui.addChat({ name: self.name, lang: self.lang, text: msg, mine: true, whisperWith });
+  net.send({ type: 'chat', id: self.id, text: msg, to });
   return null;
 }
 
@@ -775,8 +779,9 @@ function onEvent(e: NetEvent) {
     case 'chat': {
       const a = world.avatars.get(e.id);
       if (!a || a.isSelf) return;
+      if (e.to && e.to !== self.id) return; // 나한테 온 귓속말이 아니면 못 본 척해요
       a.say(e.text);
-      ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false });
+      ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false, whisperWith: e.to ? a.state.name : undefined });
       break;
     }
     case 'deploy':

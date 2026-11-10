@@ -106,7 +106,8 @@ export function cleanEvent(raw: unknown): NetEvent | null {
     case 'chat': {
       const pid = id(raw.id);
       const msg = maskIfBad(text(raw.text, CHAT_MAX_LENGTH));
-      return pid && msg ? { type: 'chat', id: pid, text: msg } : null;
+      const to = raw.to === undefined ? undefined : (id(raw.to) ?? undefined);
+      return pid && msg ? { type: 'chat', id: pid, text: msg, to } : null;
     }
     case 'act': {
       const pid = id(raw.id);
