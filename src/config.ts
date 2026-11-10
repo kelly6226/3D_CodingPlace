@@ -3,7 +3,7 @@
 /** 사이트 이름과 소개 (index.html의 메타 태그와 같게) */
 export const SITE = {
   name: '온라인 모각코',
-  title: '온라인 모각코 · 혼자 하면 야근, 같이 하면 모각코',
+  title: '온라인 모각코 · 야근 말고 모각코',
   /** 개인정보 문의·삭제 요청 받는 곳 (public/privacy.html에도 같은 주소) */
   contact: 'code_alone_together@naver.com',
 };
