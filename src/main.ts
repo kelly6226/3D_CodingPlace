@@ -203,6 +203,7 @@ async function enter(p: store.Profile) {
         for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
         known.clear();
         lastMoves.clear();
+        metThisSession.clear();
         ui.clearChat();
         ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
@@ -355,6 +356,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id, true);
   known.clear();
   lastMoves.clear();
+  metThisSession.clear();
   ui.clearChat();
   ui.setPeers([]);
   // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
@@ -676,6 +678,9 @@ function addCommit(c: Commit) {
 // ── 5. 다른 사람들 ───────────────────────────────
 const known = new Map<string, PeerState>();
 
+/** 이번 접속에서 이미 '만남'으로 기록한 사람들 (같은 접속 동안 여러 번 세지 않게) */
+const metThisSession = new Set<string>();
+
 /** Broadcast로 받은 가장 최근 이동. Presence는 PRESENCE_LAG_MS까지 늦을 수 있어서, 그 안에는 이쪽이 더 새로워요 */
 const lastMoves = new Map<string, { at: number; x: number; z: number; seat: string | null }>();
 
@@ -694,6 +699,10 @@ function onPeers(presencePeers: PeerState[]) {
   const peers = presencePeers.map(withLatestMove);
   const ids = new Set(peers.map((p) => p.id));
   for (const p of peers) {
+    if (!metThisSession.has(p.id)) {
+      metThisSession.add(p.id);
+      store.markPeerMet(p.id);
+    }
     const prev = known.get(p.id);
     let a = world.avatars.get(p.id);
     if (!a) {

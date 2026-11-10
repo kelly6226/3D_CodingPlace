@@ -596,6 +596,7 @@ button {
   width: 100%;
   margin-top: 6px;
   font-family: var(--font);
+  font-size: 15px;
 }
 .err {
   margin: 8px 0 0;
@@ -747,6 +748,9 @@ button.log-main:hover,
   color: var(--amber);
   font-weight: 600;
 }
+.people .n em.familiar {
+  color: var(--mint);
+}
 .people .s {
   grid-area: s;
   font-size: 12px;
@@ -755,7 +759,8 @@ button.log-main:hover,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.people .lang {
+.people .lang,
+.profile-id .lang {
   grid-area: lang;
   font-family: var(--mono);
   font-size: 11px;
@@ -1598,6 +1603,7 @@ button.place-name {
   min-height: 40px;
   border-radius: 12px;
   font-weight: 700;
+  font-size: 15px;
 }
 .sheet-note {
   display: block;
@@ -1941,6 +1947,109 @@ button.place-name {
 }
 .sheet-wardrobe {
   max-height: min(70vh, 640px, calc(100% - 16px));
+}
+
+/* 내 프로필 머리글: 아바타 원 + 이름 + 언어, 바로 아래 오늘/연속 통계 */
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.profile-avatar {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.profile-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.profile-name {
+  font-size: 18px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.profile-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 잔디 그래프: 바로 위 통계 칩과 한 묶음으로 보이게, 간격을 더 붙여요 */
+.study-graph-wrap .sheet-sub {
+  margin-top: 8px;
+}
+.study-graph-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 2px;
+}
+.study-graph {
+  display: flex;
+  gap: 3px;
+  width: max-content;
+}
+.study-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.study-cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--g0);
+}
+.study-cell[data-level='1'] {
+  background: var(--g1);
+}
+.study-cell[data-level='2'] {
+  background: var(--g2);
+}
+.study-cell[data-level='3'] {
+  background: var(--g3);
+}
+.study-cell[data-level='4'] {
+  background: var(--g4);
+}
+.study-cell.future {
+  background: transparent;
+}
+.study-legend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.study-days {
+  margin-left: 4px;
 }
 .wd-stage {
   display: flex;
