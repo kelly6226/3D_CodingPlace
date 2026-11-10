@@ -157,6 +157,7 @@ export const LANGS: LangDef[] = [
   { id: 'swift', label: 'Swift', color: '#f05138' },
   { id: 'cpp', label: 'C++', color: '#f34b7d' },
   { id: 'rb', label: 'Ruby', color: '#cc342d' },
+  { id: 'php', label: 'PHP', color: '#4f5d95' },
   { id: 'dart', label: 'Dart', color: '#00b4ab' },
   { id: 'html', label: 'HTML (프로그래밍 언어 맞음)', color: '#e34c26' },
 ];
