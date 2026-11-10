@@ -229,7 +229,8 @@ button {
 .place-meta .sep {
   opacity: 0.5;
 }
-#since {
+#since,
+#study-today {
   font-family: var(--mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -595,6 +596,7 @@ button {
   width: 100%;
   margin-top: 6px;
   font-family: var(--font);
+  font-size: 15px;
 }
 .err {
   margin: 8px 0 0;
@@ -746,12 +748,19 @@ button.log-main:hover,
   color: var(--amber);
   font-weight: 600;
 }
+.people .n em.familiar {
+  color: var(--mint);
+}
 .people .s {
   grid-area: s;
   font-size: 12px;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.people .lang {
+.people .lang,
+.profile-id .lang {
   grid-area: lang;
   font-family: var(--mono);
   font-size: 11px;
@@ -800,12 +809,21 @@ button.log-main:hover,
   height: 8px;
   border-radius: 50%;
 }
-.pop .primary {
+/* 팝업이 좁을 수 있어서(min-width 190px) 버튼은 옆이 아니라 위아래로 쌓아요 */
+.pop-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 6px;
-  font-family: var(--font);
-  min-height: 36px;
 }
-
+.pop-actions .primary,
+.pop-actions .ghost {
+  min-height: 38px;
+  margin-top: 0;
+  font-size: 13px;
+  font-family: var(--font);
+  white-space: nowrap;
+}
 /* ── 토스트 ───────────────────────────────────── */
 .toasts {
   position: absolute;
@@ -1584,6 +1602,7 @@ button.place-name {
   min-height: 40px;
   border-radius: 12px;
   font-weight: 700;
+  font-size: 15px;
 }
 .sheet-note {
   display: block;
@@ -1797,6 +1816,16 @@ button.place-name {
 .chat-log .mine .msg {
   color: var(--amber);
 }
+.chat-log li.whisper {
+  background: rgba(242, 180, 90, 0.08);
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+}
+.chat-log li.whisper .msg {
+  color: var(--amber);
+  font-style: italic;
+}
 .chat-log .pin {
   flex: none;
   padding: 0 4px;
@@ -1828,9 +1857,38 @@ button.place-name {
   background: rgba(239, 83, 80, 0.22);
   border-color: rgba(239, 83, 80, 0.8);
 }
+.whisper-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(242, 180, 90, 0.4);
+  background: rgba(242, 180, 90, 0.1);
+  font-size: 12.5px;
+  color: var(--amber);
+}
+.whisper-x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
 .chat-form {
   display: flex;
   gap: 8px;
+}
+.chat-form button[type='submit'] {
+  padding: 0 12px;
+  min-height: 38px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 .chat-form input {
   flex: 1;
@@ -1845,6 +1903,11 @@ button.place-name {
 }
 .chat-form input:focus {
   border-color: var(--amber);
+}
+/* 귓속말 모드인 동안은 입력칸 전체가 그 상태를 계속 보여줘요 (알약 표시 하나로는 지나치기 쉬워서) */
+.chat.whispering .chat-form input {
+  border-color: rgba(242, 180, 90, 0.6);
+  background: rgba(242, 180, 90, 0.08);
 }
 .chat .err {
   margin: 0;
@@ -1878,47 +1941,6 @@ button.place-name {
   align-items: center;
   gap: 8px;
 }
-/* 꾸미기 버튼: 아래 덱에서 한 번도 안 열어본 사람에게만 호박색으로 반짝여요 */
-.act.fresh {
-  color: var(--amber);
-  animation: act-pulse 1.8s ease-out infinite;
-}
-.act.fresh .ai {
-  display: inline-block;
-  animation: act-wiggle 2.4s ease-in-out infinite;
-  transform-origin: 50% 80%;
-}
-@keyframes act-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(247, 197, 111, 0.6);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 10px rgba(247, 197, 111, 0);
-  }
-}
-@keyframes act-wiggle {
-  0%,
-  60%,
-  100% {
-    transform: rotate(0);
-  }
-  70% {
-    transform: rotate(-16deg);
-  }
-  80% {
-    transform: rotate(14deg);
-  }
-  90% {
-    transform: rotate(-8deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .act.fresh,
-  .act.fresh .ai {
-    animation: none;
-  }
-}
 .sheet-sub {
   margin: 14px 0 6px;
   font-size: 12.5px;
@@ -1927,6 +1949,109 @@ button.place-name {
 }
 .sheet-wardrobe {
   max-height: min(70vh, 640px, calc(100% - 16px));
+}
+
+/* 내 프로필 머리글: 아바타 원 + 이름 + 언어, 바로 아래 오늘/연속 통계 */
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.profile-avatar {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.profile-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.profile-name {
+  font-size: 18px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.profile-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 잔디 그래프: 바로 위 통계 칩과 한 묶음으로 보이게, 간격을 더 붙여요 */
+.study-graph-wrap .sheet-sub {
+  margin-top: 8px;
+}
+.study-graph-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 2px;
+}
+.study-graph {
+  display: flex;
+  gap: 3px;
+  width: max-content;
+}
+.study-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.study-cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--g0);
+}
+.study-cell[data-level='1'] {
+  background: var(--g1);
+}
+.study-cell[data-level='2'] {
+  background: var(--g2);
+}
+.study-cell[data-level='3'] {
+  background: var(--g3);
+}
+.study-cell[data-level='4'] {
+  background: var(--g4);
+}
+.study-cell.future {
+  background: transparent;
+}
+.study-legend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.study-days {
+  margin-left: 4px;
 }
 .wd-stage {
   display: flex;

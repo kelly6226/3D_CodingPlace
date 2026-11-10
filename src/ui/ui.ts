@@ -31,12 +31,14 @@ import {
 import type { Look } from '../look';
 import type { Commit, NewRoom, PeerState } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
-import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
 import { loadPrivacyPolicy } from './privacy';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
+  getPeerMeetCount,
+  getStudyHistory,
+  kstDate,
   type Profile,
 } from '../store';
 
@@ -52,6 +54,8 @@ export interface ChatLine {
   lang: string;
   text: string;
   mine: boolean;
+  /** 귓속말이면 상대방 이름 (내가 보냈으면 받는 사람, 받았으면 보낸 사람) */
+  whisperWith?: string;
 }
 
 export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'privacy';
@@ -77,8 +81,8 @@ export interface UIHandlers {
   onLookPreview(look: Look): Promise<LookPreviewHandle | null>;
   onCoffee(): void;
   onCommit(type: string, msg: string): Promise<string | null>;
-  /** 방 사람들에게 한마디. 보낼 수 없으면 이유를 돌려줌 */
-  onChat(text: string): string | null;
+  /** 방 사람들에게 한마디. to가 있으면 그 사람에게만 귓속말. 보낼 수 없으면 이유를 돌려줌 */
+  onChat(text: string, to?: string): string | null;
   /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
   onChatPin(text: string): Promise<string | null>;
   onSound(on: boolean): void;
@@ -129,6 +133,11 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  private whisperPill!: HTMLElement;
+  private whisperName!: HTMLElement;
+  private chatSubmit!: HTMLButtonElement;
+  /** 지금 귓속말 모드로 고른 상대. 없으면 평소처럼 방 전체에 보여요 */
+  private whisperTarget: { id: string; name: string } | null = null;
   /** 비밀번호 방을 만들 수 있는지 (실시간 모드에서만) */
   private lockRoomOk = false;
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
@@ -162,6 +171,8 @@ export class UI {
             '명 모각코 중',
             h('span', { class: 'sep' }, '·'),
             h('span', { id: 'since', title: '이 방에 들어온 뒤 지난 시간' }, ''),
+            h('span', { class: 'sep' }, '·'),
+            h('span', { id: 'study-today', title: '오늘 모각코한 총 시간', hidden: true }, ''),
           ),
         ),
         h('div', { class: 'mode-pill', id: 'mode', hidden: true }, ''),
@@ -170,10 +181,9 @@ export class UI {
       h(
         'div',
         { class: 'hud hud-tools' },
-        h('button', { class: 'icon-btn', id: 'sound-btn', onclick: () => this.toggleSound(), 'aria-label': '소리 켜고 끄기' }, '🔊'),
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '친구에게 공유' }, '🔗'),
-        h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '⚙️'),
+        h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '👤'),
       ),
       // 하단 액션바
       h(
@@ -197,9 +207,6 @@ export class UI {
       h('div', { class: 'modal', id: 'modal', hidden: true }),
       (this.toastBox = h('div', { class: 'toasts', id: 'toasts', 'aria-live': 'polite' })),
     );
-
-    // 꾸미기 버튼은 한 번도 안 열어본 사람에게만 반짝여요
-    if (!hasOpenedWardrobe()) $('#act-wardrobe').classList.add('fresh');
 
     document.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
@@ -488,6 +495,13 @@ export class UI {
     for (const el of document.querySelectorAll<HTMLElement>('.people .since')) el.textContent = stayText(Number(el.dataset.joined));
   }
 
+  /** 위쪽에 오늘 누적 공부 시간을 보여줘요. 1분 넘기 전엔 아직 숨겨요 */
+  setStudyToday(ms: number) {
+    const el = $('#study-today');
+    el.hidden = ms < 60e3;
+    el.textContent = `오늘 ${elapsedText(ms)}째`;
+  }
+
   setViewState({ moved, following }: ViewState) {
     this.viewAway = moved || following;
     const btn = $('#act-view');
@@ -500,9 +514,6 @@ export class UI {
 
   setSound(on: boolean) {
     this.soundOn = on;
-    const b = $('#sound-btn');
-    b.textContent = on ? '🔊' : '🔈';
-    b.setAttribute('aria-pressed', String(on));
   }
 
   private toggleSound() {
@@ -517,19 +528,58 @@ export class UI {
     if (this.sheet === 'noise') this.renderSheet();
   }
 
+  /** 프로필 시트에 넣는 잔디 그래프: 처음엔 이번 주만, 기록이 쌓일수록 최대 53주까지 앞으로 늘어나요 */
+  private renderStudyGraph(history: Record<string, number>): HTMLElement {
+    const today = kstDate();
+    const wd = weekdayKst(today);
+    const todaySunday = addDaysKst(today, -wd);
+    const earliestActive = Object.keys(history)
+      .filter((d) => (history[d] ?? 0) > 0)
+      .sort()[0];
+    const earliestSunday = earliestActive ? addDaysKst(earliestActive, -weekdayKst(earliestActive)) : todaySunday;
+    const weeksNeeded = Math.min(STUDY_GRAPH_WEEKS, daysBetweenKst(earliestSunday, todaySunday) / 7 + 1);
+    const gridStart = addDaysKst(today, -(wd + (weeksNeeded - 1) * 7));
+    let activeDays = 0;
+    const cols = Array.from({ length: weeksNeeded }, (_, c) => {
+      const rows = Array.from({ length: 7 }, (_, r) => {
+        const date = addDaysKst(gridStart, c * 7 + r);
+        if (date > today) return h('span', { class: 'study-cell future' });
+        const ms = history[date] ?? 0;
+        if (ms > 0) activeDays++;
+        return h('span', { class: 'study-cell', 'data-level': String(studyLevel(ms)), title: `${date} · ${ms > 0 ? elapsedText(ms) : '기록 없음'}` });
+      });
+      return h('div', { class: 'study-col' }, ...rows);
+    });
+    const scroll = h('div', { class: 'study-graph-scroll' }, h('div', { class: 'study-graph' }, ...cols));
+    // 만들자마자 오른쪽 끝(오늘)이 보이게
+    window.setTimeout(() => (scroll.scrollLeft = scroll.scrollWidth), 0);
+    return h(
+      'div',
+      { class: 'study-graph-wrap' },
+      h('h3', { class: 'sheet-sub' }, '공부 잔디'),
+      scroll,
+      h(
+        'div',
+        { class: 'study-legend' },
+        '적음',
+        ...[0, 1, 2, 3, 4].map((lv) => h('span', { class: 'study-cell', 'data-level': String(lv) })),
+        '많음',
+        h('span', { class: 'study-days' }, `· ${activeDays}일 출석`),
+      ),
+    );
+  }
+
   private renderNoise(el: HTMLElement, head: (title: string, sub?: string) => HTMLElement) {
     const { current, roomDefault } = this.noise;
-    el.append(head('배경 소리', '나에게만 들려요. 방마다 고른 소리를 이 브라우저에 기억해요'));
-    if (!this.soundOn) {
-      el.append(
-        h(
-          'div',
-          { class: 'noise-muted' },
-          h('span', {}, '🔈 소리가 꺼져 있어요'),
-          h('button', { type: 'button', class: 'chip-sm on', onclick: () => this.toggleSound() }, '소리 켜기'),
-        ),
-      );
-    }
+    el.append(
+      head('배경 소리', '나에게만 들려요. 방마다 고른 소리를 이 브라우저에 기억해요'),
+      h(
+        'div',
+        { class: 'noise-muted' },
+        h('span', {}, this.soundOn ? '🔊 소리 켜져 있어요' : '🔈 소리가 꺼져 있어요'),
+        h('button', { type: 'button', class: 'chip-sm' + (this.soundOn ? '' : ' on'), onclick: () => this.toggleSound() }, this.soundOn ? '소리 끄기' : '소리 켜기'),
+      ),
+    );
     for (const g of NOISE_GROUPS) {
       el.append(
         h('h3', { class: 'noise-group' }, g.label),
@@ -617,6 +667,14 @@ export class UI {
     this.chatLog = h('ol', { class: 'chat-log' });
     this.chatErr = h('p', { class: 'err', hidden: true });
     this.chatInput = h('input', { id: 'chat-input', maxlength: CHAT_MAX_LENGTH, placeholder: '한마디 (Enter로 보내기)', autocomplete: 'off', enterkeyhint: 'send' });
+    this.whisperName = h('b', {}, '');
+    this.whisperPill = h(
+      'div',
+      { class: 'whisper-pill', hidden: true },
+      h('span', {}, '🤫 ', this.whisperName, '님에게만 보여요'),
+      h('button', { type: 'button', class: 'whisper-x', onclick: () => this.clearWhisper(), 'aria-label': '귓속말 그만하기' }, '✕'),
+    );
+    this.chatSubmit = h('button', { class: 'primary', type: 'submit' }, '보내기');
     const form = h(
       'form',
       {
@@ -627,7 +685,7 @@ export class UI {
         },
       },
       this.chatInput,
-      h('button', { class: 'primary', type: 'submit' }, '보내기'),
+      this.chatSubmit,
     );
     this.chatPanel = h(
       'section',
@@ -635,14 +693,34 @@ export class UI {
       h(
         'header',
         { class: 'chat-head' },
-        h('p', {}, '말풍선으로 잠깐 보여요 · 남기고 싶은 말은 📌'),
+        h('p', {}, '말풍선으로 잠깐 보여요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
       this.chatLog,
       this.chatErr,
+      this.whisperPill,
       form,
     );
     return this.chatPanel;
+  }
+
+  /** 특정 사람에게만 보이는 귓속말 모드로 전환 (방을 나가거나 새로고침하면 상대를 다시 못 찾아요) */
+  startWhisper(id: string, name: string) {
+    this.whisperTarget = { id, name };
+    this.whisperName.textContent = name;
+    this.whisperPill.hidden = false;
+    this.chatPanel.classList.add('whispering');
+    this.chatInput.placeholder = `${name}님에게 귓속말`;
+    this.chatSubmit.textContent = '귓속말 보내기';
+    this.openChat();
+  }
+
+  private clearWhisper() {
+    this.whisperTarget = null;
+    this.whisperPill.hidden = true;
+    this.chatPanel.classList.remove('whispering');
+    this.chatInput.placeholder = '한마디 (Enter로 보내기)';
+    this.chatSubmit.textContent = '보내기';
   }
 
   toggleChat() {
@@ -665,6 +743,7 @@ export class UI {
     this.chatPanel.hidden = true;
     this.chatBtn.classList.remove('open');
     this.chatInput.blur();
+    this.clearWhisper();
   }
 
   /** 입력 칸·버튼·대화상자에 포커스가 없을 때만 Enter로 채팅을 열어요 */
@@ -676,30 +755,41 @@ export class UI {
   private sendChat() {
     const text = this.chatInput.value.trim();
     if (!text) return;
-    const problem = this.h.onChat(text);
+    const problem = this.h.onChat(text, this.whisperTarget?.id);
     this.chatErr.hidden = !problem;
     this.chatErr.textContent = problem ?? '';
     if (!problem) this.chatInput.value = '';
     this.chatInput.focus({ preventScroll: true });
   }
 
-  /** 대화 한 줄 추가. 내 글에만 방명록에 남기는 📌 버튼이 붙어요 (방명록에는 내 닉네임으로 남으니까) */
+  /**
+   * 대화 한 줄 추가. 내 글에만 방명록에 남기는 📌 버튼이 붙어요 (방명록에는 내 닉네임으로 남으니까) —
+   * 귓속말은 방명록이 공개라서 📌를 안 붙여요
+   */
   addChat(line: ChatLine) {
-    const pin = line.mine
-      ? h(
-          'button',
-          {
-            class: 'pin',
-            type: 'button',
-            title: '방명록에 남기기',
-            'aria-label': '방명록에 남기기',
-            onclick: (e: Event) => void this.pinChat(line.text, e.currentTarget as HTMLButtonElement),
-          },
-          '📌',
-        )
-      : null;
+    const pin =
+      line.mine && !line.whisperWith
+        ? h(
+            'button',
+            {
+              class: 'pin',
+              type: 'button',
+              title: '방명록에 남기기',
+              'aria-label': '방명록에 남기기',
+              onclick: (e: Event) => void this.pinChat(line.text, e.currentTarget as HTMLButtonElement),
+            },
+            '📌',
+          )
+        : null;
+    const who = line.whisperWith ? (line.mine ? `🤫 나 → ${line.whisperWith}` : `🤫 ${line.name}`) : line.name;
     this.chatLog.append(
-      h('li', { class: line.mine ? 'mine' : undefined }, h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, line.name), h('span', { class: 'msg' }, line.text), pin),
+      h(
+        'li',
+        { class: [line.mine && 'mine', line.whisperWith && 'whisper'].filter(Boolean).join(' ') || undefined },
+        h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, who),
+        h('span', { class: 'msg' }, line.text),
+        pin,
+      ),
     );
     while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
     this.chatLog.scrollTop = this.chatLog.scrollHeight;
@@ -738,11 +828,6 @@ export class UI {
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
     this.sheet = kind;
-    // 옷장을 한 번 열어보면 반짝임은 멈춰요
-    if (kind === 'wardrobe') {
-      markWardrobeOpened();
-      $('#act-wardrobe').classList.remove('fresh');
-    }
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
     this.renderSheet();
@@ -947,8 +1032,25 @@ export class UI {
                     },
                   },
                   h('span', { class: 'e' }, st.emoji),
-                  h('span', { class: 'n' }, p.name, p.id === this.self.id ? h('em', {}, ' (나)') : null),
-                  h('span', { class: 's' }, st.label, ' · ', h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt))),
+                  h(
+                    'span',
+                    { class: 'n' },
+                    p.name,
+                    p.id === this.self.id
+                      ? h('em', {}, ' (나)')
+                      : getPeerMeetCount(p.id) >= 2
+                        ? h('em', { class: 'familiar', title: '전에도 같이 모각코했어요' }, ' 🙋 또 만났어요')
+                        : null,
+                  ),
+                  h(
+                    'span',
+                    { class: 's' },
+                    st.label,
+                    ' · ',
+                    h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt)),
+                    ' · ',
+                    `오늘 ${elapsedText(p.studyToday)}째`,
+                  ),
                   h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
                 ),
               );
@@ -962,8 +1064,31 @@ export class UI {
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
+        const history = getStudyHistory();
+        const today = kstDate();
+        const streak = currentStreak(history, today);
+        const st = statusById(s.status);
         el.append(
           head('내 프로필', '후드티·머리·모자는 👕 옷장에서 바꿔요'),
+          h(
+            'div',
+            { class: 'profile-head' },
+            h('div', { class: 'profile-avatar', style: `background:${p.color}` }, st.emoji),
+            h(
+              'div',
+              { class: 'profile-id' },
+              h('div', { class: 'profile-name' }, p.name),
+              h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
+            ),
+          ),
+          h(
+            'div',
+            { class: 'profile-stats' },
+            h('span', { class: 'profile-stat' }, streak > 0 ? `🔥 연속 ${streak}일째` : '🌱 오늘부터 시작해봐요'),
+            h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(s.studyToday)}`),
+          ),
+          this.renderStudyGraph(history),
+          h('h3', { class: 'sheet-sub' }, '✏️ 정보 수정'),
           h(
             'form',
             {
@@ -1328,15 +1453,30 @@ export class UI {
       isSelf
         ? null
         : h(
-            'button',
-            {
-              class: 'primary',
-              onclick: () => {
-                this.h.onWave(p.id);
-                this.hidePop();
+            'div',
+            { class: 'pop-actions' },
+            h(
+              'button',
+              {
+                class: 'primary',
+                onclick: () => {
+                  this.h.onWave(p.id);
+                  this.hidePop();
+                },
               },
-            },
-            '👋 손 흔들기',
+              '👋 손 흔들기',
+            ),
+            h(
+              'button',
+              {
+                class: 'ghost',
+                onclick: () => {
+                  this.hidePop();
+                  this.startWhisper(p.id, p.name);
+                },
+              },
+              '💬 귓속말',
+            ),
           ),
     ];
     el.append(...(rows.filter(Boolean) as Node[]));
@@ -1487,6 +1627,48 @@ function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean)
 /** 이 방에 들어온 뒤 지난 시간 표시 (위쪽 인원 표시와 사람 목록이 같이 써요) */
 function stayText(joinedAt: number) {
   return `⏱ ${elapsedText(Date.now() - joinedAt)}`;
+}
+
+/** 잔디 그래프에 보여줄 주 수 (대략 1년) */
+const STUDY_GRAPH_WEEKS = 53;
+
+/** KST 기준 날짜 문자열의 요일 (0=일 ~ 6=토). 시간대 영향 없이 날짜 문자열 자체로 계산해요 */
+function weekdayKst(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00+09:00`).getUTCDay();
+}
+
+/** KST 기준 날짜 문자열에 날짜를 더하거나 빼요 */
+function addDaysKst(dateStr: string, delta: number): string {
+  const d = new Date(`${dateStr}T00:00:00+09:00`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return kstDate(d);
+}
+
+/** KST 날짜 문자열 둘 사이의 날짜 수 (b - a) */
+function daysBetweenKst(a: string, b: string): number {
+  const ta = new Date(`${a}T00:00:00+09:00`).getTime();
+  const tb = new Date(`${b}T00:00:00+09:00`).getTime();
+  return Math.round((tb - ta) / 86400e3);
+}
+
+/** 오늘(아직 기록이 없으면 어제)부터 거슬러 올라가며 끊기지 않고 공부한 날 수 */
+function currentStreak(history: Record<string, number>, today: string): number {
+  let d = (history[today] ?? 0) > 0 ? today : addDaysKst(today, -1);
+  let streak = 0;
+  while ((history[d] ?? 0) > 0) {
+    streak++;
+    d = addDaysKst(d, -1);
+  }
+  return streak;
+}
+
+function studyLevel(ms: number): 0 | 1 | 2 | 3 | 4 {
+  if (ms <= 0) return 0;
+  const min = ms / 60e3;
+  if (min < 30) return 1;
+  if (min < 90) return 2;
+  if (min < 180) return 3;
+  return 4;
 }
 
 export function elapsedText(ms: number) {
