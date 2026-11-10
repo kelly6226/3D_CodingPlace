@@ -174,7 +174,6 @@ export class UI {
       h(
         'div',
         { class: 'hud hud-tools' },
-        h('button', { class: 'icon-btn', id: 'sound-btn', onclick: () => this.toggleSound(), 'aria-label': '소리 켜고 끄기' }, '🔊'),
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
         h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '👤'),
@@ -511,9 +510,6 @@ export class UI {
 
   setSound(on: boolean) {
     this.soundOn = on;
-    const b = $('#sound-btn');
-    b.textContent = on ? '🔊' : '🔈';
-    b.setAttribute('aria-pressed', String(on));
   }
 
   private toggleSound() {
@@ -571,17 +567,15 @@ export class UI {
 
   private renderNoise(el: HTMLElement, head: (title: string, sub?: string) => HTMLElement) {
     const { current, roomDefault } = this.noise;
-    el.append(head('배경 소리', '나에게만 들려요. 방마다 고른 소리를 이 브라우저에 기억해요'));
-    if (!this.soundOn) {
-      el.append(
-        h(
-          'div',
-          { class: 'noise-muted' },
-          h('span', {}, '🔈 소리가 꺼져 있어요'),
-          h('button', { type: 'button', class: 'chip-sm on', onclick: () => this.toggleSound() }, '소리 켜기'),
-        ),
-      );
-    }
+    el.append(
+      head('배경 소리', '나에게만 들려요. 방마다 고른 소리를 이 브라우저에 기억해요'),
+      h(
+        'div',
+        { class: 'noise-muted' },
+        h('span', {}, this.soundOn ? '🔊 소리 켜져 있어요' : '🔈 소리가 꺼져 있어요'),
+        h('button', { type: 'button', class: 'chip-sm' + (this.soundOn ? '' : ' on'), onclick: () => this.toggleSound() }, this.soundOn ? '소리 끄기' : '소리 켜기'),
+      ),
+    );
     for (const g of NOISE_GROUPS) {
       el.append(
         h('h3', { class: 'noise-group' }, g.label),
