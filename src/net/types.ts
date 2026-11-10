@@ -21,6 +21,8 @@ export interface PeerState {
   z: number;
   coffee: number;
   joinedAt: number;
+  /** 오늘 모각코한 총 시간(ms). 각자 브라우저에 쌓인 값을 그대로 알려줘요 */
+  studyToday: number;
   bot?: boolean;
 }
 

@@ -161,6 +161,8 @@ export class UI {
             '명 모각코 중',
             h('span', { class: 'sep' }, '·'),
             h('span', { id: 'since', title: '이 방에 들어온 뒤 지난 시간' }, ''),
+            h('span', { class: 'sep' }, '·'),
+            h('span', { id: 'study-today', title: '오늘 모각코한 총 시간', hidden: true }, ''),
           ),
         ),
         h('div', { class: 'mode-pill', id: 'mode', hidden: true }, ''),
@@ -485,6 +487,13 @@ export class UI {
     $('#since').textContent = stayText(this.self.joinedAt);
     if (this.sheet !== 'people') return;
     for (const el of document.querySelectorAll<HTMLElement>('.people .since')) el.textContent = stayText(Number(el.dataset.joined));
+  }
+
+  /** 위쪽에 오늘 누적 공부 시간을 보여줘요. 1분 넘기 전엔 아직 숨겨요 */
+  setStudyToday(ms: number) {
+    const el = $('#study-today');
+    el.hidden = ms < 60e3;
+    el.textContent = `오늘 ${elapsedText(ms)}째`;
   }
 
   setViewState({ moved, following }: ViewState) {
@@ -933,7 +942,15 @@ export class UI {
                   },
                   h('span', { class: 'e' }, st.emoji),
                   h('span', { class: 'n' }, p.name, p.id === this.self.id ? h('em', {}, ' (나)') : null),
-                  h('span', { class: 's' }, st.label, ' · ', h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt))),
+                  h(
+                    'span',
+                    { class: 's' },
+                    st.label,
+                    ' · ',
+                    h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt)),
+                    ' · ',
+                    `오늘 ${elapsedText(p.studyToday)}째`,
+                  ),
                   h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
                 ),
               );
