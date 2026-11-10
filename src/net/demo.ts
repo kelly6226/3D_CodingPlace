@@ -151,6 +151,7 @@ export class DemoNet implements Net {
       z: SPAWN.z,
       coffee: Math.floor(rand(0, 4)),
       joinedAt: Date.now(),
+      studyToday: Math.floor(rand(0, 180)) * 60e3,
       bot: true,
       ...over,
     };

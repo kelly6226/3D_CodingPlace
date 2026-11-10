@@ -185,9 +185,11 @@ async function enter(p: store.Profile) {
     z: SPAWN.z,
     coffee: store.getCoffeeToday(),
     joinedAt: Date.now(),
+    studyToday: store.getStudyMsToday(),
   };
   world.addAvatar(self, true);
   ui.setSelf(self);
+  ui.setStudyToday(store.getStudyMsToday());
 
   const connecting = net.connect(
     self,
@@ -208,6 +210,7 @@ async function enter(p: store.Profile) {
         for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id);
         known.clear();
         lastMoves.clear();
+        metThisSession.clear();
         ui.clearChat();
         ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
@@ -249,7 +252,7 @@ function showTips() {
       {
         emoji: '💬',
         title: '한마디 걸어 보기',
-        body: '보낸 말은 머리 위 말풍선으로 잠깐 떠요. 남겨 두고 싶은 말은 📌로 방명록에 붙여요.',
+        body: '보낸 말은 머리 위 말풍선으로 잠깐 떠요. 다른 사람을 눌러 "💬 귓속말"을 고르면 그 사람에게만 보여요. 남겨 두고 싶은 말은 📌로 방명록에 붙여요.',
         target: () => document.getElementById('act-chat'),
       },
       {
@@ -360,6 +363,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   for (const id of [...world.avatars.keys()]) if (id !== self.id) world.removeAvatar(id, true);
   known.clear();
   lastMoves.clear();
+  metThisSession.clear();
   ui.clearChat();
   ui.setPeers([]);
   // 장소가 다르면 3D 장면을 갈아끼움. 배치도가 바뀌니 연결(검사)보다 먼저
@@ -476,7 +480,7 @@ function setStatus(id: string) {
 /** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
 /** 옷장 미리보기에 쓰는 아바타 바탕. 입장 화면에서도 쓰니까 self에 기대지 않아요 */
 function previewBase(look: Look): PeerState {
-  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, ...look };
+  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, studyToday: 0, ...look };
 }
 
 function profileOf(s: PeerState): store.Profile {
@@ -516,8 +520,11 @@ function emote(id: string, to?: string) {
 const CHAT_PIN_COMMIT_TYPE = 'chore';
 
 let lastChat = 0;
-/** 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요 */
-function chat(text: string): string | null {
+/**
+ * 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요.
+ * to를 주면 그 사람에게만 보이는 귓속말이 돼요 (로그인이 없어서 이 방문 동안만 가요. 암호화는 안 돼요)
+ */
+function chat(text: string, to?: string): string | null {
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
   if (hasBadWord(text)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
@@ -525,8 +532,9 @@ function chat(text: string): string | null {
   lastChat = Date.now();
   meAvatar().say(msg);
   sound.pop();
-  ui.addChat({ name: self.name, lang: self.lang, text: msg, mine: true });
-  net.send({ type: 'chat', id: self.id, text: msg });
+  const whisperWith = to ? (world.avatars.get(to)?.state.name ?? '상대방') : undefined;
+  ui.addChat({ name: self.name, lang: self.lang, text: msg, mine: true, whisperWith });
+  net.send({ type: 'chat', id: self.id, text: msg, to });
   return null;
 }
 
@@ -663,6 +671,9 @@ function addCommit(c: Commit) {
 // ── 5. 다른 사람들 ───────────────────────────────
 const known = new Map<string, PeerState>();
 
+/** 이번 접속에서 이미 '만남'으로 기록한 사람들 (같은 접속 동안 여러 번 세지 않게) */
+const metThisSession = new Set<string>();
+
 /** Broadcast로 받은 가장 최근 이동. Presence는 PRESENCE_LAG_MS까지 늦을 수 있어서, 그 안에는 이쪽이 더 새로워요 */
 const lastMoves = new Map<string, { at: number; x: number; z: number; seat: string | null }>();
 
@@ -681,6 +692,10 @@ function onPeers(presencePeers: PeerState[]) {
   const peers = presencePeers.map(withLatestMove);
   const ids = new Set(peers.map((p) => p.id));
   for (const p of peers) {
+    if (!metThisSession.has(p.id)) {
+      metThisSession.add(p.id);
+      store.markPeerMet(p.id);
+    }
     const prev = known.get(p.id);
     let a = world.avatars.get(p.id);
     if (!a) {
@@ -753,8 +768,9 @@ function onEvent(e: NetEvent) {
     case 'chat': {
       const a = world.avatars.get(e.id);
       if (!a || a.isSelf) return;
+      if (e.to && e.to !== self.id) return; // 나한테 온 귓속말이 아니면 못 본 척해요
       a.say(e.text);
-      ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false });
+      ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false, whisperWith: e.to ? a.state.name : undefined });
       break;
     }
     case 'deploy':
@@ -846,6 +862,12 @@ function onFrame(dt: number) {
   if (secT >= 1) {
     secT = 0;
     ui.tickSince();
+    if (self) {
+      const total = store.addStudyMs(1000);
+      self.studyToday = total;
+      ui.setStudyToday(total);
+      net.updateSelf({ studyToday: total });
+    }
   }
   if (!self) return;
   // 멀리서 들리는 다른 사람들 타자 소리
