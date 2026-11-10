@@ -31,7 +31,6 @@ import {
 import type { Look } from '../look';
 import type { Commit, NewRoom, PeerState } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
-import { hasOpenedWardrobe, markWardrobeOpened } from '../store';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
@@ -200,9 +199,6 @@ export class UI {
       h('div', { class: 'modal', id: 'modal', hidden: true }),
       (this.toastBox = h('div', { class: 'toasts', id: 'toasts', 'aria-live': 'polite' })),
     );
-
-    // 꾸미기 버튼은 한 번도 안 열어본 사람에게만 반짝여요
-    if (!hasOpenedWardrobe()) $('#act-wardrobe').classList.add('fresh');
 
     document.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
@@ -784,11 +780,6 @@ export class UI {
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
     this.sheet = kind;
-    // 옷장을 한 번 열어보면 반짝임은 멈춰요
-    if (kind === 'wardrobe') {
-      markWardrobeOpened();
-      $('#act-wardrobe').classList.remove('fresh');
-    }
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
     this.renderSheet();

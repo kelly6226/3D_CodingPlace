@@ -22,8 +22,6 @@ interface Saved {
   reported?: Record<string, string[]>;
   /** 방마다 내가 고른 배경 소리 (방 slug → 소리). 방 기본값과 같으면 지워요 */
   noise?: Record<string, string>;
-  /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
-  wardrobeOpened?: boolean;
   coffee?: { date: string; count: number };
   /** 날짜(KST)별 모각코한 총 시간(ms). 잔디 그래프에 써요. 오래된 날짜는 자동으로 정리돼요 */
   studyHistory?: Record<string, number>;
@@ -150,16 +148,6 @@ export function addReportedCommit(slug: string, hash: string) {
   const list = (cache.reported?.[slug] ?? []).filter((h) => h !== hash);
   list.push(hash);
   cache.reported = { ...cache.reported, [slug]: list.slice(-MAX_REPORTED_PER_ROOM) };
-  persist();
-}
-
-export function hasOpenedWardrobe(): boolean {
-  return cache.wardrobeOpened === true;
-}
-
-export function markWardrobeOpened() {
-  if (cache.wardrobeOpened) return;
-  cache.wardrobeOpened = true;
   persist();
 }
 

@@ -1898,47 +1898,6 @@ button.place-name {
   align-items: center;
   gap: 8px;
 }
-/* 꾸미기 버튼: 아래 덱에서 한 번도 안 열어본 사람에게만 호박색으로 반짝여요 */
-.act.fresh {
-  color: var(--amber);
-  animation: act-pulse 1.8s ease-out infinite;
-}
-.act.fresh .ai {
-  display: inline-block;
-  animation: act-wiggle 2.4s ease-in-out infinite;
-  transform-origin: 50% 80%;
-}
-@keyframes act-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(247, 197, 111, 0.6);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 10px rgba(247, 197, 111, 0);
-  }
-}
-@keyframes act-wiggle {
-  0%,
-  60%,
-  100% {
-    transform: rotate(0);
-  }
-  70% {
-    transform: rotate(-16deg);
-  }
-  80% {
-    transform: rotate(14deg);
-  }
-  90% {
-    transform: rotate(-8deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .act.fresh,
-  .act.fresh .ai {
-    animation: none;
-  }
-}
 .sheet-sub {
   margin: 14px 0 6px;
   font-size: 12.5px;
