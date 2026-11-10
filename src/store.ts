@@ -25,12 +25,19 @@ interface Saved {
   /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
   wardrobeOpened?: boolean;
   coffee?: { date: string; count: number };
-  /** 오늘 모각코한 총 시간 (날짜가 바뀌면 리셋) */
-  studyMs?: { date: string; ms: number };
+  /** 날짜(KST)별 모각코한 총 시간(ms). 잔디 그래프에 써요. 오래된 날짜는 자동으로 정리돼요 */
+  studyHistory?: Record<string, number>;
   demoCommits?: unknown[];
   demoRooms?: unknown[];
   /** 비밀번호를 맞힌 방의 열쇠 (방 주소 → 열쇠). 오래된 것부터 밀려나요 */
   roomKeys?: Record<string, StoredRoomKey>;
+  /** 전에 만난 적 있는 사람들 (peer id → 몇 번 만났는지, 마지막으로 만난 시각). 오래된 것부터 밀려나요 */
+  knownPeers?: Record<string, KnownPeer>;
+}
+
+export interface KnownPeer {
+  count: number;
+  last: number;
 }
 
 export interface StoredRoomKey {
@@ -169,18 +176,34 @@ export function addCoffee(): number {
   return count;
 }
 
+/** 잔디 그래프에 보여줄 기간 (대략 53주) */
+const STUDY_HISTORY_DAYS = 371;
+
 export function getStudyMsToday(): number {
-  const d = kstDate();
-  return cache.studyMs?.date === d ? cache.studyMs.ms : 0;
+  return cache.studyHistory?.[kstDate()] ?? 0;
+}
+
+/** 날짜별 누적 시간 그대로 (잔디 그래프용) */
+export function getStudyHistory(): Record<string, number> {
+  return { ...cache.studyHistory };
 }
 
 /** 오늘 누적 시간에 더해요 (새로고침하거나 방을 나가도 자정까진 안 지워져요) */
 export function addStudyMs(ms: number): number {
   const d = kstDate();
-  const total = (cache.studyMs?.date === d ? cache.studyMs.ms : 0) + ms;
-  cache.studyMs = { date: d, ms: total };
+  const hist = { ...cache.studyHistory };
+  hist[d] = (hist[d] ?? 0) + ms;
+  cache.studyHistory = pruneByCutoff(hist, STUDY_HISTORY_DAYS);
   persist();
-  return total;
+  return cache.studyHistory[d];
+}
+
+/** 기준일보다 오래된 날짜(YYYY-MM-DD라 문자열 비교로 충분해요)는 지워요 */
+function pruneByCutoff(hist: Record<string, number>, days: number): Record<string, number> {
+  const cutoff = kstDate(new Date(Date.now() - days * 86400e3));
+  const out: Record<string, number> = {};
+  for (const [d, ms] of Object.entries(hist)) if (d >= cutoff) out[d] = ms;
+  return out;
 }
 
 export function getDemoCommits<T>(): T[] {
@@ -210,5 +233,23 @@ export function setRoomKey(slug: string, key: StoredRoomKey) {
   // 객체는 넣은 순서를 기억하니까, 다시 넣을 땐 빼고 넣어서 맨 뒤(가장 최근)로 보내요
   const { [slug]: _old, ...rest } = cache.roomKeys ?? {};
   cache.roomKeys = Object.fromEntries([...Object.entries(rest), [slug, key]].slice(-ROOM_KEYS_MAX));
+  persist();
+}
+
+/** 기억해 둘 '만난 적 있는 사람' 수. 넘으면 오래 전에 만난 사람부터 잊어요 */
+const KNOWN_PEERS_MAX = 300;
+
+/** 이 사람을 몇 번 만났는지 (한 번도 없으면 0) */
+export function getPeerMeetCount(id: string): number {
+  return cache.knownPeers?.[id]?.count ?? 0;
+}
+
+/** 방문(접속) 한 번에 한 번씩만 불러요. 처음 보는 사람이면 1, 그 다음부턴 늘어나요 */
+export function markPeerMet(id: string) {
+  const known: Record<string, KnownPeer> = { ...cache.knownPeers };
+  known[id] = { count: (known[id]?.count ?? 0) + 1, last: Date.now() };
+  const ids = Object.keys(known).sort((a, b) => known[a].last - known[b].last);
+  for (const old of ids.slice(0, Math.max(0, ids.length - KNOWN_PEERS_MAX))) delete known[old];
+  cache.knownPeers = known;
   persist();
 }

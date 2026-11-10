@@ -36,6 +36,9 @@ import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
+  getPeerMeetCount,
+  getStudyHistory,
+  kstDate,
   type Profile,
 } from '../store';
 
@@ -174,7 +177,7 @@ export class UI {
         h('button', { class: 'icon-btn', id: 'sound-btn', onclick: () => this.toggleSound(), 'aria-label': '소리 켜고 끄기' }, '🔊'),
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
-        h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '⚙️'),
+        h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '👤'),
       ),
       // 하단 액션바
       h(
@@ -523,6 +526,47 @@ export class UI {
   setNoise(state: NoiseState) {
     this.noise = state;
     if (this.sheet === 'noise') this.renderSheet();
+  }
+
+  /** 프로필 시트에 넣는 잔디 그래프: 처음엔 이번 주만, 기록이 쌓일수록 최대 53주까지 앞으로 늘어나요 */
+  private renderStudyGraph(history: Record<string, number>): HTMLElement {
+    const today = kstDate();
+    const wd = weekdayKst(today);
+    const todaySunday = addDaysKst(today, -wd);
+    const earliestActive = Object.keys(history)
+      .filter((d) => (history[d] ?? 0) > 0)
+      .sort()[0];
+    const earliestSunday = earliestActive ? addDaysKst(earliestActive, -weekdayKst(earliestActive)) : todaySunday;
+    const weeksNeeded = Math.min(STUDY_GRAPH_WEEKS, daysBetweenKst(earliestSunday, todaySunday) / 7 + 1);
+    const gridStart = addDaysKst(today, -(wd + (weeksNeeded - 1) * 7));
+    let activeDays = 0;
+    const cols = Array.from({ length: weeksNeeded }, (_, c) => {
+      const rows = Array.from({ length: 7 }, (_, r) => {
+        const date = addDaysKst(gridStart, c * 7 + r);
+        if (date > today) return h('span', { class: 'study-cell future' });
+        const ms = history[date] ?? 0;
+        if (ms > 0) activeDays++;
+        return h('span', { class: 'study-cell', 'data-level': String(studyLevel(ms)), title: `${date} · ${ms > 0 ? elapsedText(ms) : '기록 없음'}` });
+      });
+      return h('div', { class: 'study-col' }, ...rows);
+    });
+    const scroll = h('div', { class: 'study-graph-scroll' }, h('div', { class: 'study-graph' }, ...cols));
+    // 만들자마자 오른쪽 끝(오늘)이 보이게
+    window.setTimeout(() => (scroll.scrollLeft = scroll.scrollWidth), 0);
+    return h(
+      'div',
+      { class: 'study-graph-wrap' },
+      h('h3', { class: 'sheet-sub' }, '공부 잔디'),
+      scroll,
+      h(
+        'div',
+        { class: 'study-legend' },
+        '적음',
+        ...[0, 1, 2, 3, 4].map((lv) => h('span', { class: 'study-cell', 'data-level': String(lv) })),
+        '많음',
+        h('span', { class: 'study-days' }, `· ${activeDays}일 출석`),
+      ),
+    );
   }
 
   private renderNoise(el: HTMLElement, head: (title: string, sub?: string) => HTMLElement) {
@@ -941,7 +985,16 @@ export class UI {
                     },
                   },
                   h('span', { class: 'e' }, st.emoji),
-                  h('span', { class: 'n' }, p.name, p.id === this.self.id ? h('em', {}, ' (나)') : null),
+                  h(
+                    'span',
+                    { class: 'n' },
+                    p.name,
+                    p.id === this.self.id
+                      ? h('em', {}, ' (나)')
+                      : getPeerMeetCount(p.id) >= 2
+                        ? h('em', { class: 'familiar', title: '전에도 같이 모각코했어요' }, ' 🙋 또 만났어요')
+                        : null,
+                  ),
                   h(
                     'span',
                     { class: 's' },
@@ -964,8 +1017,31 @@ export class UI {
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
+        const history = getStudyHistory();
+        const today = kstDate();
+        const streak = currentStreak(history, today);
+        const st = statusById(s.status);
         el.append(
           head('내 프로필', '후드티·머리·모자는 👕 옷장에서 바꿔요'),
+          h(
+            'div',
+            { class: 'profile-head' },
+            h('div', { class: 'profile-avatar', style: `background:${p.color}` }, st.emoji),
+            h(
+              'div',
+              { class: 'profile-id' },
+              h('div', { class: 'profile-name' }, p.name),
+              h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
+            ),
+          ),
+          h(
+            'div',
+            { class: 'profile-stats' },
+            h('span', { class: 'profile-stat' }, streak > 0 ? `🔥 연속 ${streak}일째` : '🌱 오늘부터 시작해봐요'),
+            h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(s.studyToday)}`),
+          ),
+          this.renderStudyGraph(history),
+          h('h3', { class: 'sheet-sub' }, '✏️ 정보 수정'),
           h(
             'form',
             {
@@ -1485,6 +1561,48 @@ function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean)
 /** 이 방에 들어온 뒤 지난 시간 표시 (위쪽 인원 표시와 사람 목록이 같이 써요) */
 function stayText(joinedAt: number) {
   return `⏱ ${elapsedText(Date.now() - joinedAt)}`;
+}
+
+/** 잔디 그래프에 보여줄 주 수 (대략 1년) */
+const STUDY_GRAPH_WEEKS = 53;
+
+/** KST 기준 날짜 문자열의 요일 (0=일 ~ 6=토). 시간대 영향 없이 날짜 문자열 자체로 계산해요 */
+function weekdayKst(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00+09:00`).getUTCDay();
+}
+
+/** KST 기준 날짜 문자열에 날짜를 더하거나 빼요 */
+function addDaysKst(dateStr: string, delta: number): string {
+  const d = new Date(`${dateStr}T00:00:00+09:00`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return kstDate(d);
+}
+
+/** KST 날짜 문자열 둘 사이의 날짜 수 (b - a) */
+function daysBetweenKst(a: string, b: string): number {
+  const ta = new Date(`${a}T00:00:00+09:00`).getTime();
+  const tb = new Date(`${b}T00:00:00+09:00`).getTime();
+  return Math.round((tb - ta) / 86400e3);
+}
+
+/** 오늘(아직 기록이 없으면 어제)부터 거슬러 올라가며 끊기지 않고 공부한 날 수 */
+function currentStreak(history: Record<string, number>, today: string): number {
+  let d = (history[today] ?? 0) > 0 ? today : addDaysKst(today, -1);
+  let streak = 0;
+  while ((history[d] ?? 0) > 0) {
+    streak++;
+    d = addDaysKst(d, -1);
+  }
+  return streak;
+}
+
+function studyLevel(ms: number): 0 | 1 | 2 | 3 | 4 {
+  if (ms <= 0) return 0;
+  const min = ms / 60e3;
+  if (min < 30) return 1;
+  if (min < 90) return 2;
+  if (min < 180) return 3;
+  return 4;
 }
 
 export function elapsedText(ms: number) {
