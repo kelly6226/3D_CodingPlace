@@ -76,6 +76,7 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
     z: pos.z,
     coffee: clamp(Math.floor(num(raw.coffee, 0)), 0, 99),
     joinedAt: clamp(num(raw.joinedAt, now), 0, now + 60e3),
+    studyToday: clamp(Math.floor(num(raw.studyToday, 0)), 0, 24 * 3600e3),
   };
 }
 

@@ -178,9 +178,11 @@ async function enter(p: store.Profile) {
     z: SPAWN.z,
     coffee: store.getCoffeeToday(),
     joinedAt: Date.now(),
+    studyToday: store.getStudyMsToday(),
   };
   world.addAvatar(self, true);
   ui.setSelf(self);
+  ui.setStudyToday(store.getStudyMsToday());
 
   const connecting = net.connect(
     self,
@@ -487,7 +489,7 @@ function setStatus(id: string) {
 /** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
 /** 옷장 미리보기에 쓰는 아바타 바탕. 입장 화면에서도 쓰니까 self에 기대지 않아요 */
 function previewBase(look: Look): PeerState {
-  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, ...look };
+  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, studyToday: 0, ...look };
 }
 
 function profileOf(s: PeerState): store.Profile {
@@ -857,6 +859,12 @@ function onFrame(dt: number) {
   if (secT >= 1) {
     secT = 0;
     ui.tickSince();
+    if (self) {
+      const total = store.addStudyMs(1000);
+      self.studyToday = total;
+      ui.setStudyToday(total);
+      net.updateSelf({ studyToday: total });
+    }
   }
   if (!self) return;
   // 멀리서 들리는 다른 사람들 타자 소리

@@ -25,6 +25,8 @@ interface Saved {
   /** 옷장을 한 번이라도 열어봤는지 (처음엔 버튼이 눈에 띄게 반짝여요) */
   wardrobeOpened?: boolean;
   coffee?: { date: string; count: number };
+  /** 오늘 모각코한 총 시간 (날짜가 바뀌면 리셋) */
+  studyMs?: { date: string; ms: number };
   demoCommits?: unknown[];
   demoRooms?: unknown[];
   /** 비밀번호를 맞힌 방의 열쇠 (방 주소 → 열쇠). 오래된 것부터 밀려나요 */
@@ -165,6 +167,20 @@ export function addCoffee(): number {
   cache.coffee = { date: d, count };
   persist();
   return count;
+}
+
+export function getStudyMsToday(): number {
+  const d = kstDate();
+  return cache.studyMs?.date === d ? cache.studyMs.ms : 0;
+}
+
+/** 오늘 누적 시간에 더해요 (새로고침하거나 방을 나가도 자정까진 안 지워져요) */
+export function addStudyMs(ms: number): number {
+  const d = kstDate();
+  const total = (cache.studyMs?.date === d ? cache.studyMs.ms : 0) + ms;
+  cache.studyMs = { date: d, ms: total };
+  persist();
+  return total;
 }
 
 export function getDemoCommits<T>(): T[] {
