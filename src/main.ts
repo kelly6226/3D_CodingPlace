@@ -28,6 +28,7 @@ import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/bad
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
+import { startStudyClock } from './studyClock';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -183,6 +184,7 @@ async function enter(p: store.Profile) {
   world.addAvatar(self, true);
   ui.setSelf(self);
   ui.setStudyToday(store.getStudyMsToday());
+  startStudyClock(addStudyTimeAndShare);
 
   const connecting = net.connect(
     self,
@@ -865,6 +867,14 @@ function fillNote(line: string) {
 }
 
 // ── 7. 매 프레임 / 주기 작업 ───────────────────────
+/** 오늘 누적 시간에 더하고 내 화면과 다른 사람들에게 알려요 (studyClock.ts가 실제 시각으로 불러요) */
+function addStudyTimeAndShare(ms: number) {
+  const total = store.addStudyMs(ms);
+  self.studyToday = total;
+  ui.setStudyToday(total);
+  net.updateSelf({ studyToday: total });
+}
+
 let secT = 0;
 let keysT = 3;
 let tagT = 0;
@@ -873,12 +883,6 @@ function onFrame(dt: number) {
   if (secT >= 1) {
     secT = 0;
     ui.tickSince();
-    if (self) {
-      const total = store.addStudyMs(1000);
-      self.studyToday = total;
-      ui.setStudyToday(total);
-      net.updateSelf({ studyToday: total });
-    }
   }
   if (!self) return;
   // 멀리서 들리는 다른 사람들 타자 소리
