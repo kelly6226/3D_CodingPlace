@@ -55,14 +55,17 @@ import {
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import { renderSyncSheet } from './syncSheet';
+import { canShareLink, isKakaoInApp } from '../sync/env';
 import type { SyncOutcome, SyncState } from '../sync/deviceSync';
 import {
   getMyHour,
   getPeerMeetCount,
   getSessionsToday,
   getStudyHistory,
+  hasSeenSync,
   hasSeenTogether,
   kstDate,
+  markSyncSeen,
   markTogetherSeen,
   setMyHour,
   type Profile,
@@ -139,6 +142,10 @@ export interface UIHandlers {
   /** 서버에 남은 기록 지우기 (확인 창은 main.ts가 띄워요) */
   onSyncErase(): void;
   onSyncCopy(what: 'code' | 'link'): void;
+  /** 내 이어하기 링크를 공유 창으로 보내기 (공유 창이 없으면 복사) */
+  onSyncShare(): void;
+  /** 카카오톡 안의 브라우저에서 기본 브라우저로 다시 열기. 코드 칸에 적혀 있던 글자를 같이 넘겨요 */
+  onSyncOpenExternal(draft: string): void;
 }
 
 export class UI {
@@ -240,7 +247,13 @@ export class UI {
         { class: 'hud hud-tools' },
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
-        h('button', { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' }, '👤'),
+        h(
+          'button',
+          { class: 'icon-btn', onclick: () => this.toggleSheet('profile'), 'aria-label': '내 프로필' },
+          '👤',
+          // 다른 기기에서 이어하기를 아직 안 열어 봤으면 점으로 알려요 (setSyncState가 켜고 꺼요)
+          h('i', { class: 'new-dot', id: 'profile-dot', hidden: true, 'aria-hidden': 'true' }),
+        ),
       ),
       // 하단 액션바
       h(
@@ -355,6 +368,12 @@ export class UI {
         lang,
       ),
       dress,
+      h(
+        'p',
+        { class: 'intro-sync-hint', id: 'intro-sync-hint', hidden: !this.showsNewDeviceHint(returning) },
+        '다른 기기에서 쓰던 캐릭터와 잔디가 있나요? 나에게 보내 둔 링크를 열거나 ',
+        h('button', { type: 'button', class: 'sync-intro-link', onclick: () => this.openSync() }, '코드 넣기'),
+      ),
       h('div', { class: 'progress' }, bar),
       btn,
       h(
@@ -610,9 +629,73 @@ export class UI {
     this.syncState = state;
     this.syncError = '';
     if (state.kind !== 'linked') this.syncRevealed = false;
-    const introLink = document.getElementById('intro-sync');
-    if (introLink) introLink.hidden = state.kind === 'off';
+    this.paintSyncHints();
     if (this.sheet === 'sync' || this.sheet === 'profile') this.renderSheet();
+  }
+
+  /** 이어하기를 알리는 곳들: 입장 화면 링크·새 기기 안내, 👤 버튼의 점 */
+  private paintSyncHints() {
+    const available = this.syncState.kind !== 'off';
+    const introLink = document.getElementById('intro-sync');
+    if (introLink) introLink.hidden = !available;
+    const newDeviceHint = document.getElementById('intro-sync-hint');
+    if (newDeviceHint) newDeviceHint.hidden = !this.showsNewDeviceHint(this.returning);
+    $('#profile-dot').hidden = !this.needsSyncAttention();
+  }
+
+  /** 프로필 시트의 잔디 바로 아래: 이 기록을 다른 기기에서도 쓸 수 있다고 알려요 */
+  private renderSyncCallout(): HTMLElement[] {
+    const open = () => this.openSync();
+    switch (this.syncState.kind) {
+      case 'off':
+        return [];
+      case 'linked':
+        if (!this.syncState.shared) {
+          return [
+            h(
+              'div',
+              { class: 'sync-callout' },
+              h('span', {}, '이어하기는 켰는데 아직 내 링크를 안 보냈어요. 보내 둬야 다른 기기에서 이어할 수 있어요.'),
+              h('button', { type: 'button', class: 'primary', onclick: open }, '📱 내 링크 보내기'),
+            ),
+          ];
+        }
+        return [
+          h(
+            'div',
+            { class: 'sync-callout linked' },
+            h('span', {}, '📱 다른 기기와 이어져 있어요'),
+            h('button', { type: 'button', class: 'ghost-sm', onclick: open }, '링크 보기'),
+          ),
+        ];
+      case 'unlinked':
+        return [
+          h(
+            'div',
+            { class: 'sync-callout' },
+            h('span', {}, '이 잔디는 지금 이 브라우저에만 있어요. 회사·집, 폰에서도 이어 쓰려면'),
+            h(
+              'button',
+              { type: 'button', class: 'primary', onclick: open },
+              '📱 다른 기기에서 이어하기',
+              hasSeenSync() ? null : h('b', { class: 'sync-new' }, 'NEW'),
+            ),
+          ),
+        ];
+    }
+  }
+
+  /** 👤 버튼에 점을 찍을지: 이어하기를 아직 안 봤거나, 켜 놓고 링크를 안 보냈으면 */
+  private needsSyncAttention(): boolean {
+    const s = this.syncState;
+    if (s.kind === 'unlinked') return !hasSeenSync();
+    if (s.kind === 'linked') return !s.shared;
+    return false;
+  }
+
+  /** 이 브라우저에 저장된 프로필이 없으면(처음 왔거나 새 기기) 입장 화면에서 이어하기를 크게 알려요 */
+  private showsNewDeviceHint(returning: boolean): boolean {
+    return this.syncState.kind === 'unlinked' && !returning;
   }
 
   /** 이어하기 시트 열기. 링크로 받은 코드가 있으면 입력 칸에 넣어 둬요 */
@@ -1010,6 +1093,10 @@ export class UI {
       markTogetherSeen();
       $('#session-dot').hidden = true;
     }
+    if (kind === 'sync') {
+      markSyncSeen();
+      this.paintSyncHints();
+    }
     this.sheet = kind;
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
@@ -1266,6 +1353,7 @@ export class UI {
             h('span', { class: 'profile-stat' }, `🟩 정각 모각코 ${getSessionsToday()}칸`),
           ),
           this.renderStudyGraph(history),
+          ...this.renderSyncCallout(),
           h('h3', { class: 'sheet-sub' }, '✏️ 정보 수정'),
           h(
             'form',
@@ -1298,9 +1386,6 @@ export class UI {
             },
             '처음 안내 다시 보기',
           ),
-          ...(this.syncState.kind === 'off'
-            ? []
-            : [h('button', { type: 'button', class: 'ghost wide sync-open', onclick: () => this.openSync() }, '📱 다른 기기에서 이어하기')]),
           h(
             'small',
             { class: 'sheet-note' },
@@ -1316,7 +1401,15 @@ export class UI {
         el.append(
           head('다른 기기에서 이어하기'),
           ...renderSyncSheet(
-            { state: this.syncState, draft: this.syncDraft, busy: this.syncBusy, error: this.syncError, revealed: this.syncRevealed },
+            {
+              state: this.syncState,
+              draft: this.syncDraft,
+              busy: this.syncBusy,
+              error: this.syncError,
+              revealed: this.syncRevealed,
+              canShare: canShareLink(),
+              inKakao: isKakaoInApp(),
+            },
             {
               create: () => void this.runSync(() => this.h.onSyncCreate()),
               join: (code) => void this.runSync(() => this.h.onSyncJoin(code)),
@@ -1327,8 +1420,10 @@ export class UI {
                 this.syncRevealed = true;
                 this.renderSheet();
               },
+              share: () => this.h.onSyncShare(),
               copyCode: () => this.h.onSyncCopy('code'),
               copyLink: () => this.h.onSyncCopy('link'),
+              openExternal: () => this.h.onSyncOpenExternal(this.syncDraft),
               unlink: () => this.h.onSyncUnlink(),
               erase: () => this.h.onSyncErase(),
             },
