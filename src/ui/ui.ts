@@ -35,15 +35,18 @@ import { studyTodayAt } from '../studyClock';
 import type { SessionState } from '../together/session';
 import { $, h } from './dom';
 import {
+  busyIntroText,
   hasRoomRecord,
   minutesText,
   paintSessionSection,
+  renderBusySection,
   renderSessionSection,
   renderTodaySection,
   roomTodaySentence,
   sessionIntroText,
   sessionPillLabel,
   sessionPillText,
+  type BusyHoursState,
   type RoomTodayState,
 } from './together';
 import { enableDragScroll } from './dragScroll';
@@ -167,6 +170,8 @@ export class UI {
   private roomToday: RoomTodayState = { kind: 'loading' };
   /** 방 목록에 보이는 방들의 오늘 기록 (방 slug → 합계) */
   private roomsToday: Record<string, RoomToday> = {};
+  /** 지금 방이 보통 몇 시에 붐비는지 */
+  private busyHours: BusyHoursState = { kind: 'loading' };
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -423,9 +428,11 @@ export class UI {
       h('div', { class: 'ir-session', id: 'ir-session' }, this.session ? sessionIntroText(this.session, Date.now()) : ''),
     );
     // 지금 아무도 없어도 오늘 다녀간 사람들이 있다는 걸 들어가기 전에 보여줘요
-    if (this.roomToday.kind === 'ready' && hasRoomRecord(this.roomToday.today)) {
-      el.append(h('div', { class: 'ir-today' }, `📊 ${roomTodaySentence(this.roomToday.today)}`));
+    if (this.roomToday.kind === 'ready' && hasRoomRecord(this.roomToday.value)) {
+      el.append(h('div', { class: 'ir-today' }, `📊 ${roomTodaySentence(this.roomToday.value)}`));
     }
+    const busy = this.busyHours.kind === 'ready' ? busyIntroText(this.busyHours.value) : null;
+    if (busy) el.append(h('div', { class: 'ir-today' }, busy));
   }
 
   private tagChips(tags: string[]) {
@@ -461,6 +468,13 @@ export class UI {
   /** 지금 방의 오늘 기록 (main.ts가 방에 들어올 때와 5분마다 읽어요) */
   setRoomToday(state: RoomTodayState) {
     this.roomToday = state;
+    this.renderIntroRoom();
+    if (this.sheet === 'together') this.renderSheet();
+  }
+
+  /** 지금 방이 붐비는 시간 (방에 들어올 때 읽어요) */
+  setBusyHours(state: BusyHoursState) {
+    this.busyHours = state;
     this.renderIntroRoom();
     if (this.sheet === 'together') this.renderSheet();
   }
@@ -564,8 +578,10 @@ export class UI {
       peopleHere: this.peers.length + 1,
       roomName: this.room?.name ?? placeMeta('cafe').name,
       roomToday: this.roomToday,
+      busyHours: this.busyHours,
+      nowHour: this.session.hour,
     };
-    return [renderSessionSection(view, Date.now()), renderTodaySection(view)];
+    return [renderSessionSection(view, Date.now()), renderTodaySection(view), renderBusySection(view, null)];
   }
 
   /** 정각 세션 (매초). 단계가 바뀌면 시트를 다시 그리고, 아니면 글자만 바꿔요 */

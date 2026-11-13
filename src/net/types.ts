@@ -59,6 +59,14 @@ export interface RoomToday {
   visits: number;
 }
 
+/** 이 방이 보통 몇 시에 붐비는지 (최근 14일, 오늘 포함) */
+export interface BusyHours {
+  /** 기록이 있는 날 수 (평균을 낼 때 나눠요) */
+  days: number;
+  /** 시각(KST 0~23)별 분 합계. 길이 24 */
+  minutes: number[];
+}
+
 /** 방에 있던 시간 보고 (5분마다, 그리고 오늘 처음 들어왔을 때) */
 export interface RoomTimeReport {
   /** 0~5분 */
@@ -132,4 +140,6 @@ export interface Net {
   loadRoomToday(room: string): Promise<RoomToday | null>;
   /** 오늘 방 목록에 보이는 방들의 합계 (방 slug → 합계) */
   loadRoomsToday(): Promise<Record<string, RoomToday>>;
+  /** 이 방이 보통 몇 시에 붐비는지. 못 읽으면 null */
+  loadBusyHours(room: string): Promise<BusyHours | null>;
 }

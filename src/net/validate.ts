@@ -18,7 +18,7 @@ import {
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskIfBad } from './badwords';
-import type { Commit, NetEvent, PeerState, RoomToday } from './types';
+import type { BusyHours, Commit, NetEvent, PeerState, RoomToday } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const HASH_RE = /^[0-9a-f]{7}$/;
@@ -215,4 +215,15 @@ export function cleanRoomsToday(raw: unknown): Record<string, RoomToday> {
     if (today) out[row.room] = today;
   }
   return out;
+}
+
+/** room_busy_hours의 결과. 한 시각 합계는 14일 × 60명 × 60분을 넘을 수 없어요 */
+const BUSY_HOUR_MINUTES_MAX = 14 * 3600;
+
+export function cleanBusyHours(raw: unknown): BusyHours | null {
+  if (!isObj(raw) || !Array.isArray(raw.minutes) || raw.minutes.length !== 24) return null;
+  return {
+    days: clamp(Math.floor(num(raw.days, 0)), 0, 14),
+    minutes: raw.minutes.map((m) => clamp(Math.floor(num(m, 0)), 0, BUSY_HOUR_MINUTES_MAX)),
+  };
 }

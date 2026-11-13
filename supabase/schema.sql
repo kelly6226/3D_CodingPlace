@@ -715,3 +715,28 @@ revoke all on function public.room_today(text) from public, anon, authenticated;
 grant execute on function public.room_today(text) to anon, authenticated;
 revoke all on function public.rooms_today() from public, anon, authenticated;
 grant execute on function public.rooms_today() to anon, authenticated;
+
+-- 이 방이 보통 몇 시에 붐비는지: 최근 14일(오늘 포함) 시각(KST)별 분 합계와, 기록이 있는 날 수.
+-- 브라우저가 "합계 ÷ 날 수 ÷ 60"으로 그 시각의 평균 인원을 계산해요
+create or replace function public.room_busy_hours(p_room text)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with recent as (
+    select day, hour, minutes from public.room_hours
+    where room = p_room and day > (now() at time zone 'Asia/Seoul')::date - 14
+  )
+  select json_build_object(
+    'days', (select count(distinct day) from recent),
+    'minutes', (
+      select json_agg(coalesce((select sum(r.minutes) from recent r where r.hour = g.h), 0) order by g.h)
+      from generate_series(0, 23) as g(h)
+    )
+  );
+$$;
+
+revoke all on function public.room_busy_hours(text) from public, anon, authenticated;
+grant execute on function public.room_busy_hours(text) to anon, authenticated;

@@ -141,7 +141,7 @@ async function boot() {
   ui.setCurrentRoom(room, !!found);
   ui.setRoom(startInstance);
   void refreshRooms();
-  void refreshRoomToday();
+  reloadRoomToday();
   window.setInterval(() => void refreshRoomToday(), ROOM_TODAY_REFRESH_MS);
   net.watchCounts((c) => ui.setCounts(c));
   await loadRoomCommits();
@@ -163,12 +163,26 @@ async function refreshRoomToday() {
   const slug = room.slug;
   const [today, all] = await Promise.all([net.loadRoomToday(slug), net.loadRoomsToday()]);
   ui.setRoomsToday(all);
-  if (slug === room.slug) ui.setRoomToday({ kind: 'ready', today });
+  if (slug === room.slug) ui.setRoomToday({ kind: 'ready', value: today });
+}
+
+/** 붐비는 시간은 하루 사이에 크게 안 바뀌어서 방이 바뀔 때만 읽어요 */
+async function refreshBusyHours() {
+  if (!net.keepsRoomStats) {
+    ui.setBusyHours({ kind: 'off' });
+    return;
+  }
+  const slug = room.slug;
+  const busy = await net.loadBusyHours(slug);
+  if (slug === room.slug) ui.setBusyHours({ kind: 'ready', value: busy });
 }
 
 /** 방이 바뀌면 이전 방 숫자가 잠깐이라도 보이지 않게 비우고 다시 읽어요 */
 function reloadRoomToday(delayMs = 0) {
-  ui.setRoomToday(net.keepsRoomStats ? { kind: 'loading' } : { kind: 'off' });
+  const pending = net.keepsRoomStats ? ({ kind: 'loading' } as const) : ({ kind: 'off' } as const);
+  ui.setRoomToday(pending);
+  ui.setBusyHours(pending);
+  void refreshBusyHours();
   window.setTimeout(() => void refreshRoomToday(), delayMs);
 }
 

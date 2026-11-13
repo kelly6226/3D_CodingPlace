@@ -25,10 +25,10 @@ import {
   type RoomInfo,
 } from '../config';
 import * as store from '../store';
-import type { Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState, RoomTimeReport, RoomToday } from './types';
+import type { BusyHours, Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState, RoomTimeReport, RoomToday } from './types';
 import { maskIfBad } from './badwords';
 import { deriveRoomKey } from './roomKey';
-import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, cleanRoomToday, cleanRoomsToday, text } from './validate';
+import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, cleanBusyHours, cleanRoomToday, cleanRoomsToday, text } from './validate';
 
 interface RoomRow {
   slug: string;
@@ -545,5 +545,15 @@ export class OnlineNet implements Net {
       return {};
     }
     return cleanRoomsToday(data);
+  }
+
+  async loadBusyHours(room: string): Promise<BusyHours | null> {
+    if (!ROOM_SLUG_RE.test(room)) return null;
+    const { data, error } = await this.sb.rpc('room_busy_hours', { p_room: room });
+    if (error) {
+      console.warn('[room time] 붐비는 시간 읽기 실패', error.message);
+      return null;
+    }
+    return cleanBusyHours(data);
   }
 }
