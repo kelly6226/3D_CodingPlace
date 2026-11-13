@@ -17,10 +17,11 @@ export function newSyncCode(): string {
 
 /**
  * 사람이 옮겨 적은 코드를 서버 형식으로. 대소문자, 띄어쓰기, 하이픈은 상관없고
- * 헷갈리기 쉬운 O는 0으로, I·L은 1로 읽어요. 형식이 맞지 않으면 null
+ * 헷갈리기 쉬운 O는 0으로, I·L은 1로 읽어요. 링크나 안내 글을 통째로 붙여 넣어도 링크 속 코드를 찾아요.
+ * 형식이 맞지 않으면 null
  */
 export function parseSyncCode(input: string): string | null {
-  const code = input
+  const code = (codeInLink(input) ?? input)
     .toUpperCase()
     .replace(/[\s-]/g, '')
     .replace(/O/g, '0')
@@ -41,10 +42,29 @@ export function syncLink(code: string): string {
   return `${location.origin}/#${LINK_KEY}=${formatSyncCode(code)}`;
 }
 
+/**
+ * '#sync=' 바로 뒤의 코드 20글자(4글자씩 하이픈은 있어도 없어도). 없으면 null.
+ * 메신저가 링크 뒤에 붙은 글자까지 링크로 묶어도(…CMQM온라인) 코드 뒤는 버려요
+ */
+function codeInLink(text: string): string | null {
+  const m = safeDecode(text).match(new RegExp(`#${LINK_KEY}=([0-9A-Za-z]{4}(?:-?[0-9A-Za-z]{4}){4})`));
+  return m ? m[1] : null;
+}
+
+/** 링크 속 한글이 %EC%98… 처럼 바뀌어 와도 읽을 수 있게. 잘못된 % 글자가 있으면 그대로 */
+function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /** 지금 주소에 이어하기 코드가 있으면 꺼내고, 주소에서는 지워요 (방문 기록에 남지 않게) */
 export function takeSyncCodeFromUrl(): string | null {
-  const m = location.hash.match(new RegExp(`^#${LINK_KEY}=([0-9A-Za-z-]+)$`));
-  if (!m) return null;
+  const hash = location.hash;
+  if (!hash.startsWith(`#${LINK_KEY}=`)) return null;
   history.replaceState(null, '', location.pathname + location.search);
-  return parseSyncCode(m[1]);
+  const code = codeInLink(hash);
+  return code ? parseSyncCode(code) : null;
 }
