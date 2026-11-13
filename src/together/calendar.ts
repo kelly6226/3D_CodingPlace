@@ -3,7 +3,7 @@
 import { FOCUS_MINUTES } from './session';
 
 const KST_OFFSET_MS = 9 * 3600e3;
-const TITLE = '온라인 모각코 🎯';
+const TITLE = '온라인 모각코';
 /** 일정 시작 몇 분 전에 알릴지 */
 const REMIND_BEFORE_MINUTES = 5;
 

@@ -33,7 +33,7 @@ interface Saved {
   knownPeers?: Record<string, KnownPeer>;
   /** 오늘(KST) 끝낸 정각 세션 수 */
   sessions?: { date: string; count: number };
-  /** '🎯 같이 하는 시간' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
+  /** '정각 모각코' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
   togetherSeen?: boolean;
   /** 내 모각코 시간 (KST 0~23시). 정하지 않았으면 없어요 */
   myHour?: number;

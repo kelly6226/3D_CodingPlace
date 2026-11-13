@@ -32,7 +32,7 @@ import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
 import { RoomTimeReporter } from './together/roomTime';
 import { SeatTimeReporter } from './together/seatTime';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
-import { hasRoomRecord, roomTodaySentence, seatTraceLine } from './ui/together';
+import { hasRoomRecord, hourLabel, roomTodaySentence, seatTraceLine } from './ui/together';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -152,7 +152,7 @@ async function boot() {
   ui.ready();
 }
 
-// ── 같이 하는 시간: 방별 오늘 기록 ─────────────────
+// ── 정각 모각코: 방별 오늘 기록 ─────────────────
 /** 오늘 기록을 다시 읽는 간격 (브라우저들이 5분마다 더해요) */
 const ROOM_TODAY_REFRESH_MS = 5 * 60e3;
 /** 방에 들어온 뒤 '다녀감'이 서버에 더해질 때까지 기다렸다 읽어요 */
@@ -184,7 +184,7 @@ function showSeatTraces(traces: SeatTrace[]) {
   syncTraceVisibility();
   // 처음 한 번만: 컵이 무엇인지 알려줘요
   if (props.length && self && store.takeTracesHint()) {
-    window.setTimeout(() => ui.toast('☕ 자리에 놓인 컵은 최근 다녀간 사람들의 흔적이에요. 눌러 보세요', 'info', 6000), NUDGE_DELAY_MS);
+    window.setTimeout(() => ui.toast('☕ 책상에 놓인 커피잔은 최근에 누가 앉았던 자리예요. 눌러 보세요', 'info', 6000), NUDGE_DELAY_MS);
   }
 }
 
@@ -300,7 +300,7 @@ async function enter(p: store.Profile) {
   // 처음 온 사람은 자리 안내를 토스트 대신 안내 메모 첫 장으로 보여줘요
   autoSeat(!firstVisit);
   if (store.getMyHour() === sessionAt(Date.now()).hour) {
-    window.setTimeout(() => ui.toast('🙋 내 모각코 시간이에요. 오늘도 왔네요!', 'good', 4200), NUDGE_DELAY_MS);
+    window.setTimeout(() => ui.toast('정해 둔 시간에 맞춰 왔어요', 'good'), NUDGE_DELAY_MS);
   }
   if (firstVisit) {
     await wait(TIPS_DELAY_MS);
@@ -327,9 +327,9 @@ function showTips() {
         },
       },
       {
-        emoji: '🎯',
-        title: '정각에 다 같이 시작해요',
-        body: `매시 정각부터 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 누르면 오늘 이 방 기록, 사람이 많이 오는 시간, 내 모각코 시간 정하기가 있어요.`,
+        emoji: '⏱',
+        title: '정각에 같이 시작해요',
+        body: `매시 정각부터 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 누르면 오늘 이 방 기록과 사람 많은 시간을 볼 수 있어요.`,
         target: () => document.getElementById('session-btn'),
       },
       {
@@ -513,7 +513,7 @@ async function createRoom({ name, tags, isPublic, place, noise, password = '' }:
 /** 방을 옮겼을 때: 오늘 기록이 있으면 같이 알려줘요 (지금 아무도 없어도 다들 다녀간 곳이라는 걸) */
 function enteredMessage(r: RoomInfo): string {
   const today = ui.roomTodayOf(r.slug);
-  return hasRoomRecord(today) ? `🚪 ${r.name}에 들어왔어요 · ${roomTodaySentence(today)}` : `🚪 ${r.name}에 들어왔어요`;
+  return hasRoomRecord(today) ? `🚪 ${r.name}에 들어왔어요. ${roomTodaySentence(today)}` : `🚪 ${r.name}에 들어왔어요`;
 }
 
 function createdMessage(r: RoomInfo, copied: boolean): string {
@@ -1042,20 +1042,21 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
   if (!self) return;
   sound.chime();
   if (next.phase === 'focus') {
-    ui.toast(`🎯 정각이에요. 지금부터 ${FOCUS_MINUTES}분, 다 같이 집중해요`, 'good', 5000);
+    ui.toast(`${hourLabel(next.hour)} 정각이에요. ${FOCUS_MINUTES}분 동안 같이 집중해요`, 'good', 5000);
     return;
   }
+  const nextStart = hourLabel((next.hour + 1) % 24);
   if (finished) {
     const n = store.addSessionDone();
-    meAvatar().emote('✅', `세션 ${n}`);
-    ui.toast(`✅ 세션 끝! 오늘 ${n}번째예요. ${BREAK_MINUTES}분 쉬고 정각에 다시 시작해요`, 'good', 6000);
-    // 세션을 끝낸 기분 좋은 때에, 아직 내 시간을 안 정했으면 하루 한 번 알려줘요
+    meAvatar().emote('✅', `${n}칸째`);
+    ui.toast(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
+    // 한 칸 채운 직후에, 아직 내 시간을 안 정했으면 하루 한 번 알려줘요
     if (store.getMyHour() === null && store.takeMyHourNudge()) {
-      window.setTimeout(() => ui.toast("🙋 내일도 이 시간에 올래요? 왼쪽 위 🎯 버튼에서 '내 모각코 시간'을 정할 수 있어요", 'info', 7000), NUDGE_DELAY_MS);
+      window.setTimeout(() => ui.toast("내일도 이 시간에 올 거면 왼쪽 위 '집중' 버튼에서 매일 오는 시간을 정해 두세요", 'info', 7000), NUDGE_DELAY_MS);
     }
     return;
   }
-  ui.toast('☕ 쉬는 시간이에요. 정각에 다시 다 같이 시작해요', 'info', 5000);
+  ui.toast(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
 }
 
 watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseChange });
