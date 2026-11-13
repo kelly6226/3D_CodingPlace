@@ -26,12 +26,13 @@ import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
-import type { Commit, Net, NetEvent, PeerState } from './net/types';
+import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
 import { RoomTimeReporter } from './together/roomTime';
+import { SeatTimeReporter } from './together/seatTime';
 import { SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
-import { hasRoomRecord, roomTodaySentence } from './ui/together';
+import { hasRoomRecord, roomTodaySentence, seatTraceLine } from './ui/together';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -79,6 +80,8 @@ let enteredAt = 0;
 let connWarned = false;
 /** 방에 있던 시간을 5분마다 서버에 더해요 (net이 정해진 뒤 boot에서 만들어요) */
 let roomTime: RoomTimeReporter | null = null;
+/** 앉아 있던 자리의 시간도 같이 (자리에 남은 흔적용) */
+let seatTime: SeatTimeReporter | null = null;
 
 // ── 1. 폰트 → 3D 장면 준비 ─────────────────────────
 async function boot() {
@@ -112,6 +115,7 @@ async function boot() {
   }
   ui.setMode(net.mode);
   roomTime = new RoomTimeReporter((slug, report) => net.addRoomTime(slug, report));
+  seatTime = new SeatTimeReporter((slug, seat, minutes) => net.addSeatTime(slug, seat, minutes));
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
   const fromUrl = roomFromUrl();
@@ -161,9 +165,35 @@ async function refreshRoomToday() {
     return;
   }
   const slug = room.slug;
-  const [today, all] = await Promise.all([net.loadRoomToday(slug), net.loadRoomsToday()]);
+  const [today, all, traces] = await Promise.all([net.loadRoomToday(slug), net.loadRoomsToday(), net.loadSeatTraces(slug)]);
   ui.setRoomsToday(all);
-  if (slug === room.slug) ui.setRoomToday({ kind: 'ready', value: today });
+  if (slug !== room.slug) return;
+  ui.setRoomToday({ kind: 'ready', value: today });
+  showSeatTraces(traces);
+}
+
+/** 자리에 남은 흔적(식은 커피잔). 지금 장소에 없는 자리와 이번에 내가 앉았던 자리는 빼요 */
+function showSeatTraces(traces: SeatTrace[]) {
+  const now = Date.now();
+  const props = traces.flatMap((t) => {
+    const seat = seatById(t.seat);
+    if (!seat || seatTime?.isMine(room.slug, t.seat)) return [];
+    return [{ seat, line: seatTraceLine(t, now) }];
+  });
+  world.setTraces(props);
+  syncTraceVisibility();
+  // 처음 한 번만: 컵이 무엇인지 알려줘요
+  if (props.length && self && store.takeTracesHint()) {
+    window.setTimeout(() => ui.toast('☕ 자리에 놓인 컵은 최근 다녀간 사람들의 흔적이에요. 눌러 보세요', 'info', 6000), NUDGE_DELAY_MS);
+  }
+}
+
+/** 지금 누가(나 포함) 앉아 있는 자리의 흔적은 숨겨요 */
+function syncTraceVisibility() {
+  if (!world) return;
+  const taken = takenSeats();
+  if (self?.seat) taken.add(self.seat);
+  world.hideTraceSeats(taken);
 }
 
 /** 붐비는 시간은 하루 사이에 크게 안 바뀌어서 방이 바뀔 때만 읽어요 */
@@ -182,6 +212,7 @@ function reloadRoomToday(delayMs = 0) {
   const pending = net.keepsRoomStats ? ({ kind: 'loading' } as const) : ({ kind: 'off' } as const);
   ui.setRoomToday(pending);
   ui.setBusyHours(pending);
+  world.setTraces([]);
   void refreshBusyHours();
   window.setTimeout(() => void refreshRoomToday(), delayMs);
 }
@@ -533,6 +564,7 @@ function moveTo(x: number, z: number, then?: () => void) {
   meAvatar().goTo(x, z, null, then);
   net.send({ type: 'move', id: self.id, x, z, seat: null });
   net.updateSelf({ seat: null, x, z });
+  syncTraceVisibility();
 }
 
 function sitAt(id: string) {
@@ -547,6 +579,7 @@ function sitAt(id: string) {
   meAvatar().goTo(s.x, s.z, id);
   net.send({ type: 'move', id: self.id, x: s.x, z: s.z, seat: id });
   net.updateSelf({ seat: id, seatAt: self.seatAt, x: s.x, z: s.z });
+  syncTraceVisibility();
 }
 
 function setStatus(id: string) {
@@ -813,6 +846,7 @@ function onPeers(presencePeers: PeerState[]) {
     if (name) ui.toast(`${name}님이 퇴근했어요`);
   }
   ui.setPeers(peers);
+  syncTraceVisibility();
 }
 
 function onEvent(e: NetEvent) {
@@ -826,6 +860,7 @@ function onEvent(e: NetEvent) {
       a.state.z = e.z;
       a.goTo(e.x, e.z, e.seat);
       lastMoves.set(e.id, { at: Date.now(), x: e.x, z: e.z, seat: e.seat });
+      syncTraceVisibility();
       const k = known.get(e.id);
       if (k) Object.assign(k, { seat: e.seat, x: e.x, z: e.z });
       break;
@@ -943,6 +978,7 @@ const STUDY_SINCE_DRIFT_MS = 30e3;
 function addStudyTime(ms: number) {
   if (sessionAt(Date.now()).phase === 'focus') focusedThisSession += ms;
   roomTime?.add(ms);
+  seatTime?.add(ms, room.slug, self.seat);
   const total = store.addStudyMs(ms);
   ui.setStudyToday(total);
   const now = Date.now();
@@ -1021,7 +1057,9 @@ watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseCha
 
 // 탭을 숨기거나 닫기 직전에 모아 둔 시간을 보내요 (닫히면 1분 미만은 버려져요)
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') void roomTime?.flush();
+  if (document.visibilityState !== 'hidden') return;
+  void roomTime?.flush();
+  void seatTime?.flush();
 });
 
 // 진짜 키보드를 치면 내 아바타도 열심히 침 (무슨 키인지는 안 봐요)

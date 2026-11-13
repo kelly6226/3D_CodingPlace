@@ -11,6 +11,7 @@ import { disposeTree, type InteractData } from './places/kit';
 import type { PlaceBuild, PlaceDef, PlaceEnv } from './places/types';
 import { ResolutionGovernor } from './quality';
 import { codeScreen } from './textures';
+import { TraceLayer, type TraceProp } from './traces';
 
 export interface WorldHandlers {
   onFloor(x: number, z: number): void;
@@ -67,6 +68,8 @@ export class World {
   readonly controls: OrbitControls;
   readonly avatars = new Map<string, Avatar>();
   readonly mobile: boolean;
+  /** 자리에 남은 흔적 (식은 커피잔). 장소를 바꾸면 비워요 */
+  private traces: TraceLayer;
   private place!: PlaceBuild;
   private placeId: PlaceId | null = null;
   private codeTex: THREE.Texture;
@@ -158,6 +161,7 @@ export class World {
     this.controls.addEventListener('start', () => (this.flight = null));
     this.controls.addEventListener('change', () => this.updateViewState());
 
+    this.traces = new TraceLayer(this.scene);
     this.setPlace(first);
 
     // 창 크기 이벤트만으론 못 알아채는 변화도 잡으려고 그리는 영역 자체를 지켜봐요 (아이폰 Safari는 처음에 높이가 0일 때가 있어요)
@@ -207,6 +211,8 @@ export class World {
       this.scene.remove(this.place.root);
       disposeTree(this.place.root);
     }
+    // 흔적은 자리 위치에 붙어 있어서 배치도가 바뀌면 지워요 (main.ts가 새 방 흔적을 다시 넣어요)
+    this.traces.clear();
     useLayout(def.layout);
     buildGrid(def.layout.room, def.layout.obstacles);
     this.applyEnv(def.env);
@@ -416,6 +422,17 @@ export class World {
     if (f.t >= 1) this.flight = null;
   }
 
+  /** 자리에 남은 흔적을 바꿔요 */
+  setTraces(props: TraceProp[]) {
+    this.traces.set(props);
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /** 지금 누가 앉아 있는 자리의 흔적은 숨겨요 */
+  hideTraceSeats(taken: ReadonlySet<string>) {
+    this.traces.hideSeats(taken);
+  }
+
   setHandlers(h: WorldHandlers) {
     this.handlers = h;
   }
@@ -437,7 +454,7 @@ export class World {
     const r = this.renderer.domElement.getBoundingClientRect();
     this.ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.camera);
-    const targets: THREE.Object3D[] = [this.place.floor, ...this.place.clickables, ...this.place.seatHits];
+    const targets: THREE.Object3D[] = [this.place.floor, ...this.place.clickables, ...this.place.seatHits, this.traces.root];
     for (const a of this.avatars.values()) {
       targets.push(a.root);
       if (a.laptop) targets.push(a.laptop);

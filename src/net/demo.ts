@@ -23,7 +23,7 @@ import { randomOutfit } from '../look';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
-import type { BusyHours, Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState, RoomToday } from './types';
+import type { BusyHours, Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState, RoomToday, SeatTrace } from './types';
 
 type SavedCommit = Commit & { room?: string };
 
@@ -355,5 +355,9 @@ export class DemoNet implements Net {
   }
   async loadBusyHours(): Promise<BusyHours | null> {
     return null;
+  }
+  async addSeatTime(): Promise<void> {}
+  async loadSeatTraces(): Promise<SeatTrace[]> {
+    return [];
   }
 }

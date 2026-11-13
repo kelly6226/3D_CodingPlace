@@ -39,6 +39,8 @@ interface Saved {
   myHour?: number;
   /** '내 시간을 정해 보세요' 안내를 마지막으로 보여준 날 (하루 한 번만) */
   myHourNudged?: string;
+  /** 자리에 남은 흔적(컵) 안내를 보여줬는지 (한 번만) */
+  tracesHinted?: boolean;
   /** 오늘(KST) 들어가 본 방들. 방마다 하루 한 번만 '다녀감'으로 세려고 기억해요 */
   visited?: { date: string; rooms: string[] };
 }
@@ -305,6 +307,14 @@ export function takeMyHourNudge(): boolean {
   const d = kstDate();
   if (cache.myHourNudged === d) return false;
   cache.myHourNudged = d;
+  persist();
+  return true;
+}
+
+/** 흔적(컵) 안내를 아직 안 했으면 true를 돌려주고 했다고 기억해요 */
+export function takeTracesHint(): boolean {
+  if (cache.tracesHinted) return false;
+  cache.tracesHinted = true;
   persist();
   return true;
 }
