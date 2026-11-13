@@ -2686,6 +2686,21 @@ button.place-name {
   white-space: nowrap;
   font-weight: 700;
 }
+.tg-busy-axis .mark.lower {
+  top: 30px;
+}
+.tg-busy-axis:has(.lower) {
+  height: 46px;
+}
+.tg-busy-axis .mark.start {
+  left: 0;
+  transform: none;
+}
+.tg-busy-axis .mark.end {
+  left: auto;
+  right: 0;
+  transform: none;
+}
 .tg-busy-axis .mark.now {
   color: var(--mint);
 }
