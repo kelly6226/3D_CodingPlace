@@ -18,6 +18,12 @@ export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent
  */
 export const PRIVATE_ROOMS_ENABLED = false;
 
+/**
+ * 다른 기기에서 이어하기(이어하기 코드). 서버(Supabase)가 없는 데모 모드에서는 늘 꺼져요.
+ * 토스 앱 안에서는 로그인 규정(토스 로그인만 허용)에 걸리는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
+ */
+export const DEVICE_SYNC_ENABLED = true;
+
 /** 브라우저 탭 제목: 기본 방은 사이트 제목, 다른 방은 방 이름을 앞에 */
 export const pageTitle = (room: { slug: string; name: string }) => (room.slug === DEFAULT_ROOM ? SITE.title : `${room.name} · ${SITE.name}`);
 
