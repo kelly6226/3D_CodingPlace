@@ -813,3 +813,268 @@ revoke all on function public.add_seat_time(text, text, int, text) from public, 
 grant execute on function public.add_seat_time(text, text, int, text) to anon, authenticated;
 revoke all on function public.room_seat_traces(text) from public, anon, authenticated;
 grant execute on function public.room_seat_traces(text) to anon, authenticated;
+
+-- ── 8. 다른 기기에서 이어하기 ──────────────────────────
+-- 로그인 대신 "이어하기 코드"로 같은 사람의 기록을 여러 기기에서 이어 써요.
+-- 코드는 브라우저가 무작위로 만든 20글자(Crockford Base32, 약 100비트)라 찍어서 맞힐 수 없어요.
+-- 서버에는 코드의 SHA-256 해시만 저장해요. 이 표가 새어 나가도 코드는 알 수 없어요.
+-- 코드를 아는 사람은 누구나 그 기록을 읽고 쓸 수 있어요 (아이디이자 비밀번호). 그래서 화면에서 남에게 보여주지 말라고 알려요.
+-- 남기는 것: 프로필(닉네임·주력 언어·아바타 모양), 설정(내 모각코 시간, 방마다 고른 배경 소리), 기기별·날짜별 모각코 시간.
+-- 이름·연락처·IP는 남기지 않아요. 400일 동안 어느 기기에서도 안 쓰면 지워요.
+-- 코드 형식은 src/sync/code.ts와 같아야 해요.
+create table if not exists public.device_sync (
+  code_hash bytea primary key check (length(code_hash) = 32),
+  profile jsonb not null check (jsonb_typeof(profile) = 'object' and pg_column_size(profile) <= 2048),
+  settings jsonb not null check (jsonb_typeof(settings) = 'object' and pg_column_size(settings) <= 4096),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  used_at timestamptz not null default now()
+);
+
+-- 기기마다 따로 더해요. 브라우저는 "이 기기가 그날 한 시간 전체"를 보내고 서버는 더 큰 값만 남겨서,
+-- 같은 값을 두 번 보내도(응답을 못 받아 다시 보내도) 두 번 더해지지 않아요.
+-- device는 이어하기에만 쓰는 무작위 값이라 방에서 쓰는 이용자 번호와 연결되지 않아요.
+create table if not exists public.device_sync_days (
+  code_hash bytea not null references public.device_sync (code_hash) on delete cascade,
+  device text not null check (device ~ '^[A-Za-z0-9_-]{8,40}$'),
+  day date not null,
+  ms bigint not null default 0 check (ms between 0 and 86400000),
+  primary key (code_hash, device, day)
+);
+
+alter table public.device_sync enable row level security;
+alter table public.device_sync_days enable row level security;
+revoke all on public.device_sync, public.device_sync_days from anon, authenticated;
+
+-- 이어하기 함수들의 호출 수 (1분 단위, 서비스 전체)
+create table if not exists public.sync_calls (
+  minute timestamptz primary key,
+  calls int not null default 0 check (calls >= 0)
+);
+
+alter table public.sync_calls enable row level security;
+revoke all on public.sync_calls from anon, authenticated;
+
+-- 브라우저 하나가 5분마다 한 번쯤 불러요. 1분 300번이면 동시에 1000명 넘게 버텨요. 이용자가 늘면 올려 주세요.
+create or replace function public.sync_call_ok()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  calls_per_minute constant int := 300;
+  v_calls int;
+begin
+  insert into public.sync_calls as t (minute, calls) values (date_trunc('minute', now()), 1)
+  on conflict (minute) do update set calls = t.calls + 1
+  returning t.calls into v_calls;
+  return v_calls <= calls_per_minute;
+end;
+$$;
+
+-- 코드 → 해시. 형식이 틀리면 막아요 (0-9, A-Z에서 I L O U 뺀 32글자 중 20글자)
+create or replace function public.sync_code_hash(p_code text)
+returns bytea
+language plpgsql
+immutable
+set search_path = public
+as $$
+begin
+  if p_code is null or p_code !~ '^[0-9A-HJKMNP-TV-Z]{20}$' then
+    raise exception 'bad code';
+  end if;
+  return sha256(convert_to(p_code, 'UTF8'));
+end;
+$$;
+
+-- 함수마다 같은 확인: 호출 수 한도
+create or replace function public.sync_guard()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.sync_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+end;
+$$;
+
+-- 다른 기기들이 날짜별로 한 시간 합계 (이 기기 몫은 브라우저가 이미 알아서 빼요). 최근 371일만
+create or replace function public.sync_others(p_hash bytea, p_device text)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(json_object_agg(day::text, total), '{}'::json)
+  from (
+    select day, least(sum(ms), 86400000) as total
+    from public.device_sync_days
+    where code_hash = p_hash and device <> p_device and day >= (now() at time zone 'Asia/Seoul')::date - 371
+    group by day
+  ) d;
+$$;
+
+-- 새 코드 만들기 (처음 한 번). 같은 코드가 이미 있으면(사실상 안 일어나요) 실패해요
+create or replace function public.sync_create(p_code text, p_profile jsonb, p_settings jsonb)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  max_codes constant int := 100000;
+  v_hash bytea := public.sync_code_hash(p_code);
+  v_at timestamptz;
+begin
+  perform public.sync_guard();
+  if (select count(*) from public.device_sync) >= max_codes then
+    raise exception 'too many codes';
+  end if;
+  insert into public.device_sync (code_hash, profile, settings) values (v_hash, p_profile, p_settings)
+  returning updated_at into v_at;
+  -- 가끔(약 2%) 오래 안 쓴 코드와 지난 호출 수를 정리해요
+  if random() < 0.02 then
+    delete from public.device_sync where used_at < now() - interval '400 days';
+    delete from public.device_sync_days where day < (now() at time zone 'Asia/Seoul')::date - 400;
+    delete from public.sync_calls where minute < now() - interval '10 minutes';
+  end if;
+  return json_build_object('updated_at', v_at);
+exception
+  when unique_violation then
+    raise exception 'code taken';
+end;
+$$;
+
+-- 코드로 읽기. 없는 코드면 null
+create or replace function public.sync_pull(p_code text, p_device text)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hash bytea := public.sync_code_hash(p_code);
+  r public.device_sync;
+begin
+  perform public.sync_guard();
+  select * into r from public.device_sync where code_hash = v_hash;
+  if not found then
+    return null;
+  end if;
+  -- 쓰고 있다는 표시는 하루에 한 번만 고쳐요 (읽을 때마다 쓰지 않게)
+  if r.used_at < now() - interval '1 day' then
+    update public.device_sync set used_at = now() where code_hash = v_hash;
+  end if;
+  return json_build_object('profile', r.profile, 'settings', r.settings, 'updated_at', r.updated_at, 'others', public.sync_others(v_hash, p_device));
+end;
+$$;
+
+-- 프로필·설정 바꾸기. 마지막에 보낸 기기의 것이 남아요
+create or replace function public.sync_push(p_code text, p_profile jsonb, p_settings jsonb)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hash bytea := public.sync_code_hash(p_code);
+  v_at timestamptz;
+begin
+  perform public.sync_guard();
+  update public.device_sync set profile = p_profile, settings = p_settings, updated_at = now(), used_at = now()
+  where code_hash = v_hash
+  returning updated_at into v_at;
+  if not found then
+    raise exception 'no such code';
+  end if;
+  return json_build_object('updated_at', v_at);
+end;
+$$;
+
+-- 이 기기의 날짜별 모각코 시간 알리기 ({"2026-11-13": 3600000, ...}).
+-- 기기·날짜마다 더 큰 값만 남겨요. 돌려주는 건 다른 기기들의 합계예요
+create or replace function public.sync_study(p_code text, p_device text, p_days jsonb)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  max_devices constant int := 20;
+  v_hash bytea := public.sync_code_hash(p_code);
+  v_today date := (now() at time zone 'Asia/Seoul')::date;
+  v_day date;
+  v_ms bigint;
+  e record;
+begin
+  perform public.sync_guard();
+  if p_device is null or p_device !~ '^[A-Za-z0-9_-]{8,40}$' then
+    raise exception 'bad device';
+  end if;
+  if p_days is null or jsonb_typeof(p_days) <> 'object' then
+    raise exception 'bad days';
+  end if;
+  if (select count(*) from jsonb_object_keys(p_days)) > 400 then
+    raise exception 'too many days';
+  end if;
+  if not exists (select 1 from public.device_sync where code_hash = v_hash) then
+    raise exception 'no such code';
+  end if;
+  if not exists (select 1 from public.device_sync_days where code_hash = v_hash and device = p_device)
+     and (select count(distinct device) from public.device_sync_days where code_hash = v_hash) >= max_devices then
+    raise exception 'too many devices';
+  end if;
+  for e in select key, value from jsonb_each(p_days) loop
+    if e.key !~ '^\d{4}-\d{2}-\d{2}$' or jsonb_typeof(e.value) <> 'number' then
+      raise exception 'bad day';
+    end if;
+    v_day := e.key::date;
+    v_ms := round((e.value #>> '{}')::numeric);
+    -- 날짜는 최근 371일 ~ 내일(KST 자정 근처 시계 차이)까지, 하루 24시간까지
+    if v_day < v_today - 371 or v_day > v_today + 1 or v_ms not between 0 and 86400000 then
+      raise exception 'bad day';
+    end if;
+    if v_ms > 0 then
+      insert into public.device_sync_days as d (code_hash, device, day, ms) values (v_hash, p_device, v_day, v_ms)
+      on conflict (code_hash, device, day) do update set ms = greatest(d.ms, excluded.ms);
+    end if;
+  end loop;
+  return json_build_object('others', public.sync_others(v_hash, p_device));
+end;
+$$;
+
+-- 서버에 남은 이 코드의 기록 지우기 (모든 기기의 시간 기록도 함께). 지웠으면 true
+create or replace function public.sync_delete(p_code text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hash bytea := public.sync_code_hash(p_code);
+begin
+  perform public.sync_guard();
+  delete from public.device_sync where code_hash = v_hash;
+  return found;
+end;
+$$;
+
+revoke all on function public.sync_call_ok() from public, anon, authenticated;
+revoke all on function public.sync_code_hash(text) from public, anon, authenticated;
+revoke all on function public.sync_guard() from public, anon, authenticated;
+revoke all on function public.sync_others(bytea, text) from public, anon, authenticated;
+revoke all on function public.sync_create(text, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.sync_create(text, jsonb, jsonb) to anon, authenticated;
+revoke all on function public.sync_pull(text, text) from public, anon, authenticated;
+grant execute on function public.sync_pull(text, text) to anon, authenticated;
+revoke all on function public.sync_push(text, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.sync_push(text, jsonb, jsonb) to anon, authenticated;
+revoke all on function public.sync_study(text, text, jsonb) from public, anon, authenticated;
+grant execute on function public.sync_study(text, text, jsonb) to anon, authenticated;
+revoke all on function public.sync_delete(text) from public, anon, authenticated;
+grant execute on function public.sync_delete(text) to anon, authenticated;
