@@ -28,7 +28,7 @@ import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/bad
 import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
-import { startStudyClock } from './studyClock';
+import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -179,12 +179,12 @@ async function enter(p: store.Profile) {
     z: SPAWN.z,
     coffee: store.getCoffeeToday(),
     joinedAt: Date.now(),
-    studyToday: store.getStudyMsToday(),
+    studySince: studySinceFor(store.getStudyMsToday(), Date.now()),
   };
   world.addAvatar(self, true);
   ui.setSelf(self);
   ui.setStudyToday(store.getStudyMsToday());
-  startStudyClock(addStudyTimeAndShare);
+  startStudyClock({ onElapsed: addStudyTime, onSkipped: skipAsleepTime });
 
   const connecting = net.connect(
     self,
@@ -493,7 +493,7 @@ function setStatus(id: string) {
 /** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
 /** 옷장 미리보기에 쓰는 아바타 바탕. 입장 화면에서도 쓰니까 self에 기대지 않아요 */
 function previewBase(look: Look): PeerState {
-  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, studyToday: 0, ...look };
+  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, studySince: 0, ...look };
 }
 
 function profileOf(s: PeerState): store.Profile {
@@ -867,12 +867,31 @@ function fillNote(line: string) {
 }
 
 // ── 7. 매 프레임 / 주기 작업 ───────────────────────
-/** 오늘 누적 시간에 더하고 내 화면과 다른 사람들에게 알려요 (studyClock.ts가 실제 시각으로 불러요) */
-function addStudyTimeAndShare(ms: number) {
+/** 방 사람들에게 알린 기준 시각이 실제 누적과 이만큼 넘게 어긋나면 다시 알려요 (자정이 지났을 때 등) */
+const STUDY_SINCE_DRIFT_MS = 30e3;
+
+/**
+ * 오늘 누적 시간에 더해요 (studyClock.ts가 실제 시각으로 불러요).
+ * 방 사람들에게는 매번 보내지 않아요. 기준 시각(studySince)을 한 번 알면 각자 화면에서 계산해요
+ */
+function addStudyTime(ms: number) {
   const total = store.addStudyMs(ms);
-  self.studyToday = total;
   ui.setStudyToday(total);
-  net.updateSelf({ studyToday: total });
+  const now = Date.now();
+  if (Math.abs(studyTodayAt(self.studySince, now) - total) > STUDY_SINCE_DRIFT_MS) shareStudyTime(total, now);
+}
+
+/** 노트북을 덮었다 연 것처럼 오래 멈췄던 시간은 오늘 누적에도, 이 방에 있은 시간(⏱)에도 넣지 않아요 */
+function skipAsleepTime(ms: number) {
+  const now = Date.now();
+  self.joinedAt = Math.min(now, self.joinedAt + ms);
+  shareStudyTime(store.getStudyMsToday(), now);
+}
+
+function shareStudyTime(todayMs: number, now: number) {
+  self.studySince = studySinceFor(todayMs, now);
+  ui.setSelf(self);
+  net.updateSelf({ studySince: self.studySince, joinedAt: self.joinedAt });
 }
 
 let secT = 0;

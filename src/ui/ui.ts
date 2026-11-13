@@ -31,6 +31,7 @@ import {
 import type { Look } from '../look';
 import type { Commit, NewRoom, PeerState } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
+import { studyTodayAt } from '../studyClock';
 import { $, h } from './dom';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
@@ -492,6 +493,7 @@ export class UI {
     $('#since').textContent = stayText(this.self.joinedAt);
     if (this.sheet !== 'people') return;
     for (const el of document.querySelectorAll<HTMLElement>('.people .since')) el.textContent = stayText(Number(el.dataset.joined));
+    for (const el of document.querySelectorAll<HTMLElement>('.people .today')) el.textContent = todayText(Number(el.dataset.since));
   }
 
   /** 위쪽에 오늘 누적 공부 시간을 보여줘요. 1분 넘기 전엔 아직 숨겨요 */
@@ -1034,7 +1036,7 @@ export class UI {
                     ' · ',
                     h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt)),
                     ' · ',
-                    `오늘 ${elapsedText(p.studyToday)}째`,
+                    h('span', { class: 'today', 'data-since': p.studySince }, todayText(p.studySince)),
                   ),
                   h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
                 ),
@@ -1070,7 +1072,7 @@ export class UI {
             'div',
             { class: 'profile-stats' },
             h('span', { class: 'profile-stat' }, streak > 0 ? `🔥 연속 ${streak}일째` : '🌱 오늘부터 시작해봐요'),
-            h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(s.studyToday)}`),
+            h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(history[today] ?? 0)}`),
           ),
           this.renderStudyGraph(history),
           h('h3', { class: 'sheet-sub' }, '✏️ 정보 수정'),
@@ -1608,6 +1610,11 @@ function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean)
 /** 이 방에 들어온 뒤 지난 시간 표시 (위쪽 인원 표시와 사람 목록이 같이 써요) */
 function stayText(joinedAt: number) {
   return `⏱ ${elapsedText(Date.now() - joinedAt)}`;
+}
+
+/** 사람 목록의 오늘 누적 시간. 기준 시각으로 매초 다시 계산해요 (studyClock.ts) */
+function todayText(studySince: number) {
+  return `오늘 ${elapsedText(studyTodayAt(studySince, Date.now()))}째`;
 }
 
 /** 잔디 그래프에 보여줄 주 수 (대략 1년) */
