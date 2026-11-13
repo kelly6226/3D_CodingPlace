@@ -54,9 +54,9 @@ import {
 } from './together';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
-import { renderSyncSheet } from './syncSheet';
+import { renderSyncSheet, syncSheetTitle, type SyncArrival } from './syncSheet';
 import { canShareLink, isKakaoInApp } from '../sync/env';
-import type { SyncOutcome, SyncState } from '../sync/deviceSync';
+import type { SyncOutcome, SyncPreviewResult, SyncState } from '../sync/deviceSync';
 import {
   getMyHour,
   getPeerMeetCount,
@@ -146,6 +146,8 @@ export interface UIHandlers {
   onSyncShare(): void;
   /** 카카오톡 안의 브라우저에서 기본 브라우저로 다시 열기. 코드 칸에 적혀 있던 글자를 같이 넘겨요 */
   onSyncOpenExternal(draft: string): void;
+  /** 링크로 들어왔을 때, 이어하기 전에 그 기록을 미리 봐요 */
+  onSyncPreview(code: string): Promise<SyncPreviewResult>;
 }
 
 export class UI {
@@ -201,6 +203,8 @@ export class UI {
   private syncBusy = false;
   private syncError = '';
   private syncRevealed = false;
+  /** 링크로 들어왔을 때 보여줄 그 링크의 기록 (시트를 닫으면 잊어요) */
+  private syncArrival: SyncArrival | null = null;
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -705,6 +709,18 @@ export class UI {
     this.openSheet('sync');
   }
 
+  /** 이어하기 링크로 들어왔을 때: 그 기록을 불러와 보여주고 '이 기기에서 이어하기' 버튼 하나만 둬요 */
+  async openSyncArrival(code: string) {
+    this.syncArrival = { code, kind: 'loading' };
+    this.syncError = '';
+    this.openSheet('sync');
+    const result = await this.h.onSyncPreview(code);
+    // 그 사이 시트를 닫았으면 그리지 않아요
+    if (this.syncArrival?.code !== code) return;
+    this.syncArrival = result.ok ? { code, kind: 'ready', preview: result.preview } : { code, kind: 'error', reason: result.reason };
+    if (this.sheet === 'sync') this.renderSheet();
+  }
+
   /** 이어하기 버튼: 기다리는 동안 버튼을 막고, 실패하면 이유를 시트에 보여줘요 */
   private async runSync(task: () => Promise<SyncOutcome>) {
     if (this.syncBusy) return;
@@ -1106,6 +1122,7 @@ export class UI {
 
   closeSheet() {
     this.sheet = '';
+    this.syncArrival = null;
     this.openCommit = null;
     this.wardrobe.close();
     delete $('#sheet').dataset.sheetKey; // 다시 열면 맨 위부터
@@ -1399,9 +1416,10 @@ export class UI {
       }
       case 'sync': {
         el.append(
-          head('다른 기기에서 이어하기'),
+          head(syncSheetTitle({ arrival: this.syncArrival })),
           ...renderSyncSheet(
             {
+              arrival: this.syncArrival,
               state: this.syncState,
               draft: this.syncDraft,
               busy: this.syncBusy,
@@ -1423,7 +1441,8 @@ export class UI {
               share: () => this.h.onSyncShare(),
               copyCode: () => this.h.onSyncCopy('code'),
               copyLink: () => this.h.onSyncCopy('link'),
-              openExternal: () => this.h.onSyncOpenExternal(this.syncDraft),
+              openExternal: () => this.h.onSyncOpenExternal(this.syncArrival?.code ?? this.syncDraft),
+              dismissArrival: () => this.closeSheet(),
               unlink: () => this.h.onSyncUnlink(),
               erase: () => this.h.onSyncErase(),
             },
