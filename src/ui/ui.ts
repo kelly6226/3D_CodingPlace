@@ -5,6 +5,7 @@ import {
   CHAT_MAX_LENGTH,
   COMMIT_TYPES,
   DEFAULT_NOISE,
+  DEFAULT_ROOM,
   EMOTES,
   FEEDBACK_URL,
   LANGS,
@@ -37,9 +38,11 @@ import { $, h } from './dom';
 import {
   busyIntroText,
   hasRoomRecord,
+  hourLabel,
   minutesText,
   paintSessionSection,
   renderBusySection,
+  renderMyHourSection,
   renderSessionSection,
   renderTodaySection,
   roomTodaySentence,
@@ -52,12 +55,14 @@ import {
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
+  getMyHour,
   getPeerMeetCount,
   getSessionsToday,
   getStudyHistory,
   hasSeenTogether,
   kstDate,
   markTogetherSeen,
+  setMyHour,
   type Profile,
 } from '../store';
 
@@ -581,7 +586,18 @@ export class UI {
       busyHours: this.busyHours,
       nowHour: this.session.hour,
     };
-    return [renderSessionSection(view, Date.now()), renderTodaySection(view), renderBusySection(view, null)];
+    const myHour = getMyHour();
+    const pick = (hour: number | null) => {
+      setMyHour(hour);
+      this.renderSheet();
+      if (hour !== null) this.toast(`🙋 매일 ${hourLabel(hour)}로 정했어요. 캘린더에 넣어 두면 잊지 않아요.`, 'good', 4200);
+    };
+    return [
+      renderSessionSection(view, Date.now()),
+      renderTodaySection(view),
+      renderBusySection(view, myHour),
+      renderMyHourSection(view, myHour, { pick, roomLink: roomUrl(this.room?.slug ?? DEFAULT_ROOM) }),
+    ];
   }
 
   /** 정각 세션 (매초). 단계가 바뀌면 시트를 다시 그리고, 아니면 글자만 바꿔요 */
