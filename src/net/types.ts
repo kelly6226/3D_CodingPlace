@@ -21,8 +21,11 @@ export interface PeerState {
   z: number;
   coffee: number;
   joinedAt: number;
-  /** 오늘 모각코한 총 시간(ms). 각자 브라우저에 쌓인 값을 그대로 알려줘요 */
-  studyToday: number;
+  /**
+   * 오늘 누적 시간의 기준 시각(ms). 지금 시각에서 빼면 오늘 모각코한 시간이에요 (studyClock.ts studyTodayAt).
+   * 누적 시간을 매초 보내지 않으려고 기준 시각만 보내요. 잠들었다 깨거나 자정이 지나면 다시 보내요
+   */
+  studySince: number;
   bot?: boolean;
 }
 

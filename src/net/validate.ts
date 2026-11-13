@@ -76,8 +76,20 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
     z: pos.z,
     coffee: clamp(Math.floor(num(raw.coffee, 0)), 0, 99),
     joinedAt: clamp(num(raw.joinedAt, now), 0, now + 60e3),
-    studyToday: clamp(Math.floor(num(raw.studyToday, 0)), 0, 24 * 3600e3),
+    studySince: studySinceOf(raw, now),
   };
+}
+
+/** 하루보다 오래된 기준 시각은 볼 필요가 없어요 (오늘 누적 시간은 자정에 다시 세요) */
+const STUDY_SINCE_MAX_AGE_MS = 24 * 3600e3;
+
+/**
+ * 오늘 누적 시간의 기준 시각. 이전 버전은 누적 시간(studyToday)을 보내서, 그때는 받은 시각 기준으로 바꿔요
+ * (새로 고치기 전의 창이 잠깐 남아 있어도 숫자가 0으로 보이지 않게)
+ */
+function studySinceOf(raw: Record<string, unknown>, now: number): number {
+  const legacy = now - clamp(Math.floor(num(raw.studyToday, 0)), 0, STUDY_SINCE_MAX_AGE_MS);
+  return clamp(num(raw.studySince, legacy), now - STUDY_SINCE_MAX_AGE_MS, now);
 }
 
 /** Broadcast로 받은 이벤트 */

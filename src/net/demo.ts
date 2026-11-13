@@ -151,7 +151,8 @@ export class DemoNet implements Net {
       z: SPAWN.z,
       coffee: Math.floor(rand(0, 4)),
       joinedAt: Date.now(),
-      studyToday: Math.floor(rand(0, 180)) * 60e3,
+      // 봇마다 오늘 0~3시간 했다고 쳐요. 방에 들어온 시각보다는 늘 앞서게 (오늘 누적이 머문 시간보다 짧으면 이상해요)
+      studySince: (over.joinedAt ?? Date.now()) - Math.floor(rand(0, 180)) * 60e3,
       bot: true,
       ...over,
     };
