@@ -11,13 +11,14 @@ import {
   EMOTES,
   HEX_RE,
   LANGS,
+  ROOM_SLUG_RE,
   STATUSES,
   actionById,
 } from '../config';
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskIfBad } from './badwords';
-import type { Commit, NetEvent, PeerState } from './types';
+import type { BusyHours, Commit, NetEvent, PeerState, RoomToday, SeatTrace } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const HASH_RE = /^[0-9a-f]{7}$/;
@@ -76,8 +77,20 @@ export function cleanPeer(raw: unknown, key: string): PeerState | null {
     z: pos.z,
     coffee: clamp(Math.floor(num(raw.coffee, 0)), 0, 99),
     joinedAt: clamp(num(raw.joinedAt, now), 0, now + 60e3),
-    studyToday: clamp(Math.floor(num(raw.studyToday, 0)), 0, 24 * 3600e3),
+    studySince: studySinceOf(raw, now),
   };
+}
+
+/** 하루보다 오래된 기준 시각은 볼 필요가 없어요 (오늘 누적 시간은 자정에 다시 세요) */
+const STUDY_SINCE_MAX_AGE_MS = 24 * 3600e3;
+
+/**
+ * 오늘 누적 시간의 기준 시각. 이전 버전은 누적 시간(studyToday)을 보내서, 그때는 받은 시각 기준으로 바꿔요
+ * (새로 고치기 전의 창이 잠깐 남아 있어도 숫자가 0으로 보이지 않게)
+ */
+function studySinceOf(raw: Record<string, unknown>, now: number): number {
+  const legacy = now - clamp(Math.floor(num(raw.studyToday, 0)), 0, STUDY_SINCE_MAX_AGE_MS);
+  return clamp(num(raw.studySince, legacy), now - STUDY_SINCE_MAX_AGE_MS, now);
 }
 
 /** Broadcast로 받은 이벤트 */
@@ -177,4 +190,69 @@ export class RateLimiter {
   clear() {
     this.last.clear();
   }
+}
+
+/** DB 상한과 같아요 (schema.sql 6번: 한 방 한 시간 60명 × 60분, 다녀간 수 300) */
+const ROOM_DAY_MINUTES_MAX = 24 * 3600;
+const ROOM_DAY_VISITS_MAX = 24 * 300;
+
+/** 오늘 한 방의 합계 (room_today 함수의 결과) */
+export function cleanRoomToday(raw: unknown): RoomToday | null {
+  if (!isObj(raw)) return null;
+  return {
+    minutes: clamp(Math.floor(num(raw.minutes, 0)), 0, ROOM_DAY_MINUTES_MAX),
+    visits: clamp(Math.floor(num(raw.visits, 0)), 0, ROOM_DAY_VISITS_MAX),
+  };
+}
+
+/** 오늘 방들의 합계 (rooms_today 함수의 결과) → 방 slug → 합계 */
+export function cleanRoomsToday(raw: unknown): Record<string, RoomToday> {
+  const out: Record<string, RoomToday> = {};
+  if (!Array.isArray(raw)) return out;
+  for (const row of raw.slice(0, 200)) {
+    if (!isObj(row) || typeof row.room !== 'string' || !ROOM_SLUG_RE.test(row.room)) continue;
+    const today = cleanRoomToday(row);
+    if (today) out[row.room] = today;
+  }
+  return out;
+}
+
+/** room_busy_hours의 결과. 한 시각 합계는 14일 × 60명 × 60분을 넘을 수 없어요 */
+const BUSY_HOUR_MINUTES_MAX = 14 * 3600;
+
+export function cleanBusyHours(raw: unknown): BusyHours | null {
+  if (!isObj(raw) || !Array.isArray(raw.minutes) || raw.minutes.length !== 24) return null;
+  return {
+    days: clamp(Math.floor(num(raw.days, 0)), 0, 14),
+    minutes: raw.minutes.map((m) => clamp(Math.floor(num(m, 0)), 0, BUSY_HOUR_MINUTES_MAX)),
+  };
+}
+
+const SEAT_RE = /^[a-z0-9-]{1,32}$/;
+/** DB가 돌려주는 최대 개수 (schema.sql 7번 room_seat_traces) */
+const SEAT_TRACES_MAX = 40;
+/** DB가 최근 12시간만 돌려줘요. 시계가 조금 다를 수 있어서 넉넉하게 */
+const SEAT_TRACE_MAX_AGE_MS = 13 * 3600e3;
+
+const time = (v: unknown) => (typeof v === 'string' ? Date.parse(v) : NaN);
+
+/** room_seat_traces의 결과. 자리 이름은 모양만 보고, 지금 장소에 있는 자리인지는 그리는 쪽이 확인해요 */
+export function cleanSeatTraces(raw: unknown): SeatTrace[] {
+  if (!Array.isArray(raw)) return [];
+  const now = Date.now();
+  const out: SeatTrace[] = [];
+  for (const row of raw.slice(0, SEAT_TRACES_MAX)) {
+    if (!isObj(row) || typeof row.seat !== 'string' || !SEAT_RE.test(row.seat)) continue;
+    const leftAt = time(row.left_at);
+    const startedAt = time(row.started_at);
+    if (!Number.isFinite(leftAt) || !Number.isFinite(startedAt)) continue;
+    if (leftAt < now - SEAT_TRACE_MAX_AGE_MS) continue;
+    out.push({
+      seat: row.seat,
+      minutes: clamp(Math.floor(num(row.minutes, 0)), 0, 1440),
+      startedAt: Math.min(startedAt, leftAt),
+      leftAt: Math.min(leftAt, now),
+    });
+  }
+  return out;
 }

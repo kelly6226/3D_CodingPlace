@@ -31,6 +31,18 @@ interface Saved {
   roomKeys?: Record<string, StoredRoomKey>;
   /** 전에 만난 적 있는 사람들 (peer id → 몇 번 만났는지, 마지막으로 만난 시각). 오래된 것부터 밀려나요 */
   knownPeers?: Record<string, KnownPeer>;
+  /** 오늘(KST) 끝낸 정각 세션 수 */
+  sessions?: { date: string; count: number };
+  /** '정각 모각코' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
+  togetherSeen?: boolean;
+  /** 내 모각코 시간 (KST 0~23시). 정하지 않았으면 없어요 */
+  myHour?: number;
+  /** '내 시간을 정해 보세요' 안내를 마지막으로 보여준 날 (하루 한 번만) */
+  myHourNudged?: string;
+  /** 자리에 남은 흔적(컵) 안내를 보여줬는지 (한 번만) */
+  tracesHinted?: boolean;
+  /** 오늘(KST) 들어가 본 방들. 방마다 하루 한 번만 '다녀감'으로 세려고 기억해요 */
+  visited?: { date: string; rooms: string[] };
 }
 
 export interface KnownPeer {
@@ -240,4 +252,69 @@ export function markPeerMet(id: string) {
   for (const old of ids.slice(0, Math.max(0, ids.length - KNOWN_PEERS_MAX))) delete known[old];
   cache.knownPeers = known;
   persist();
+}
+
+export function getSessionsToday(): number {
+  const d = kstDate();
+  return cache.sessions?.date === d ? cache.sessions.count : 0;
+}
+
+/** 정각 세션을 하나 끝냈어요. 오늘 몇 번째인지 돌려줘요 */
+export function addSessionDone(): number {
+  const count = getSessionsToday() + 1;
+  cache.sessions = { date: kstDate(), count };
+  persist();
+  return count;
+}
+
+export function hasSeenTogether(): boolean {
+  return cache.togetherSeen === true;
+}
+
+export function markTogetherSeen() {
+  if (cache.togetherSeen) return;
+  cache.togetherSeen = true;
+  persist();
+}
+
+/** 하루에 기억해 둘 '들어가 본 방' 수 */
+const VISITED_ROOMS_MAX = 50;
+
+/** 오늘 이 방에 처음 들어온 거면 true (기억해 두고, 같은 날 다시 들어오면 false) */
+export function markRoomVisit(slug: string): boolean {
+  const d = kstDate();
+  const rooms = cache.visited?.date === d ? cache.visited.rooms : [];
+  if (rooms.includes(slug)) return false;
+  cache.visited = { date: d, rooms: [...rooms, slug].slice(-VISITED_ROOMS_MAX) };
+  persist();
+  return true;
+}
+
+/** 내 모각코 시간 (KST 0~23시). 없으면 null */
+export function getMyHour(): number | null {
+  const h = cache.myHour;
+  return Number.isInteger(h) && (h as number) >= 0 && (h as number) <= 23 ? (h as number) : null;
+}
+
+export function setMyHour(hour: number | null) {
+  if (hour === null) delete cache.myHour;
+  else cache.myHour = hour;
+  persist();
+}
+
+/** 오늘 아직 '내 시간 정하기' 안내를 안 했으면 true를 돌려주고 했다고 기억해요 */
+export function takeMyHourNudge(): boolean {
+  const d = kstDate();
+  if (cache.myHourNudged === d) return false;
+  cache.myHourNudged = d;
+  persist();
+  return true;
+}
+
+/** 흔적(컵) 안내를 아직 안 했으면 true를 돌려주고 했다고 기억해요 */
+export function takeTracesHint(): boolean {
+  if (cache.tracesHinted) return false;
+  cache.tracesHinted = true;
+  persist();
+  return true;
 }

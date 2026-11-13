@@ -29,16 +29,40 @@ import {
   type ViewState,
 } from '../config';
 import type { Look } from '../look';
-import type { Commit, NewRoom, PeerState } from '../net/types';
+import type { Commit, NewRoom, PeerState, RoomToday } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
+import { studyTodayAt } from '../studyClock';
+import { BREAK_MINUTES, FOCUS_MINUTES, type SessionState } from '../together/session';
 import { $, h } from './dom';
+import {
+  busyIntroText,
+  hasRoomRecord,
+  hourLabel,
+  minutesText,
+  paintSessionSection,
+  renderBusySection,
+  renderMyHourSection,
+  renderSessionSection,
+  renderTodaySection,
+  roomTodaySentence,
+  sessionIntroText,
+  sessionPillLabel,
+  sessionPillText,
+  type BusyHoursState,
+  type RoomTodayState,
+} from './together';
 import { enableDragScroll } from './dragScroll';
 import { loadPrivacyPolicy } from './privacy';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
+  getMyHour,
   getPeerMeetCount,
+  getSessionsToday,
   getStudyHistory,
+  hasSeenTogether,
   kstDate,
+  markTogetherSeen,
+  setMyHour,
   type Profile,
 } from '../store';
 
@@ -58,7 +82,7 @@ export interface ChatLine {
   whisperWith?: string;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'privacy';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'privacy' | 'together';
 
 /** 방 만들기 화면에서 고른 것 (만든 사람 이름은 main.ts가 채워요) */
 export type RoomDraft = Omit<NewRoom, 'creator'>;
@@ -145,6 +169,14 @@ export class UI {
   private introWardrobe: Wardrobe | null = null;
   /** 시점이 처음에서 벗어났거나 내 캐릭터를 따라가는 중이면 true (시점 버튼이 어느 쪽으로 가는지) */
   private viewAway = false;
+  /** 지금 정각 세션 (main.ts가 매초 알려줘요) */
+  private session: SessionState | null = null;
+  /** 지금 방의 오늘 기록 */
+  private roomToday: RoomTodayState = { kind: 'loading' };
+  /** 방 목록에 보이는 방들의 오늘 기록 (방 slug → 합계) */
+  private roomsToday: Record<string, RoomToday> = {};
+  /** 지금 방이 보통 몇 시에 붐비는지 */
+  private busyHours: BusyHoursState = { kind: 'loading' };
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -174,6 +206,14 @@ export class UI {
             h('span', { class: 'sep' }, '·'),
             h('span', { id: 'study-today', title: '오늘 모각코한 총 시간', hidden: true }, ''),
           ),
+        ),
+        // 정각 모각코: 누르면 시트. 처음엔 빨간 점을 찍어 눌러 보게 해요
+        h(
+          'button',
+          { type: 'button', class: 'session-pill', id: 'session-btn', onclick: () => this.toggleSheet('together') },
+          h('i', { class: 'session-light', 'aria-hidden': 'true' }),
+          h('span', { id: 'session-text' }, ''),
+          h('i', { class: 'new-dot', id: 'session-dot', hidden: hasSeenTogether(), 'aria-hidden': 'true' }),
         ),
         h('div', { class: 'mode-pill', id: 'mode', hidden: true }, ''),
       ),
@@ -391,7 +431,14 @@ export class UI {
           '다른 방',
         ),
       ),
+      h('div', { class: 'ir-session', id: 'ir-session' }, this.session ? sessionIntroText(this.session, Date.now()) : ''),
     );
+    // 지금 아무도 없어도 오늘 다녀간 사람들이 있다는 걸 들어가기 전에 보여줘요
+    if (this.roomToday.kind === 'ready' && hasRoomRecord(this.roomToday.value)) {
+      el.append(h('div', { class: 'ir-today' }, `${roomTodaySentence(this.roomToday.value)}.`));
+    }
+    const busy = this.busyHours.kind === 'ready' ? busyIntroText(this.busyHours.value) : null;
+    if (busy) el.append(h('div', { class: 'ir-today' }, busy));
   }
 
   private tagChips(tags: string[]) {
@@ -421,6 +468,31 @@ export class UI {
     this.counts = c;
     this.renderIntroRoom();
     // 방 만드는 중에는 다시 그리면 입력이 날아가서 목록일 때만
+    if (this.sheet === 'rooms' && this.roomsView === 'list') this.renderSheet();
+  }
+
+  /** 지금 방의 오늘 기록 (main.ts가 방에 들어올 때와 5분마다 읽어요) */
+  setRoomToday(state: RoomTodayState) {
+    this.roomToday = state;
+    this.renderIntroRoom();
+    if (this.sheet === 'together') this.renderSheet();
+  }
+
+  /** 지금 방이 붐비는 시간 (방에 들어올 때 읽어요) */
+  setBusyHours(state: BusyHoursState) {
+    this.busyHours = state;
+    this.renderIntroRoom();
+    if (this.sheet === 'together') this.renderSheet();
+  }
+
+  /** 방 목록에서 읽어 둔 한 방의 오늘 기록 (없으면 undefined) */
+  roomTodayOf(slug: string): RoomToday | undefined {
+    return this.roomsToday[slug];
+  }
+
+  /** 방 목록의 오늘 기록 */
+  setRoomsToday(map: Record<string, RoomToday>) {
+    this.roomsToday = map;
     if (this.sheet === 'rooms' && this.roomsView === 'list') this.renderSheet();
   }
 
@@ -493,6 +565,7 @@ export class UI {
     $('#since').textContent = stayText(this.self.joinedAt);
     if (this.sheet !== 'people') return;
     for (const el of document.querySelectorAll<HTMLElement>('.people .since')) el.textContent = stayText(Number(el.dataset.joined));
+    for (const el of document.querySelectorAll<HTMLElement>('.people .today')) el.textContent = todayText(Number(el.dataset.since));
   }
 
   /** 위쪽에 오늘 누적 공부 시간을 보여줘요. 1분 넘기 전엔 아직 숨겨요 */
@@ -500,6 +573,47 @@ export class UI {
     const el = $('#study-today');
     el.hidden = ms < 60e3;
     el.textContent = `오늘 ${elapsedText(ms)}째`;
+  }
+
+  /** '정각 모각코' 시트 내용 */
+  private renderTogether(): HTMLElement[] {
+    if (!this.session) return [];
+    const view = {
+      session: this.session,
+      sessionsToday: getSessionsToday(),
+      roomToday: this.roomToday,
+      busyHours: this.busyHours,
+      nowHour: this.session.hour,
+    };
+    const myHour = getMyHour();
+    const pick = (hour: number | null) => {
+      setMyHour(hour);
+      this.renderSheet();
+      if (hour !== null) this.toast(`매일 ${hourLabel(hour)}로 정했어요`, 'good');
+    };
+    // 토스 앱 안에서는 .ics 내려받기와 구글 캘린더(토스 밖 링크)를 쓸 수 없어서 캘린더 버튼은 빼요
+    const myHourSection = renderMyHourSection(view, myHour, { pick, roomLink: null });
+    // 데모 모드는 방 기록이 없어서, 빈 칸을 두 개 보여주는 대신 한 줄로 알려요
+    if (this.roomToday.kind === 'off') {
+      return [renderSessionSection(view, Date.now()), myHourSection, h('small', { class: 'tg-foot' }, '데모 모드에서는 방 기록이 남지 않아요.')];
+    }
+    return [renderSessionSection(view, Date.now()), renderTodaySection(view), renderBusySection(view, myHour), myHourSection];
+  }
+
+  /** 정각 세션 (매초). 단계가 바뀌면 시트를 다시 그리고, 아니면 글자만 바꿔요 */
+  setSession(s: SessionState) {
+    const phaseChanged = this.session?.phase !== s.phase;
+    this.session = s;
+    const now = Date.now();
+    const btn = $('#session-btn');
+    $('#session-text').textContent = sessionPillText(s, now);
+    btn.setAttribute('aria-label', sessionPillLabel(s, now));
+    btn.classList.toggle('break', s.phase === 'break');
+    const intro = document.getElementById('ir-session');
+    if (intro) intro.textContent = sessionIntroText(s, now);
+    if (this.sheet !== 'together') return;
+    if (phaseChanged) this.renderSheet();
+    else paintSessionSection($('#sheet'), s, now);
   }
 
   setViewState({ moved, following }: ViewState) {
@@ -827,6 +941,10 @@ export class UI {
     this.closeChat();
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
+    if (kind === 'together') {
+      markTogetherSeen();
+      $('#session-dot').hidden = true;
+    }
     this.sheet = kind;
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
@@ -868,6 +986,14 @@ export class UI {
       }
       case 'noise': {
         this.renderNoise(el, head);
+        break;
+      }
+      case 'together': {
+        if (!this.session) break;
+        el.append(
+          head('정각 모각코', `매시 정각에 같이 시작해서 ${FOCUS_MINUTES}분 하고 ${BREAK_MINUTES}분 쉬어요`),
+          ...this.renderTogether(),
+        );
         break;
       }
       case 'status': {
@@ -1049,7 +1175,7 @@ export class UI {
                     ' · ',
                     h('span', { class: 'since', 'data-joined': p.joinedAt }, stayText(p.joinedAt)),
                     ' · ',
-                    `오늘 ${elapsedText(p.studyToday)}째`,
+                    h('span', { class: 'today', 'data-since': p.studySince }, todayText(p.studySince)),
                   ),
                   h('span', { class: 'lang', style: `--c:${langById(p.lang).color}` }, langById(p.lang).label.split(' ')[0]),
                 ),
@@ -1085,7 +1211,8 @@ export class UI {
             'div',
             { class: 'profile-stats' },
             h('span', { class: 'profile-stat' }, streak > 0 ? `🔥 연속 ${streak}일째` : '🌱 오늘부터 시작해봐요'),
-            h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(s.studyToday)}`),
+            h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(history[today] ?? 0)}`),
+            h('span', { class: 'profile-stat' }, `🟩 정각 모각코 ${getSessionsToday()}칸`),
           ),
           this.renderStudyGraph(history),
           h('h3', { class: 'sheet-sub' }, '✏️ 정보 수정'),
@@ -1325,6 +1452,8 @@ export class UI {
       .sort(
         (a, b) =>
           (counts[b.slug] ?? 0) - (counts[a.slug] ?? 0) ||
+          // 지금 아무도 없으면 오늘 많이 쓴 방부터 (사람이 다시 올 만한 방)
+          (this.roomsToday[b.slug]?.minutes ?? 0) - (this.roomsToday[a.slug]?.minutes ?? 0) ||
           Number(!!b.builtin) - Number(!!a.builtin) ||
           (b.createdAt ?? 0) - (a.createdAt ?? 0),
       );
@@ -1402,7 +1531,12 @@ export class UI {
             h('span', { class: 'tag place' }, placeMeta(r.place).name),
             ...this.tagChips(r.tags),
           ),
-          h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
+          h(
+            'span',
+            { class: 'ri-count' + (n || here ? ' on' : '') },
+            label,
+            (this.roomsToday[r.slug]?.minutes ?? 0) >= 1 ? h('small', { class: 'ri-today' }, `오늘 ${minutesText(this.roomsToday[r.slug].minutes)}`) : null,
+          ),
         ),
       );
     };
@@ -1627,6 +1761,11 @@ function roomCountLabel(r: RoomInfo, n: number, here: boolean, entered: boolean)
 /** 이 방에 들어온 뒤 지난 시간 표시 (위쪽 인원 표시와 사람 목록이 같이 써요) */
 function stayText(joinedAt: number) {
   return `⏱ ${elapsedText(Date.now() - joinedAt)}`;
+}
+
+/** 사람 목록의 오늘 누적 시간. 기준 시각으로 매초 다시 계산해요 (studyClock.ts) */
+function todayText(studySince: number) {
+  return `오늘 ${elapsedText(studyTodayAt(studySince, Date.now()))}째`;
 }
 
 /** 잔디 그래프에 보여줄 주 수 (대략 1년) */

@@ -589,3 +589,227 @@ create index if not exists commit_reports_created_idx on public.commit_reports (
 
 revoke all on function public.report_commit(text, text, text, text) from public, anon, authenticated;
 grant execute on function public.report_commit(text, text, text, text) to anon, authenticated;
+
+
+-- ── 6. 같이 하는 시간: 방마다 시간대별 모각코 기록 ─────────
+-- "오늘 이 카페에서 23명이 41시간 모각코했어요"와 "이 방은 보통 밤 10시에 붐벼요"에 써요.
+-- 누가 했는지는 남기지 않아요. 방 · 날짜 · 시각(KST)별 합계만 있어요.
+-- 로그인이 없어서 숫자를 부풀리는 걸 완전히 막을 수는 없어요. 그래서
+--   한 번에 더할 수 있는 시간(5분), 서비스 전체 호출 수(1분에 600번), 한 방 한 시간 합계(60명 × 60분)에 상한을 둬요.
+-- 보여주기용 숫자라 이 정도로 막아요. 30일 지난 기록은 지워요.
+create table if not exists public.room_hours (
+  room text not null check (room ~ '^[a-z0-9-]{3,32}$'),
+  day date not null,
+  hour smallint not null check (hour between 0 and 23),
+  minutes int not null default 0 check (minutes between 0 and 3600),
+  visits int not null default 0 check (visits between 0 and 300),
+  primary key (room, day, hour)
+);
+
+alter table public.room_hours enable row level security;
+revoke all on public.room_hours from anon, authenticated;
+
+-- 같이 하는 시간 함수들의 호출 수 (1분 단위, 서비스 전체). 사람을 알아보는 값은 없어요
+create table if not exists public.together_calls (
+  minute timestamptz primary key,
+  calls int not null default 0 check (calls >= 0)
+);
+
+alter table public.together_calls enable row level security;
+revoke all on public.together_calls from anon, authenticated;
+
+-- 이번 1분 동안의 호출 수를 하나 늘리고, 한도 안이면 true
+create or replace function public.together_call_ok()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  calls_per_minute constant int := 600;
+  v_calls int;
+begin
+  insert into public.together_calls as t (minute, calls) values (date_trunc('minute', now()), 1)
+  on conflict (minute) do update set calls = t.calls + 1
+  returning t.calls into v_calls;
+  return v_calls <= calls_per_minute;
+end;
+$$;
+
+-- 방에 있던 시간 더하기 (브라우저가 5분마다, 그 방에 오늘 처음 들어왔을 때 p_visit = true로 불러요)
+-- 비밀번호 방은 확인값(p_check)이 맞아야 해요
+create or replace function public.add_room_time(p_room text, p_minutes int, p_visit boolean, p_check text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  kst timestamp := now() at time zone 'Asia/Seoul';
+begin
+  if p_room is null or p_room !~ '^[a-z0-9-]{3,32}$' then
+    raise exception 'bad room';
+  end if;
+  if p_minutes is null or p_minutes not between 0 and 5 then
+    raise exception 'bad minutes';
+  end if;
+  if p_minutes = 0 and not coalesce(p_visit, false) then
+    return;
+  end if;
+  if not (public.is_builtin_room(p_room) or exists (select 1 from public.rooms where slug = p_room)) then
+    raise exception 'unknown room';
+  end if;
+  if public.room_is_locked(p_room) and not public.room_key_ok(p_room, p_check) then
+    raise exception 'wrong key';
+  end if;
+  if not public.together_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+  insert into public.room_hours as r (room, day, hour, minutes, visits)
+  values (p_room, kst::date, extract(hour from kst)::smallint, p_minutes, case when p_visit then 1 else 0 end)
+  on conflict (room, day, hour) do update
+    set minutes = least(r.minutes + excluded.minutes, 3600),
+        visits = least(r.visits + excluded.visits, 300);
+  -- 가끔(약 2%) 오래된 기록과 지난 호출 수를 정리해요
+  if random() < 0.02 then
+    delete from public.room_hours where day < kst::date - 30;
+    delete from public.together_calls where minute < now() - interval '10 minutes';
+  end if;
+end;
+$$;
+
+-- 오늘(KST) 한 방의 합계. 비밀번호 방도 합계는 보여줘요 (방 목록에 이름과 인원이 보이는 것과 같은 수준)
+create or replace function public.room_today(p_room text)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select json_build_object('minutes', coalesce(sum(minutes), 0), 'visits', coalesce(sum(visits), 0))
+  from public.room_hours
+  where room = p_room and day = (now() at time zone 'Asia/Seoul')::date;
+$$;
+
+-- 오늘(KST) 방 목록에 보이는 방들의 합계 (기본 방 + 공개 방). 링크로만 들어오는 방은 주소가 드러나지 않게 빼요
+create or replace function public.rooms_today()
+returns table (room text, minutes int, visits int)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select h.room, sum(h.minutes)::int, sum(h.visits)::int
+  from public.room_hours h
+  where h.day = (now() at time zone 'Asia/Seoul')::date
+    and (public.is_builtin_room(h.room) or exists (select 1 from public.rooms r where r.slug = h.room and r.is_public))
+  group by h.room
+  order by 2 desc
+  limit 200;
+$$;
+
+revoke all on function public.together_call_ok() from public, anon, authenticated;
+revoke all on function public.add_room_time(text, int, boolean, text) from public, anon, authenticated;
+grant execute on function public.add_room_time(text, int, boolean, text) to anon, authenticated;
+revoke all on function public.room_today(text) from public, anon, authenticated;
+grant execute on function public.room_today(text) to anon, authenticated;
+revoke all on function public.rooms_today() from public, anon, authenticated;
+grant execute on function public.rooms_today() to anon, authenticated;
+
+-- 이 방이 보통 몇 시에 붐비는지: 최근 14일(오늘 포함) 시각(KST)별 분 합계와, 기록이 있는 날 수.
+-- 브라우저가 "합계 ÷ 날 수 ÷ 60"으로 그 시각의 평균 인원을 계산해요
+create or replace function public.room_busy_hours(p_room text)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with recent as (
+    select day, hour, minutes from public.room_hours
+    where room = p_room and day > (now() at time zone 'Asia/Seoul')::date - 14
+  )
+  select json_build_object(
+    'days', (select count(distinct day) from recent),
+    'minutes', (
+      select json_agg(coalesce((select sum(r.minutes) from recent r where r.hour = g.h), 0) order by g.h)
+      from generate_series(0, 23) as g(h)
+    )
+  );
+$$;
+
+revoke all on function public.room_busy_hours(text) from public, anon, authenticated;
+grant execute on function public.room_busy_hours(text) to anon, authenticated;
+
+
+-- ── 7. 자리에 남은 흔적 ─────────────────────────────
+-- 누가 앉았던 자리에 식은 커피잔을 남겨서, 빈 방에 들어와도 다들 방금 다녀간 걸 보여줘요.
+-- 누구였는지는 남기지 않아요. 방 · 자리 · 언제부터 언제까지 · 몇 분만 있어요.
+-- 자리에 앉아 있는 동안 브라우저가 5분마다 add_seat_time을 불러요. 8분 넘게 소식이 없으면 일어난 걸로 봐요.
+-- 한 자리에는 가장 최근 흔적 하나만 남고, 2일 지난 흔적은 지워요. 호출 한도는 6번과 같이 써요.
+create table if not exists public.seat_traces (
+  room text not null check (room ~ '^[a-z0-9-]{3,32}$'),
+  seat text not null check (seat ~ '^[a-z0-9-]{1,32}$'),
+  started_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  minutes int not null default 0 check (minutes between 0 and 1440),
+  primary key (room, seat)
+);
+
+alter table public.seat_traces enable row level security;
+revoke all on public.seat_traces from anon, authenticated;
+
+create or replace function public.add_seat_time(p_room text, p_seat text, p_minutes int, p_check text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_room is null or p_room !~ '^[a-z0-9-]{3,32}$' or p_seat is null or p_seat !~ '^[a-z0-9-]{1,32}$' then
+    raise exception 'bad seat';
+  end if;
+  if p_minutes is null or p_minutes not between 1 and 5 then
+    raise exception 'bad minutes';
+  end if;
+  if not (public.is_builtin_room(p_room) or exists (select 1 from public.rooms where slug = p_room)) then
+    raise exception 'unknown room';
+  end if;
+  if public.room_is_locked(p_room) and not public.room_key_ok(p_room, p_check) then
+    raise exception 'wrong key';
+  end if;
+  if not public.together_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+  -- 8분 안에 다시 오면 같은 사람이 계속 앉아 있는 걸로 이어 세고, 아니면 새 흔적으로 시작해요
+  insert into public.seat_traces as t (room, seat, started_at, updated_at, minutes)
+  values (p_room, p_seat, now() - make_interval(mins => p_minutes), now(), p_minutes)
+  on conflict (room, seat) do update
+    set minutes = case when t.updated_at > now() - interval '8 minutes' then least(t.minutes + excluded.minutes, 1440) else excluded.minutes end,
+        started_at = case when t.updated_at > now() - interval '8 minutes' then t.started_at else excluded.started_at end,
+        updated_at = now();
+  if random() < 0.02 then
+    delete from public.seat_traces where updated_at < now() - interval '2 days';
+  end if;
+end;
+$$;
+
+-- 최근 12시간 안에 10분 넘게 앉았던 자리들 (가장 최근 것부터 40개)
+create or replace function public.room_seat_traces(p_room text)
+returns table (seat text, minutes int, started_at timestamptz, left_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.seat, t.minutes, t.started_at, t.updated_at
+  from public.seat_traces t
+  where t.room = p_room and t.updated_at > now() - interval '12 hours' and t.minutes >= 10
+  order by t.updated_at desc
+  limit 40;
+$$;
+
+revoke all on function public.add_seat_time(text, text, int, text) from public, anon, authenticated;
+grant execute on function public.add_seat_time(text, text, int, text) to anon, authenticated;
+revoke all on function public.room_seat_traces(text) from public, anon, authenticated;
+grant execute on function public.room_seat_traces(text) to anon, authenticated;

@@ -21,8 +21,11 @@ export interface PeerState {
   z: number;
   coffee: number;
   joinedAt: number;
-  /** 오늘 모각코한 총 시간(ms). 각자 브라우저에 쌓인 값을 그대로 알려줘요 */
-  studyToday: number;
+  /**
+   * 오늘 누적 시간의 기준 시각(ms). 지금 시각에서 빼면 오늘 모각코한 시간이에요 (studyClock.ts studyTodayAt).
+   * 누적 시간을 매초 보내지 않으려고 기준 시각만 보내요. 잠들었다 깨거나 자정이 지나면 다시 보내요
+   */
+  studySince: number;
   bot?: boolean;
 }
 
@@ -48,6 +51,38 @@ export type NetEvent =
   | { type: 'coffee'; id: string };
 
 export type JoinResult = 'ok' | 'wrong' | 'error';
+
+/** 오늘(KST) 한 방에서 쌓인 모각코 합계. 누가 했는지는 없어요 */
+export interface RoomToday {
+  minutes: number;
+  /** 오늘 이 방에 다녀간 브라우저 수 (같은 사람이 기기를 바꾸면 두 번 세요) */
+  visits: number;
+}
+
+/** 이 방이 보통 몇 시에 붐비는지 (최근 14일, 오늘 포함) */
+export interface BusyHours {
+  /** 기록이 있는 날 수 (평균을 낼 때 나눠요) */
+  days: number;
+  /** 시각(KST 0~23)별 분 합계. 길이 24 */
+  minutes: number[];
+}
+
+/** 누가 앉았다 간 자리의 흔적. 누구였는지는 없어요 */
+export interface SeatTrace {
+  seat: string;
+  minutes: number;
+  startedAt: number;
+  /** 마지막으로 앉아 있던 시각 */
+  leftAt: number;
+}
+
+/** 방에 있던 시간 보고 (5분마다, 그리고 오늘 처음 들어왔을 때) */
+export interface RoomTimeReport {
+  /** 0~5분 */
+  minutes: number;
+  /** 오늘 이 방에 처음 들어왔으면 true */
+  visit: boolean;
+}
 
 export interface NetHandlers {
   /** 지금 방에 있는 사람 전체(나 제외). 들어오고 나갈 때마다 호출 */
@@ -104,4 +139,20 @@ export interface Net {
   hasRoomAccess(room: RoomInfo): Promise<boolean>;
   /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
   joinRoom(slug: string, password: string): Promise<JoinResult>;
+
+  // ── 정각 모각코 (방별 기록) ─────────────────────
+  /** 실시간 서버에 기록이 남는지. 데모 모드에서는 false라서 화면에 "연결되면 보여요"라고 적어요 */
+  readonly keepsRoomStats: boolean;
+  /** 방에 있던 시간을 더해요. 실패해도 조용히 넘어가요 (보여주기용 기록이라서) */
+  addRoomTime(room: string, report: RoomTimeReport): Promise<void>;
+  /** 오늘 이 방의 합계. 못 읽으면 null */
+  loadRoomToday(room: string): Promise<RoomToday | null>;
+  /** 오늘 방 목록에 보이는 방들의 합계 (방 slug → 합계) */
+  loadRoomsToday(): Promise<Record<string, RoomToday>>;
+  /** 이 방이 보통 몇 시에 붐비는지. 못 읽으면 null */
+  loadBusyHours(room: string): Promise<BusyHours | null>;
+  /** 이 자리에 앉아 있던 시간을 더해요 (1~5분). 실패해도 조용히 넘어가요 */
+  addSeatTime(room: string, seat: string, minutes: number): Promise<void>;
+  /** 최근 12시간 안에 10분 넘게 앉았던 자리들 */
+  loadSeatTraces(room: string): Promise<SeatTrace[]>;
 }
