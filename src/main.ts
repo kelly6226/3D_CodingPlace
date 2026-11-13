@@ -268,6 +268,9 @@ async function enter(p: store.Profile) {
   await wait(700);
   // 처음 온 사람은 자리 안내를 토스트 대신 안내 메모 첫 장으로 보여줘요
   autoSeat(!firstVisit);
+  if (store.getMyHour() === sessionAt(Date.now()).hour) {
+    window.setTimeout(() => ui.toast('🙋 내 모각코 시간이에요. 오늘도 왔네요!', 'good', 4200), NUDGE_DELAY_MS);
+  }
   if (firstVisit) {
     await wait(TIPS_DELAY_MS);
     showTips();
@@ -295,7 +298,7 @@ function showTips() {
       {
         emoji: '🎯',
         title: '정각에 다 같이 시작해요',
-        body: '매시 정각부터 50분 집중하고 10분 쉬어요. 누르면 남은 시간과 오늘 끝낸 세션을 볼 수 있어요.',
+        body: '매시 정각부터 50분 집중하고 10분 쉬어요. 누르면 오늘 이 방 기록, 사람이 많이 오는 시간, 내 모각코 시간 정하기가 있어요.',
         target: () => document.getElementById('session-btn'),
       },
       {
@@ -985,6 +988,9 @@ function onFrame(dt: number) {
 }
 
 // ── 정각 세션 ─────────────────────────────────────
+/** 세션 끝 토스트 다음에 안내 토스트를 띄우기까지 */
+const NUDGE_DELAY_MS = 2500;
+
 /** 이번 집중 시간에 실제로 있었던 시간(ms). 40분을 넘기면 세션 하나를 끝낸 걸로 쳐요 */
 let focusedThisSession = 0;
 
@@ -1002,6 +1008,10 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
     const n = store.addSessionDone();
     meAvatar().emote('✅', `세션 ${n}`);
     ui.toast(`✅ 세션 끝! 오늘 ${n}번째예요. 10분 쉬고 정각에 다시 시작해요`, 'good', 6000);
+    // 세션을 끝낸 기분 좋은 때에, 아직 내 시간을 안 정했으면 하루 한 번 알려줘요
+    if (store.getMyHour() === null && store.takeMyHourNudge()) {
+      window.setTimeout(() => ui.toast("🙋 내일도 이 시간에 올래요? 왼쪽 위 🎯 버튼에서 '내 모각코 시간'을 정할 수 있어요", 'info', 7000), NUDGE_DELAY_MS);
+    }
     return;
   }
   ui.toast('☕ 쉬는 시간이에요. 정각에 다시 다 같이 시작해요', 'info', 5000);

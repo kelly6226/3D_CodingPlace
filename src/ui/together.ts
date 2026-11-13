@@ -1,6 +1,7 @@
 // '🎯 같이 하는 시간': 정각 세션 버튼(HUD)과 그 버튼으로 여는 시트
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
 import type { BusyHours, RoomToday } from '../net/types';
+import { dailyIcs, googleCalendarUrl } from '../together/calendar';
 import { BREAK_MINUTES, FOCUS_MINUTES, clockText, type SessionState } from '../together/session';
 import { h } from './dom';
 
@@ -240,4 +241,70 @@ export function renderBusySection(v: TogetherView, myHour: number | null): HTMLE
     ),
   );
   return box;
+}
+
+/** '내 모각코 시간' 칸에서 할 수 있는 것 */
+export interface MyHourActions {
+  /** 시간을 고르거나(0~23) 지워요(null) */
+  pick(hour: number | null): void;
+  /** 캘린더 일정에 넣을 지금 방 주소 */
+  roomLink: string;
+}
+
+/** 시트의 '내 모각코 시간' 칸: 매일 오는 시간을 정하고 캘린더에 넣어요 */
+export function renderMyHourSection(v: TogetherView, myHour: number | null, actions: MyHourActions): HTMLElement {
+  const select = h(
+    'select',
+    {
+      id: 'my-hour',
+      onchange: (e: Event) => {
+        const value = (e.currentTarget as HTMLSelectElement).value;
+        actions.pick(value === '' ? null : Number(value));
+      },
+    },
+    h('option', { value: '', selected: myHour === null }, '아직 안 정했어요'),
+    ...Array.from({ length: 24 }, (_, hour) => h('option', { value: hour, selected: hour === myHour }, `매일 ${hourLabel(hour)}`)),
+  );
+  const box = h(
+    'section',
+    { class: 'tg-section', 'aria-label': '내 모각코 시간' },
+    h('h3', { class: 'sheet-sub' }, '🙋 내 모각코 시간'),
+    h('label', { for: 'my-hour', class: 'tg-lead' }, '매일 오는 시간을 정해 두면 다시 오기 쉬워요. 위 그래프에 전구색 밑줄로 보여요.'),
+    select,
+  );
+  if (myHour === null) return box;
+
+  const busy = v.busyHours.kind === 'ready' ? v.busyHours.value : null;
+  const people = busy && busy.days > 0 ? averagePeople(busy)[myHour] : null;
+  const now = Date.now();
+  if (people !== null && people >= 0.05) box.append(h('p', { class: 'tg-lead' }, `이 방은 ${hourLabel(myHour)}에 보통 ${peopleText(people)} 있어요.`));
+  box.append(
+    h(
+      'div',
+      { class: 'tg-cal' },
+      h(
+        'button',
+        { type: 'button', class: 'primary', onclick: () => downloadText(dailyIcs(myHour, actions.roomLink, now), 'online-mogakco.ics', 'text/calendar') },
+        '📅 캘린더에 매일 추가',
+      ),
+      h('a', { class: 'ghost tg-cal-link', href: googleCalendarUrl(myHour, actions.roomLink, now), target: '_blank', rel: 'noopener noreferrer' }, 'Google 캘린더로'),
+    ),
+    h(
+      'small',
+      { class: 'form-hint' },
+      '"캘린더에 매일 추가"는 아이폰·맥·아웃룩 캘린더 파일(.ics)을 받아요. 일정 5분 전에 캘린더 앱이 알려줘요. 이 사이트가 직접 알림을 보내지는 않아요.',
+    ),
+  );
+  return box;
+}
+
+/** 글자를 파일로 내려받게 해요 (서버를 거치지 않아요) */
+function downloadText(text: string, filename: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
+  const a = h('a', { href: url, download: filename, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // 바로 지우면 일부 브라우저가 받기 전에 끊겨서 잠시 뒤에 지워요
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

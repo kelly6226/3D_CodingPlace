@@ -35,6 +35,10 @@ interface Saved {
   sessions?: { date: string; count: number };
   /** '🎯 같이 하는 시간' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
   togetherSeen?: boolean;
+  /** 내 모각코 시간 (KST 0~23시). 정하지 않았으면 없어요 */
+  myHour?: number;
+  /** '내 시간을 정해 보세요' 안내를 마지막으로 보여준 날 (하루 한 번만) */
+  myHourNudged?: string;
   /** 오늘(KST) 들어가 본 방들. 방마다 하루 한 번만 '다녀감'으로 세려고 기억해요 */
   visited?: { date: string; rooms: string[] };
 }
@@ -280,6 +284,27 @@ export function markRoomVisit(slug: string): boolean {
   const rooms = cache.visited?.date === d ? cache.visited.rooms : [];
   if (rooms.includes(slug)) return false;
   cache.visited = { date: d, rooms: [...rooms, slug].slice(-VISITED_ROOMS_MAX) };
+  persist();
+  return true;
+}
+
+/** 내 모각코 시간 (KST 0~23시). 없으면 null */
+export function getMyHour(): number | null {
+  const h = cache.myHour;
+  return Number.isInteger(h) && (h as number) >= 0 && (h as number) <= 23 ? (h as number) : null;
+}
+
+export function setMyHour(hour: number | null) {
+  if (hour === null) delete cache.myHour;
+  else cache.myHour = hour;
+  persist();
+}
+
+/** 오늘 아직 '내 시간 정하기' 안내를 안 했으면 true를 돌려주고 했다고 기억해요 */
+export function takeMyHourNudge(): boolean {
+  const d = kstDate();
+  if (cache.myHourNudged === d) return false;
+  cache.myHourNudged = d;
   persist();
   return true;
 }

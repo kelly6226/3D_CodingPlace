@@ -2666,3 +2666,42 @@ button.place-name {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* 내 모각코 시간 */
+.tg-lead {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+#my-hour {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+}
+#my-hour + .tg-lead {
+  margin-top: 8px;
+}
+.tg-cal {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.tg-cal .primary {
+  font-family: var(--font);
+}
+.tg-cal-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  border-radius: 12px;
+  color: var(--fg);
+  font-weight: 700;
+  text-decoration: none;
+}
