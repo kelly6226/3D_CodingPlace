@@ -27,8 +27,13 @@ import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
-import type { Commit, Net, NetEvent, PeerState } from './net/types';
+import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
+import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
+import { RoomTimeReporter } from './together/roomTime';
+import { SeatTimeReporter } from './together/seatTime';
+import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
+import { hasRoomRecord, hourLabel, roomTodaySentence, seatTraceLine } from './ui/together';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -79,6 +84,10 @@ let startInstance = 1;
 let commits: Commit[] = [];
 let enteredAt = 0;
 let connWarned = false;
+/** 방에 있던 시간을 5분마다 서버에 더해요 (net이 정해진 뒤 boot에서 만들어요) */
+let roomTime: RoomTimeReporter | null = null;
+/** 앉아 있던 자리의 시간도 같이 (자리에 남은 흔적용) */
+let seatTime: SeatTimeReporter | null = null;
 
 // ── 1. 폰트 → 3D 장면 준비 ─────────────────────────
 async function boot() {
@@ -111,6 +120,8 @@ async function boot() {
     net = new DemoNet();
   }
   ui.setMode(net.mode);
+  roomTime = new RoomTimeReporter((slug, report) => net.addRoomTime(slug, report));
+  seatTime = new SeatTimeReporter((slug, seat, minutes) => net.addSeatTime(slug, seat, minutes));
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
   const fromAddress = roomFromUrl();
@@ -141,9 +152,76 @@ async function boot() {
   ui.setCurrentRoom(room, !!found);
   ui.setRoom(startInstance);
   void refreshRooms();
+  reloadRoomToday();
+  window.setInterval(() => void refreshRoomToday(), ROOM_TODAY_REFRESH_MS);
   net.watchCounts((c) => ui.setCounts(c));
   await loadRoomCommits();
   ui.ready();
+}
+
+// ── 정각 모각코: 방별 오늘 기록 ─────────────────
+/** 오늘 기록을 다시 읽는 간격 (브라우저들이 5분마다 더해요) */
+const ROOM_TODAY_REFRESH_MS = 5 * 60e3;
+/** 방에 들어온 뒤 '다녀감'이 서버에 더해질 때까지 기다렸다 읽어요 */
+const ROOM_TODAY_AFTER_ENTER_MS = 1500;
+
+/** 지금 방과 방 목록의 오늘 기록을 읽어요. 데모 모드는 기록이 없다고 알려요 */
+async function refreshRoomToday() {
+  if (!net.keepsRoomStats) {
+    ui.setRoomToday({ kind: 'off' });
+    return;
+  }
+  const slug = room.slug;
+  const [today, all, traces] = await Promise.all([net.loadRoomToday(slug), net.loadRoomsToday(), net.loadSeatTraces(slug)]);
+  ui.setRoomsToday(all);
+  if (slug !== room.slug) return;
+  ui.setRoomToday({ kind: 'ready', value: today });
+  showSeatTraces(traces);
+}
+
+/** 자리에 남은 흔적(식은 커피잔). 지금 장소에 없는 자리와 이번에 내가 앉았던 자리는 빼요 */
+function showSeatTraces(traces: SeatTrace[]) {
+  const now = Date.now();
+  const props = traces.flatMap((t) => {
+    const seat = seatById(t.seat);
+    if (!seat || seatTime?.isMine(room.slug, t.seat)) return [];
+    return [{ seat, line: seatTraceLine(t, now) }];
+  });
+  world.setTraces(props);
+  syncTraceVisibility();
+  // 처음 한 번만: 컵이 무엇인지 알려줘요
+  if (props.length && self && store.takeTracesHint()) {
+    window.setTimeout(() => ui.toast('☕ 책상에 놓인 커피잔은 최근에 누가 앉았던 자리예요. 눌러 보세요', 'info', 6000), NUDGE_DELAY_MS);
+  }
+}
+
+/** 지금 누가(나 포함) 앉아 있는 자리의 흔적은 숨겨요 */
+function syncTraceVisibility() {
+  if (!world) return;
+  const taken = takenSeats();
+  if (self?.seat) taken.add(self.seat);
+  world.hideTraceSeats(taken);
+}
+
+/** 붐비는 시간은 하루 사이에 크게 안 바뀌어서 방이 바뀔 때만 읽어요 */
+async function refreshBusyHours() {
+  if (!net.keepsRoomStats) {
+    ui.setBusyHours({ kind: 'off' });
+    return;
+  }
+  const slug = room.slug;
+  const busy = await net.loadBusyHours(slug);
+  if (slug === room.slug) ui.setBusyHours({ kind: 'ready', value: busy });
+}
+
+/** 방이 바뀌면 이전 방 숫자가 잠깐이라도 보이지 않게 비우고 다시 읽어요 */
+function reloadRoomToday(delayMs = 0) {
+  const pending = net.keepsRoomStats ? ({ kind: 'loading' } as const) : ({ kind: 'off' } as const);
+  ui.setRoomToday(pending);
+  ui.setBusyHours(pending);
+  world.setTraces([]);
+  void refreshBusyHours();
+  window.setTimeout(() => void refreshRoomToday(), delayMs);
 }
 
 let roomsCache: RoomInfo[] = [];
@@ -185,11 +263,12 @@ async function enter(p: store.Profile) {
     z: SPAWN.z,
     coffee: store.getCoffeeToday(),
     joinedAt: Date.now(),
-    studyToday: store.getStudyMsToday(),
+    studySince: studySinceFor(store.getStudyMsToday(), Date.now()),
   };
   world.addAvatar(self, true);
   ui.setSelf(self);
   ui.setStudyToday(store.getStudyMsToday());
+  startStudyClock({ onElapsed: onStudyElapsed, onSkipped: skipAsleepTime });
 
   const connecting = net.connect(
     self,
@@ -220,11 +299,16 @@ async function enter(p: store.Profile) {
   );
   // 연결이 늦어도 방 구경은 먼저 할 수 있게
   await Promise.race([connecting, wait(8000)]);
+  roomTime?.enter(room.slug);
+  reloadRoomToday(ROOM_TODAY_AFTER_ENTER_MS);
   if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', roomAddress(room.slug));
 
   await wait(700);
   // 처음 온 사람은 자리 안내를 토스트 대신 안내 메모 첫 장으로 보여줘요
   autoSeat(!firstVisit);
+  if (store.getMyHour() === sessionAt(Date.now()).hour) {
+    window.setTimeout(() => ui.toast('정해 둔 시간에 맞춰 왔어요', 'good'), NUDGE_DELAY_MS);
+  }
   if (firstVisit) {
     await wait(TIPS_DELAY_MS);
     showTips();
@@ -248,6 +332,12 @@ function showTips() {
           const me = world.avatars.get(self.id);
           return me ? world.toScreen(me.position.clone().setY(2)) : null;
         },
+      },
+      {
+        emoji: '⏱',
+        title: '정각에 같이 시작해요',
+        body: `매시 정각부터 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 누르면 오늘 이 방 기록과 사람 많은 시간을 볼 수 있어요.`,
+        target: () => document.getElementById('session-btn'),
       },
       {
         emoji: '💬',
@@ -343,6 +433,7 @@ async function pickRoom(slug: string, push = true) {
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
     history.replaceState(null, '', roomAddress(r.slug));
+    reloadRoomToday();
     await loadRoomCommits();
     return;
   }
@@ -383,7 +474,9 @@ async function switchRoom(r: RoomInfo, push = true) {
   void loadRoomCommits();
   await Promise.race([net.switchRoom(r), wait(8000)]);
   switching = false;
-  ui.toast(`🚪 ${r.name}에 들어왔어요`, 'good');
+  roomTime?.enter(r.slug);
+  reloadRoomToday(ROOM_TODAY_AFTER_ENTER_MS);
+  ui.toast(enteredMessage(r), 'good', 4200);
   await wait(600);
   autoSeat(false);
 }
@@ -423,6 +516,12 @@ async function createRoom({ name, tags, isPublic, place, noise, password = '' }:
   return null;
 }
 
+/** 방을 옮겼을 때: 오늘 기록이 있으면 같이 알려줘요 (지금 아무도 없어도 다들 다녀간 곳이라는 걸) */
+function enteredMessage(r: RoomInfo): string {
+  const today = ui.roomTodayOf(r.slug);
+  return hasRoomRecord(today) ? `🚪 ${r.name}에 들어왔어요. ${roomTodaySentence(today)}` : `🚪 ${r.name}에 들어왔어요`;
+}
+
 /** 방을 만든 뒤 안내. 토스 앱은 주소창이 없어서 🔗(토스 공유 시트)로 보내게 해요 */
 function createdMessage(r: RoomInfo): string {
   const head = `"${r.name}" 방을 만들었어요. 🔗 버튼으로 친구에게 보내면 바로 이 방으로 들어와요.`;
@@ -454,6 +553,7 @@ function moveTo(x: number, z: number, then?: () => void) {
   meAvatar().goTo(x, z, null, then);
   net.send({ type: 'move', id: self.id, x, z, seat: null });
   net.updateSelf({ seat: null, x, z });
+  syncTraceVisibility();
 }
 
 function sitAt(id: string) {
@@ -468,6 +568,7 @@ function sitAt(id: string) {
   meAvatar().goTo(s.x, s.z, id);
   net.send({ type: 'move', id: self.id, x: s.x, z: s.z, seat: id });
   net.updateSelf({ seat: id, seatAt: self.seatAt, x: s.x, z: s.z });
+  syncTraceVisibility();
 }
 
 function setStatus(id: string) {
@@ -480,7 +581,7 @@ function setStatus(id: string) {
 /** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
 /** 옷장 미리보기에 쓰는 아바타 바탕. 입장 화면에서도 쓰니까 self에 기대지 않아요 */
 function previewBase(look: Look): PeerState {
-  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, studyToday: 0, ...look };
+  return { id: 'preview', name: '', lang: store.getProfile().lang, status: 'coding', seat: null, seatAt: 0, x: 0, z: 0, coffee: 0, joinedAt: 0, studySince: 0, ...look };
 }
 
 function profileOf(s: PeerState): store.Profile {
@@ -734,6 +835,7 @@ function onPeers(presencePeers: PeerState[]) {
     if (name) ui.toast(`${name}님이 퇴근했어요`);
   }
   ui.setPeers(peers);
+  syncTraceVisibility();
 }
 
 function onEvent(e: NetEvent) {
@@ -747,6 +849,7 @@ function onEvent(e: NetEvent) {
       a.state.z = e.z;
       a.goTo(e.x, e.z, e.seat);
       lastMoves.set(e.id, { at: Date.now(), x: e.x, z: e.z, seat: e.seat });
+      syncTraceVisibility();
       const k = known.get(e.id);
       if (k) Object.assign(k, { seat: e.seat, x: e.x, z: e.z });
       break;
@@ -854,6 +957,41 @@ function fillNote(line: string) {
 }
 
 // ── 7. 매 프레임 / 주기 작업 ───────────────────────
+/** 방 사람들에게 알린 기준 시각이 실제 누적과 이만큼 넘게 어긋나면 다시 알려요 (자정이 지났을 때 등) */
+const STUDY_SINCE_DRIFT_MS = 30e3;
+
+/**
+ * 오늘 누적 시간에 더해요 (studyClock.ts가 실제 시각으로 불러요).
+ * 방 사람들에게는 매번 보내지 않아요. 기준 시각(studySince)을 한 번 알면 각자 화면에서 계산해요
+ */
+function addStudyTime(ms: number) {
+  const total = store.addStudyMs(ms);
+  ui.setStudyToday(total);
+  const now = Date.now();
+  if (Math.abs(studyTodayAt(self.studySince, now) - total) > STUDY_SINCE_DRIFT_MS) shareStudyTime(total, now);
+}
+
+/** studyClock이 실제로 흐른 시간을 알려줄 때: 오늘 누적, 정각 세션, 방·자리 기록에 각각 나눠 줘요 */
+function onStudyElapsed(ms: number) {
+  addStudyTime(ms);
+  if (sessionAt(Date.now()).phase === 'focus') focusedThisSession += ms;
+  roomTime?.add(ms);
+  seatTime?.add(ms, room.slug, self.seat);
+}
+
+/** 노트북을 덮었다 연 것처럼 오래 멈췄던 시간은 오늘 누적에도, 이 방에 있은 시간(⏱)에도 넣지 않아요 */
+function skipAsleepTime(ms: number) {
+  const now = Date.now();
+  self.joinedAt = Math.min(now, self.joinedAt + ms);
+  shareStudyTime(store.getStudyMsToday(), now);
+}
+
+function shareStudyTime(todayMs: number, now: number) {
+  self.studySince = studySinceFor(todayMs, now);
+  ui.setSelf(self);
+  net.updateSelf({ studySince: self.studySince, joinedAt: self.joinedAt });
+}
+
 let secT = 0;
 let keysT = 3;
 let tagT = 0;
@@ -862,12 +1000,6 @@ function onFrame(dt: number) {
   if (secT >= 1) {
     secT = 0;
     ui.tickSince();
-    if (self) {
-      const total = store.addStudyMs(1000);
-      self.studyToday = total;
-      ui.setStudyToday(total);
-      net.updateSelf({ studyToday: total });
-    }
   }
   if (!self) return;
   // 멀리서 들리는 다른 사람들 타자 소리
@@ -884,6 +1016,46 @@ function onFrame(dt: number) {
     for (const a of world.avatars.values()) a.renderTag();
   }
 }
+
+// ── 정각 세션 ─────────────────────────────────────
+/** 세션 끝 토스트 다음에 안내 토스트를 띄우기까지 */
+const NUDGE_DELAY_MS = 2500;
+
+/** 이번 집중 시간에 실제로 있었던 시간(ms). SESSION_DONE_MIN_MS를 넘기면 세션 하나를 끝낸 걸로 쳐요 */
+let focusedThisSession = 0;
+
+/** 집중 ↔ 휴식이 바뀔 때: 끝낸 세션을 세고, 알림음과 함께 알려줘요. 입장 전에는 조용히 */
+function onSessionPhaseChange(next: SessionState, prev: SessionState) {
+  const finished = prev.phase === 'focus' && focusedThisSession >= SESSION_DONE_MIN_MS;
+  focusedThisSession = 0;
+  if (!self) return;
+  sound.chime();
+  if (next.phase === 'focus') {
+    ui.toast(`${hourLabel(next.hour)} 정각이에요. ${FOCUS_MINUTES}분 동안 같이 집중해요`, 'good', 5000);
+    return;
+  }
+  const nextStart = hourLabel((next.hour + 1) % 24);
+  if (finished) {
+    const n = store.addSessionDone();
+    meAvatar().emote('✅', `${n}칸째`);
+    ui.toast(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
+    // 한 칸 채운 직후에, 아직 내 시간을 안 정했으면 하루 한 번 알려줘요
+    if (store.getMyHour() === null && store.takeMyHourNudge()) {
+      window.setTimeout(() => ui.toast("내일도 이 시간에 올 거면 왼쪽 위 '집중' 버튼에서 매일 오는 시간을 정해 두세요", 'info', 7000), NUDGE_DELAY_MS);
+    }
+    return;
+  }
+  ui.toast(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
+}
+
+watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseChange });
+
+// 탭을 숨기거나 닫기 직전에 모아 둔 시간을 보내요 (닫히면 1분 미만은 버려져요)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  void roomTime?.flush();
+  void seatTime?.flush();
+});
 
 // 진짜 키보드를 치면 내 아바타도 열심히 침 (무슨 키인지는 안 봐요)
 addEventListener('keydown', (e) => {
