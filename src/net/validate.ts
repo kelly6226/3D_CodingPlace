@@ -11,13 +11,14 @@ import {
   EMOTES,
   HEX_RE,
   LANGS,
+  ROOM_SLUG_RE,
   STATUSES,
   actionById,
 } from '../config';
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskIfBad } from './badwords';
-import type { Commit, NetEvent, PeerState } from './types';
+import type { Commit, NetEvent, PeerState, RoomToday } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const HASH_RE = /^[0-9a-f]{7}$/;
@@ -189,4 +190,29 @@ export class RateLimiter {
   clear() {
     this.last.clear();
   }
+}
+
+/** DB 상한과 같아요 (schema.sql 6번: 한 방 한 시간 60명 × 60분, 다녀간 수 300) */
+const ROOM_DAY_MINUTES_MAX = 24 * 3600;
+const ROOM_DAY_VISITS_MAX = 24 * 300;
+
+/** 오늘 한 방의 합계 (room_today 함수의 결과) */
+export function cleanRoomToday(raw: unknown): RoomToday | null {
+  if (!isObj(raw)) return null;
+  return {
+    minutes: clamp(Math.floor(num(raw.minutes, 0)), 0, ROOM_DAY_MINUTES_MAX),
+    visits: clamp(Math.floor(num(raw.visits, 0)), 0, ROOM_DAY_VISITS_MAX),
+  };
+}
+
+/** 오늘 방들의 합계 (rooms_today 함수의 결과) → 방 slug → 합계 */
+export function cleanRoomsToday(raw: unknown): Record<string, RoomToday> {
+  const out: Record<string, RoomToday> = {};
+  if (!Array.isArray(raw)) return out;
+  for (const row of raw.slice(0, 200)) {
+    if (!isObj(row) || typeof row.room !== 'string' || !ROOM_SLUG_RE.test(row.room)) continue;
+    const today = cleanRoomToday(row);
+    if (today) out[row.room] = today;
+  }
+  return out;
 }

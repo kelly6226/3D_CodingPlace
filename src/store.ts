@@ -35,6 +35,8 @@ interface Saved {
   sessions?: { date: string; count: number };
   /** '🎯 같이 하는 시간' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
   togetherSeen?: boolean;
+  /** 오늘(KST) 들어가 본 방들. 방마다 하루 한 번만 '다녀감'으로 세려고 기억해요 */
+  visited?: { date: string; rooms: string[] };
 }
 
 export interface KnownPeer {
@@ -267,4 +269,17 @@ export function markTogetherSeen() {
   if (cache.togetherSeen) return;
   cache.togetherSeen = true;
   persist();
+}
+
+/** 하루에 기억해 둘 '들어가 본 방' 수 */
+const VISITED_ROOMS_MAX = 50;
+
+/** 오늘 이 방에 처음 들어온 거면 true (기억해 두고, 같은 날 다시 들어오면 false) */
+export function markRoomVisit(slug: string): boolean {
+  const d = kstDate();
+  const rooms = cache.visited?.date === d ? cache.visited.rooms : [];
+  if (rooms.includes(slug)) return false;
+  cache.visited = { date: d, rooms: [...rooms, slug].slice(-VISITED_ROOMS_MAX) };
+  persist();
+  return true;
 }

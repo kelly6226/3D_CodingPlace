@@ -23,7 +23,7 @@ import { randomOutfit } from '../look';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
-import type { Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState } from './types';
+import type { Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState, RoomToday } from './types';
 
 type SavedCommit = Commit & { room?: string };
 
@@ -43,6 +43,8 @@ export class DemoNet implements Net {
   readonly mode = 'demo' as const;
   /** 데모 모드엔 서버가 없어서 비밀번호 방을 만들 수 없어요 */
   readonly canLockRooms = false;
+  /** 서버가 없어서 방별 기록을 남기지 않아요. 화면에는 "실시간 서버에 연결되면 보여요"라고 나와요 */
+  readonly keepsRoomStats = false;
   readonly instance = 1;
   room = '';
   private bots: PeerState[] = [];
@@ -342,5 +344,13 @@ export class DemoNet implements Net {
   }
   async joinRoom(): Promise<JoinResult> {
     return 'error';
+  }
+
+  async addRoomTime(): Promise<void> {}
+  async loadRoomToday(): Promise<RoomToday | null> {
+    return null;
+  }
+  async loadRoomsToday(): Promise<Record<string, RoomToday>> {
+    return {};
   }
 }

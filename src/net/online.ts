@@ -25,10 +25,10 @@ import {
   type RoomInfo,
 } from '../config';
 import * as store from '../store';
-import type { Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState } from './types';
+import type { Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState, RoomTimeReport, RoomToday } from './types';
 import { maskIfBad } from './badwords';
 import { deriveRoomKey } from './roomKey';
-import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, text } from './validate';
+import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, cleanRoomToday, cleanRoomsToday, text } from './validate';
 
 interface RoomRow {
   slug: string;
@@ -80,6 +80,7 @@ const toRoom = (r: RoomRow): RoomInfo | null => {
 export class OnlineNet implements Net {
   readonly mode = 'online' as const;
   readonly canLockRooms = true;
+  readonly keepsRoomStats = true;
   instance = 1;
   room = '';
   private roomPublic = true;
@@ -513,5 +514,36 @@ export class OnlineNet implements Net {
     if (data !== true) return 'wrong';
     store.setRoomKey(slug, key);
     return 'ok';
+  }
+
+  // ── 같이 하는 시간 (방별 기록) ─────────────────────
+  async addRoomTime(room: string, { minutes, visit }: RoomTimeReport) {
+    if (!ROOM_SLUG_RE.test(room)) return;
+    const { error } = await this.sb.rpc('add_room_time', {
+      p_room: room,
+      p_minutes: Math.max(0, Math.min(5, Math.floor(minutes))),
+      p_visit: visit,
+      p_check: store.getRoomKey(room)?.check ?? null,
+    });
+    if (error) console.warn('[room time] 기록 실패', error.message);
+  }
+
+  async loadRoomToday(room: string): Promise<RoomToday | null> {
+    if (!ROOM_SLUG_RE.test(room)) return null;
+    const { data, error } = await this.sb.rpc('room_today', { p_room: room });
+    if (error) {
+      console.warn('[room time] 오늘 기록 읽기 실패', error.message);
+      return null;
+    }
+    return cleanRoomToday(data);
+  }
+
+  async loadRoomsToday(): Promise<Record<string, RoomToday>> {
+    const { data, error } = await this.sb.rpc('rooms_today');
+    if (error) {
+      console.warn('[room time] 방 목록 기록 읽기 실패', error.message);
+      return {};
+    }
+    return cleanRoomsToday(data);
   }
 }

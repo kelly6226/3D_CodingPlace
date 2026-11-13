@@ -1,7 +1,11 @@
 // '🎯 같이 하는 시간': 정각 세션 버튼(HUD)과 그 버튼으로 여는 시트
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
+import type { RoomToday } from '../net/types';
 import { BREAK_MINUTES, FOCUS_MINUTES, clockText, type SessionState } from '../together/session';
 import { h } from './dom';
+
+/** 방별 기록을 읽은 상태. 데모 모드처럼 서버가 기록을 안 남기면 'off' */
+export type RoomTodayState = { kind: 'off' } | { kind: 'loading' } | { kind: 'ready'; today: RoomToday | null };
 
 /** 시트에 보여줄 것 */
 export interface TogetherView {
@@ -10,6 +14,8 @@ export interface TogetherView {
   sessionsToday: number;
   /** 지금 이 방에 있는 사람 수 (나 포함) */
   peopleHere: number;
+  roomName: string;
+  roomToday: RoomTodayState;
 }
 
 const PHASE = {
@@ -77,4 +83,54 @@ export function paintSessionSection(root: ParentNode, s: SessionState, now: numb
   if (timer) timer.textContent = clockText(s.endsAt - now);
   const fill = root.querySelector<HTMLElement>('#tg-bar-fill');
   if (fill) fill.style.width = `${(hourProgress(s, now) * 100).toFixed(1)}%`;
+}
+
+/** 분을 읽기 쉽게: 45분 / 3시간 20분 / 41시간 (10시간 넘으면 분은 빼요) */
+export function minutesText(min: number): string {
+  const m = Math.max(0, Math.floor(min));
+  if (m < 60) return `${m}분`;
+  const hours = Math.floor(m / 60);
+  const rest = m % 60;
+  if (hours >= 10 || rest === 0) return `${hours}시간`;
+  return `${hours}시간 ${rest}분`;
+}
+
+/** 기록이 하나라도 있는지 */
+export function hasRoomRecord(t: RoomToday | null | undefined): t is RoomToday {
+  return !!t && (t.minutes > 0 || t.visits > 0);
+}
+
+/** "오늘 23명이 다녀갔고 41시간 모각코했어요" (입장 화면, 방에 들어왔을 때 토스트) */
+export function roomTodaySentence(t: RoomToday): string {
+  if (t.minutes < 1) return `오늘 ${t.visits}명이 다녀갔어요`;
+  if (t.visits < 1) return `오늘 ${minutesText(t.minutes)} 모각코했어요`;
+  return `오늘 ${t.visits}명이 다녀갔고 ${minutesText(t.minutes)} 모각코했어요`;
+}
+
+/** 시트의 '오늘 이 방' 칸: 아무도 없을 때도 다들 다녀간 곳이라는 걸 보여줘요 */
+export function renderTodaySection(v: TogetherView): HTMLElement {
+  const box = h('section', { class: 'tg-section', 'aria-label': '오늘 이 방' }, h('h3', { class: 'sheet-sub' }, `📊 오늘 ${v.roomName}`));
+  const st = v.roomToday;
+  if (st.kind === 'off') {
+    box.append(h('p', { class: 'tg-empty' }, '실시간 서버에 연결되면 오늘 이 방에 다녀간 사람과 시간이 보여요.'));
+    return box;
+  }
+  if (st.kind === 'loading') {
+    box.append(h('p', { class: 'tg-empty' }, '불러오는 중…'));
+    return box;
+  }
+  if (!hasRoomRecord(st.today)) {
+    box.append(h('p', { class: 'tg-empty' }, '오늘은 아직 기록이 없어요. 오늘의 첫 기록을 남겨 봐요 🌱'));
+    return box;
+  }
+  box.append(
+    h(
+      'div',
+      { class: 'tg-tiles' },
+      h('div', { class: 'tg-tile' }, h('b', {}, `${st.today.visits}명`), h('small', {}, '다녀간 사람')),
+      h('div', { class: 'tg-tile' }, h('b', {}, minutesText(st.today.minutes)), h('small', {}, '다 같이 모각코한 시간')),
+    ),
+    h('small', { class: 'form-hint' }, '누가 했는지는 남기지 않고 합계만 세요. 같은 사람이 다른 기기로 오면 두 번 세요. 5분마다 쌓여요.'),
+  );
+  return box;
 }
