@@ -140,7 +140,7 @@ export interface Net {
   /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
   joinRoom(slug: string, password: string): Promise<JoinResult>;
 
-  // ── 같이 하는 시간 (방별 기록) ─────────────────────
+  // ── 정각 모각코 (방별 기록) ─────────────────────
   /** 실시간 서버에 기록이 남는지. 데모 모드에서는 false라서 화면에 "연결되면 보여요"라고 적어요 */
   readonly keepsRoomStats: boolean;
   /** 방에 있던 시간을 더해요. 실패해도 조용히 넘어가요 (보여주기용 기록이라서) */

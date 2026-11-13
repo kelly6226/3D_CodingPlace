@@ -1,5 +1,6 @@
-// '🎯 같이 하는 시간': 정각 세션 버튼(HUD)과 그 버튼으로 여는 시트
+// 정각 모각코: 왼쪽 위 시계 버튼(HUD)과 그 버튼으로 여는 시트
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
+// 글은 기능 설명보다 지금 상태와 시각을 바로 알려주는 쪽으로 써요 ("1시 50분부터 쉬어요").
 import type { BusyHours, RoomToday, SeatTrace } from '../net/types';
 import { dailyIcs, googleCalendarUrl } from '../together/calendar';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, clockText, type SessionState } from '../together/session';
@@ -13,40 +14,58 @@ export type BusyHoursState = Loaded<BusyHours>;
 /** 시트에 보여줄 것 */
 export interface TogetherView {
   session: SessionState;
-  /** 오늘 내가 끝낸 세션 수 */
+  /** 오늘 채운 칸(끝낸 세션) 수 */
   sessionsToday: number;
-  /** 지금 이 방에 있는 사람 수 (나 포함) */
-  peopleHere: number;
-  roomName: string;
   roomToday: RoomTodayState;
   busyHours: BusyHoursState;
   /** 지금 시각 (KST 0~23) */
   nowHour: number;
 }
 
-const PHASE = {
-  focus: { emoji: '🎯', label: '집중 시간', short: '집중', next: `끝나면 ${BREAK_MINUTES}분 쉬어요` },
-  break: { emoji: '☕', label: '쉬는 시간', short: '휴식', next: '정각에 다 같이 다시 시작해요' },
-} as const;
+const KST_OFFSET_MS = 9 * 3600e3;
 
-/** HUD 버튼 글자: "🎯 집중 23:41" */
+// ── 시각 글자 ─────────────────────────────────────
+
+/** 시각을 말로: 새벽 2시 / 오전 9시 / 낮 12시 / 오후 3시 / 저녁 7시 / 밤 10시 / 밤 12시 */
+export function hourLabel(hour: number): string {
+  if (hour === 0) return '밤 12시';
+  if (hour < 6) return `새벽 ${hour}시`;
+  if (hour < 12) return `오전 ${hour}시`;
+  if (hour === 12) return '낮 12시';
+  if (hour < 18) return `오후 ${hour - 12}시`;
+  if (hour < 21) return `저녁 ${hour - 12}시`;
+  return `밤 ${hour - 12}시`;
+}
+
+/** 그 순간의 KST 시각을 말로: "오후 1시 50분", 정각이면 "오후 2시" */
+function clockLabel(at: number): string {
+  const d = new Date(at + KST_OFFSET_MS);
+  const min = d.getUTCMinutes();
+  return min ? `${hourLabel(d.getUTCHours())} ${min}분` : hourLabel(d.getUTCHours());
+}
+
+const minutesLeft = (s: SessionState, now: number) => Math.max(1, Math.ceil((s.endsAt - now) / 60e3));
+
+// ── HUD 버튼 · 입장 화면 ───────────────────────────
+
+/** HUD 버튼 글자: "집중 23:41" / "휴식 6:12" (앞의 색 점은 ui.ts가 붙여요) */
 export function sessionPillText(s: SessionState, now: number): string {
-  const p = PHASE[s.phase];
-  return `${p.emoji} ${p.short} ${clockText(s.endsAt - now)}`;
+  return `${s.phase === 'focus' ? '집중' : '휴식'} ${clockText(s.endsAt - now)}`;
 }
 
-/** 화면 읽기 프로그램용 설명: "집중 시간, 23분 남음" */
+/** 화면 읽기 프로그램용 설명 */
 export function sessionPillLabel(s: SessionState, now: number): string {
-  const min = Math.max(1, Math.ceil((s.endsAt - now) / 60e3));
-  return `같이 하는 시간 열기. 지금 ${PHASE[s.phase].label}, ${min}분 남음`;
+  const what = s.phase === 'focus' ? '집중 시간' : '쉬는 시간';
+  return `정각 모각코 열기. 지금 ${what}, ${minutesLeft(s, now)}분 남았어요`;
 }
 
-/** 입장 화면에 넣는 한 줄: 들어가면 어떤 시간인지 미리 알려줘요 */
+/** 입장 화면 한 줄: 들어가면 어떤 시간인지 */
 export function sessionIntroText(s: SessionState, now: number): string {
-  const min = Math.max(1, Math.ceil((s.endsAt - now) / 60e3));
-  if (s.phase === 'focus') return `🎯 지금 다 같이 집중하는 중이에요 · ${min}분 남음`;
-  return `☕ 지금은 쉬는 시간 · ${min}분 뒤 정각에 다 같이 시작해요`;
+  if (s.phase === 'focus') return `지금 다 같이 집중하는 중이에요. ${minutesLeft(s, now)}분 남았어요.`;
+  return `지금은 쉬는 시간이에요. ${minutesLeft(s, now)}분 뒤 정각에 같이 시작해요.`;
 }
+
+// ── 지금 세션 ─────────────────────────────────────
 
 /** 이 시간이 한 시간 중 얼마나 지났는지 (0~1). 진행 막대용 */
 function hourProgress(s: SessionState, now: number): number {
@@ -54,37 +73,45 @@ function hourProgress(s: SessionState, now: number): number {
   return Math.min(1, Math.max(0, 1 - (hourEnd - now) / 3600e3));
 }
 
-/** 시트의 '지금 세션' 칸 */
+/** 다음에 무슨 일이 언제 있는지: "오후 1시 50분부터 10분 쉬어요" */
+function nextStepText(s: SessionState): string {
+  if (s.phase === 'focus') return `${clockLabel(s.endsAt)}부터 ${BREAK_MINUTES}분 쉬어요`;
+  return `${clockLabel(s.endsAt)} 정각에 다시 시작해요`;
+}
+
+/** 오늘 채운 칸: 잔디 그래프처럼 한 칸 = 정각 모각코 한 번. 집중 중이면 지금 칸을 비워서 보여줘요 */
+function renderDoneCells(v: TogetherView): HTMLElement {
+  const done = v.sessionsToday;
+  const cells = Array.from({ length: done }, () => h('i', { class: 'tg-cell done' }));
+  if (v.session.phase === 'focus') cells.push(h('i', { class: 'tg-cell now', title: '지금 채우는 중' }));
+  const text =
+    done > 0
+      ? `오늘 ${done}칸 채웠어요`
+      : `정각부터 ${SESSION_DONE_MIN_MS / 60e3}분 넘게 있으면 한 칸이 채워져요`;
+  return h('div', { class: 'tg-cells' }, h('span', { class: 'tg-cell-row', 'aria-hidden': 'true' }, ...cells), h('span', {}, text));
+}
+
+/** 시트의 '지금' 칸. 큰 시계 하나가 주인공이에요 */
 export function renderSessionSection(v: TogetherView, now: number): HTMLElement {
-  const p = PHASE[v.session.phase];
+  const s = v.session;
   return h(
     'section',
-    { class: `tg-now ${v.session.phase}`, 'aria-label': '지금 세션' },
+    { class: `tg-now ${s.phase}`, 'aria-label': '지금 세션' },
     h(
       'div',
       { class: 'tg-now-top' },
-      h('span', { class: 'tg-phase' }, `${p.emoji} ${p.label}`),
-      h('b', { class: 'tg-timer', id: 'tg-timer', 'aria-live': 'off' }, clockText(v.session.endsAt - now)),
+      h('span', { class: 'tg-phase' }, s.phase === 'focus' ? `${hourLabel(s.hour)} 집중` : '쉬는 시간'),
+      h('b', { class: 'tg-timer', id: 'tg-timer' }, clockText(s.endsAt - now)),
     ),
     h(
       'div',
-      { class: 'tg-bar', role: 'img', 'aria-label': `정각부터 ${FOCUS_MINUTES}분 집중, ${BREAK_MINUTES}분 휴식` },
-      h('i', { class: 'tg-bar-fill', id: 'tg-bar-fill', style: `width:${(hourProgress(v.session, now) * 100).toFixed(1)}%` }),
+      { class: 'tg-bar', role: 'img', 'aria-label': `정각부터 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요` },
+      h('i', { class: 'tg-bar-fill', id: 'tg-bar-fill', style: `width:${(hourProgress(s, now) * 100).toFixed(1)}%` }),
       h('i', { class: 'tg-bar-break', style: `left:${(FOCUS_MINUTES / 60) * 100}%` }),
     ),
-    h('p', { class: 'tg-next' }, p.next),
-    h(
-      'div',
-      { class: 'profile-stats' },
-      h('span', { class: 'profile-stat', id: 'tg-people' }, peopleHereText(v.peopleHere)),
-      h('span', { class: 'profile-stat' }, v.sessionsToday > 0 ? `✅ 오늘 끝낸 세션 ${v.sessionsToday}개` : '✅ 오늘 첫 세션을 끝내 봐요'),
-    ),
-    h('small', { class: 'form-hint' }, `매시 정각에 다 같이 시작해서 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 조금 늦게 와도 ${SESSION_DONE_MIN_MS / 60e3}분 넘게 있으면 세션 하나로 쳐요.`),
+    h('p', { class: 'tg-next' }, nextStepText(s)),
+    renderDoneCells(v),
   );
-}
-
-export function peopleHereText(n: number): string {
-  return `👥 지금 이 방 ${n}명`;
 }
 
 /** 시트를 다시 그리지 않고 남은 시간과 진행 막대만 바꿔요 (매초 불러요) */
@@ -94,6 +121,8 @@ export function paintSessionSection(root: ParentNode, s: SessionState, now: numb
   const fill = root.querySelector<HTMLElement>('#tg-bar-fill');
   if (fill) fill.style.width = `${(hourProgress(s, now) * 100).toFixed(1)}%`;
 }
+
+// ── 오늘 이 방 ────────────────────────────────────
 
 /** 분을 읽기 쉽게: 45분 / 3시간 20분 / 41시간 (10시간 넘으면 분은 빼요) */
 export function minutesText(min: number): string {
@@ -110,66 +139,48 @@ export function hasRoomRecord(t: RoomToday | null | undefined): t is RoomToday {
   return !!t && (t.minutes > 0 || t.visits > 0);
 }
 
-/** "오늘 23명이 다녀갔고 41시간 모각코했어요" (입장 화면, 방에 들어왔을 때 토스트) */
+/** "오늘 23명이 다녀갔고, 다 같이 41시간 했어요" (입장 화면, 방에 들어왔을 때 토스트) */
 export function roomTodaySentence(t: RoomToday): string {
   if (t.minutes < 1) return `오늘 ${t.visits}명이 다녀갔어요`;
-  if (t.visits < 1) return `오늘 ${minutesText(t.minutes)} 모각코했어요`;
-  return `오늘 ${t.visits}명이 다녀갔고 ${minutesText(t.minutes)} 모각코했어요`;
+  if (t.visits < 1) return `오늘 다 같이 ${minutesText(t.minutes)} 했어요`;
+  return `오늘 ${t.visits}명이 다녀갔고, 다 같이 ${minutesText(t.minutes)} 했어요`;
 }
 
-/** 시트의 '오늘 이 방' 칸: 아무도 없을 때도 다들 다녀간 곳이라는 걸 보여줘요 */
+/** 시트의 '오늘 이 방' 칸. 숫자 두 개를 한 문장으로 읽게 해요 */
 export function renderTodaySection(v: TogetherView): HTMLElement {
-  const box = h('section', { class: 'tg-section', 'aria-label': '오늘 이 방' }, h('h3', { class: 'sheet-sub' }, `📊 오늘 ${v.roomName}`));
+  const box = h('section', { class: 'tg-section', 'aria-label': '오늘 이 방' }, h('h3', { class: 'sheet-sub' }, '오늘 이 방'));
   const st = v.roomToday;
   if (st.kind !== 'ready') {
-    box.append(notReady(st.kind, '오늘 이 방에 다녀간 사람과 시간'));
+    box.append(h('p', { class: 'tg-quiet' }, '불러오는 중…'));
     return box;
   }
   const today = st.value;
   if (!hasRoomRecord(today)) {
-    box.append(h('p', { class: 'tg-empty' }, '오늘은 아직 기록이 없어요. 오늘의 첫 기록을 남겨 봐요 🌱'));
+    box.append(h('p', { class: 'tg-quiet' }, '오늘은 아직 기록이 없어요.'));
     return box;
   }
   box.append(
     h(
-      'div',
-      { class: 'tg-tiles' },
-      h('div', { class: 'tg-tile' }, h('b', {}, `${today.visits}명`), h('small', {}, '다녀간 사람')),
-      h('div', { class: 'tg-tile' }, h('b', {}, minutesText(today.minutes)), h('small', {}, '다 같이 모각코한 시간')),
-    ),
-    h(
-      'small',
-      { class: 'form-hint' },
-      '누가 했는지는 남기지 않고 합계만 세요. 같은 사람이 다른 기기로 오면 두 번 세요. 5분마다 쌓여요. 자리에 놓인 ☕ 컵은 최근 12시간 안에 다녀간 사람들의 흔적이에요.',
+      'p',
+      { class: 'tg-today' },
+      h('b', {}, `${today.visits}명`),
+      '이 다녀갔고, 다 같이 ',
+      h('b', {}, minutesText(today.minutes)),
+      ' 했어요.',
     ),
   );
   return box;
 }
 
-/** 아직 못 읽었거나(loading) 서버가 기록을 안 남길 때(off) 보여줄 한 줄 */
-function notReady(kind: 'off' | 'loading', what: string): HTMLElement {
-  return h('p', { class: 'tg-empty' }, kind === 'off' ? `실시간 서버에 연결되면 ${what}이 보여요.` : '불러오는 중…');
-}
-
-/** 시각을 말로: 새벽 2시 / 오전 9시 / 낮 12시 / 오후 3시 / 저녁 7시 / 밤 10시 / 밤 12시 */
-export function hourLabel(hour: number): string {
-  if (hour === 0) return '밤 12시';
-  if (hour < 6) return `새벽 ${hour}시`;
-  if (hour < 12) return `오전 ${hour}시`;
-  if (hour === 12) return '낮 12시';
-  if (hour < 18) return `오후 ${hour - 12}시`;
-  if (hour < 21) return `저녁 ${hour - 12}시`;
-  return `밤 ${hour - 12}시`;
-}
+// ── 사람 많은 시간 ─────────────────────────────────
 
 /** 이보다 평균 인원이 적으면 사실상 아무도 없는 시간으로 봐요 */
 const BUSY_EMPTY_PEOPLE = 0.05;
 /** 사람이 조금이라도 있던 시각은 막대가 안 보일 만큼 짧아지지 않게 (막대 높이 %) */
 const BUSY_BAR_MIN_PCT = 6;
-
-/** 이보다 평균 인원이 적으면 "붐비는 시간"이라고 부르지 않아요 */
+/** 이보다 평균 인원이 적으면 "사람이 제일 많은 시간"이라고 부르지 않아요 */
 const BUSY_PEAK_MIN_PEOPLE = 0.5;
-/** 이보다 기록한 날이 적으면 "아직 정확하지 않아요"라고 덧붙여요 */
+/** 이보다 기록한 날이 적으면 "아직 며칠치뿐"이라고 덧붙여요 */
 const BUSY_FEW_DAYS = 3;
 
 /** 시각별 평균 인원 (분 합계 ÷ 기록한 날 수 ÷ 60) */
@@ -199,45 +210,40 @@ function peopleText(n: number): string {
   return n < 10 ? `${n.toFixed(1)}명` : `${Math.round(n)}명`;
 }
 
-/** 입장 화면 한 줄: "⏰ 이 방은 보통 밤 10시에 가장 붐벼요" */
+/** 입장 화면 한 줄: "이 방은 보통 밤 10시에 사람이 제일 많아요." */
 export function busyIntroText(b: BusyHours | null): string | null {
   const peak = busyPeak(b);
-  return peak ? `⏰ 이 방은 보통 ${hourLabel(peak.hour)}에 가장 붐벼요 (평균 ${peopleText(peak.people)})` : null;
+  return peak ? `이 방은 보통 ${hourLabel(peak.hour)}에 사람이 제일 많아요.` : null;
 }
 
 /**
- * 시트의 '붐비는 시간' 칸: 시각별 평균 인원 막대 24개.
- * 막대에 마우스를 올리거나 누르면 아래 설명 줄이 그 시각으로 바뀌어요 (기본은 가장 붐비는 시각).
+ * 시트의 '사람 많은 시간' 칸: 시각별 평균 인원 막대 24개.
+ * 막대에 올리거나 누르면 아래 줄이 그 시각 설명으로 바뀌고, 지금 시각과 내 시간은 막대 아래에 글자로 표시해요.
  */
 export function renderBusySection(v: TogetherView, myHour: number | null): HTMLElement {
-  const box = h('section', { class: 'tg-section', 'aria-label': '붐비는 시간' }, h('h3', { class: 'sheet-sub' }, '⏰ 이 방이 붐비는 시간'));
+  const box = h('section', { class: 'tg-section', 'aria-label': '사람 많은 시간' }, h('h3', { class: 'sheet-sub' }, '사람 많은 시간'));
   const st = v.busyHours;
   if (st.kind !== 'ready') {
-    box.append(notReady(st.kind, '사람이 많이 오는 시간'));
+    box.append(h('p', { class: 'tg-quiet' }, '불러오는 중…'));
     return box;
   }
   const busy = st.value;
   const peak = busyPeak(busy);
   if (!busy || !peak) {
-    box.append(h('p', { class: 'tg-empty' }, '아직 기록이 쌓이는 중이에요. 며칠 지나면 사람이 많이 오는 시간이 보여요.'));
+    box.append(h('p', { class: 'tg-quiet' }, '며칠 기록이 쌓이면 몇 시에 사람이 많은지 보여요.'));
     return box;
   }
   const avg = averagePeople(busy);
   const max = Math.max(...avg);
-  const describe = (hour: number) => {
-    const tags = [hour === v.nowHour ? '지금' : '', hour === myHour ? '내 시간' : ''].filter(Boolean).join(' · ');
-    return `${hourLabel(hour)}${tags ? ` (${tags})` : ''} · 평균 ${peopleText(avg[hour])}`;
-  };
-  // 막대마다 같은 설명이 aria-label로 있어서, 이 줄은 화면에 보이는 사람을 위한 거예요 (읽어 주지 않게 live는 안 둬요)
-  const caption = h('p', { class: 'tg-busy-caption' }, '');
-  const showDefault = () => (caption.textContent = `가장 붐비는 시간은 ${describe(peak.hour)}`);
-  showDefault();
+  const describe = (hour: number) => `${hourLabel(hour)}, 평균 ${peopleText(avg[hour])}`;
+  const peakText = `${hourLabel(peak.hour)}에 제일 많아요. 평균 ${peopleText(peak.people)}`;
+  const caption = h('p', { class: 'tg-busy-caption' }, peakText);
   const bars = avg.map((n, hour) =>
     h(
       'button',
       {
         type: 'button',
-        class: ['tg-hour', hour === v.nowHour && 'now', hour === myHour && 'mine', hour === peak.hour && 'peak'].filter(Boolean).join(' '),
+        class: ['tg-hour', hour === v.nowHour && 'now', hour === myHour && 'mine'].filter(Boolean).join(' '),
         'aria-label': describe(hour),
         onpointerenter: () => (caption.textContent = describe(hour)),
         onfocus: () => (caption.textContent = describe(hour)),
@@ -247,23 +253,27 @@ export function renderBusySection(v: TogetherView, myHour: number | null): HTMLE
     ),
   );
   const chart = h('div', { class: 'tg-busy', role: 'group', 'aria-label': '시각별 평균 인원' }, ...bars);
-  chart.addEventListener('pointerleave', showDefault);
+  chart.addEventListener('pointerleave', () => (caption.textContent = peakText));
+  // 지금 시각과 내 시간이 같으면 '지금'만 써요
+  const marks = [{ hour: v.nowHour, text: '지금', cls: 'now' }];
+  if (myHour !== null && myHour !== v.nowHour) marks.push({ hour: myHour, text: '내 시간', cls: 'mine' });
   box.append(
     chart,
-    h('div', { class: 'tg-busy-axis', 'aria-hidden': 'true' }, ...[0, 6, 12, 18].map((hour) => h('span', { style: `--h:${hour}` }, `${hour}시`))),
-    caption,
     h(
-      'small',
-      { class: 'form-hint' },
-      busy.days < BUSY_FEW_DAYS
-        ? `기록이 ${busy.days}일치라 아직 정확하지 않아요. 최근 14일 평균으로 보여줘요.`
-        : `최근 14일 중 기록이 있는 ${busy.days}일의 평균이에요. 진한 막대가 지금 시각이에요.`,
+      'div',
+      { class: 'tg-busy-axis', 'aria-hidden': 'true' },
+      ...[0, 6, 12, 18].map((hour) => h('span', { style: `--h:${hour}` }, `${hour}시`)),
+      ...marks.map((m) => h('span', { class: `mark ${m.cls}`, style: `--h:${m.hour}` }, m.text)),
     ),
+    caption,
+    h('small', { class: 'tg-foot' }, busy.days < BUSY_FEW_DAYS ? `아직 ${busy.days}일치 기록이라 정확하지 않아요.` : '최근 2주 평균이에요.'),
   );
   return box;
 }
 
-/** '내 모각코 시간' 칸에서 할 수 있는 것 */
+// ── 내 시간 ──────────────────────────────────────
+
+/** '내 시간' 칸에서 할 수 있는 것 */
 export interface MyHourActions {
   /** 시간을 고르거나(0~23) 지워요(null) */
   pick(hour: number | null): void;
@@ -271,7 +281,7 @@ export interface MyHourActions {
   roomLink: string;
 }
 
-/** 시트의 '내 모각코 시간' 칸: 매일 오는 시간을 정하고 캘린더에 넣어요 */
+/** 시트의 '내 시간' 칸: 매일 오는 시간을 정하고 캘린더에 넣어요 */
 export function renderMyHourSection(v: TogetherView, myHour: number | null, actions: MyHourActions): HTMLElement {
   const select = h(
     'select',
@@ -282,22 +292,21 @@ export function renderMyHourSection(v: TogetherView, myHour: number | null, acti
         actions.pick(value === '' ? null : Number(value));
       },
     },
-    h('option', { value: '', selected: myHour === null }, '아직 안 정했어요'),
-    ...Array.from({ length: 24 }, (_, hour) => h('option', { value: hour, selected: hour === myHour }, `매일 ${hourLabel(hour)}`)),
+    h('option', { value: '', selected: myHour === null }, '안 정했어요'),
+    ...Array.from({ length: 24 }, (_, hour) => h('option', { value: hour, selected: hour === myHour }, hourLabel(hour))),
   );
   const box = h(
     'section',
-    { class: 'tg-section', 'aria-label': '내 모각코 시간' },
-    h('h3', { class: 'sheet-sub' }, '🙋 내 모각코 시간'),
-    h('label', { for: 'my-hour', class: 'tg-lead' }, '매일 오는 시간을 정해 두면 다시 오기 쉬워요. 위 그래프에 전구색 밑줄로 보여요.'),
+    { class: 'tg-section', 'aria-label': '내 시간' },
+    h('label', { for: 'my-hour', class: 'sheet-sub tg-label' }, '매일 오는 시간'),
     select,
   );
   if (myHour === null) return box;
 
   const busy = v.busyHours.kind === 'ready' ? v.busyHours.value : null;
   const people = busy && busy.days > 0 ? averagePeople(busy)[myHour] : null;
+  if (people !== null && people >= BUSY_EMPTY_PEOPLE) box.append(h('p', { class: 'tg-quiet' }, `이 방은 그 시간에 보통 ${peopleText(people)} 있어요.`));
   const now = Date.now();
-  if (people !== null && people >= BUSY_EMPTY_PEOPLE) box.append(h('p', { class: 'tg-lead' }, `이 방은 ${hourLabel(myHour)}에 보통 ${peopleText(people)} 있어요.`));
   box.append(
     h(
       'div',
@@ -305,15 +314,11 @@ export function renderMyHourSection(v: TogetherView, myHour: number | null, acti
       h(
         'button',
         { type: 'button', class: 'primary', onclick: () => downloadText(dailyIcs(myHour, actions.roomLink, now), 'online-mogakco.ics', 'text/calendar') },
-        '📅 캘린더에 매일 추가',
+        '캘린더에 넣기',
       ),
-      h('a', { class: 'ghost tg-cal-link', href: googleCalendarUrl(myHour, actions.roomLink, now), target: '_blank', rel: 'noopener noreferrer' }, 'Google 캘린더로'),
+      h('a', { class: 'ghost tg-cal-link', href: googleCalendarUrl(myHour, actions.roomLink, now), target: '_blank', rel: 'noopener noreferrer' }, 'Google 캘린더'),
     ),
-    h(
-      'small',
-      { class: 'form-hint' },
-      '"캘린더에 매일 추가"는 아이폰·맥·아웃룩 캘린더 파일(.ics)을 받아요. 일정 5분 전에 캘린더 앱이 알려줘요. 이 사이트가 직접 알림을 보내지는 않아요.',
-    ),
+    h('small', { class: 'tg-foot' }, `매일 ${hourLabel(myHour)} 반복 일정으로 들어가고, 5분 전에 캘린더 앱이 알려줘요.`),
   );
   return box;
 }
@@ -329,6 +334,8 @@ function downloadText(text: string, filename: string, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+// ── 자리에 남은 흔적 ───────────────────────────────
+
 /** "2시간 전" / "35분 전" / "방금" */
 function agoText(at: number, now: number): string {
   const min = Math.floor(Math.max(0, now - at) / 60e3);
@@ -337,7 +344,8 @@ function agoText(at: number, now: number): string {
   return `${Math.floor(min / 60)}시간 전`;
 }
 
-/** 흔적(식은 커피잔)을 눌렀을 때: "☕ 2시간 전, 누군가 이 자리에서 1시간 40분 모각코하고 갔어요" */
+/** 흔적(식은 커피잔)을 눌렀을 때: "☕ 2시간 전까지 누가 여기서 1시간 40분 하고 갔어요" */
 export function seatTraceLine(t: SeatTrace, now: number): string {
-  return `☕ ${agoText(t.leftAt, now)}, 누군가 이 자리에서 ${minutesText(t.minutes)} 모각코하고 갔어요`;
+  const when = agoText(t.leftAt, now);
+  return `☕ ${when === '방금' ? '방금' : `${when}까지`} 누가 여기서 ${minutesText(t.minutes)} 하고 갔어요`;
 }

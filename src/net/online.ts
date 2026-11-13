@@ -516,7 +516,7 @@ export class OnlineNet implements Net {
     return 'ok';
   }
 
-  // ── 같이 하는 시간 (방별 기록) ─────────────────────
+  // ── 정각 모각코 (방별 기록) ─────────────────────
   async addRoomTime(room: string, { minutes, visit }: RoomTimeReport) {
     if (!ROOM_SLUG_RE.test(room)) return;
     const { error } = await this.sb.rpc('add_room_time', {
