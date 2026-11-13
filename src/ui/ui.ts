@@ -29,12 +29,23 @@ import {
   type ViewState,
 } from '../config';
 import type { Look } from '../look';
-import type { Commit, NewRoom, PeerState } from '../net/types';
+import type { Commit, NewRoom, PeerState, RoomToday } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
 import { studyTodayAt } from '../studyClock';
 import type { SessionState } from '../together/session';
 import { $, h } from './dom';
-import { paintSessionSection, renderSessionSection, sessionIntroText, sessionPillLabel, sessionPillText } from './together';
+import {
+  hasRoomRecord,
+  minutesText,
+  paintSessionSection,
+  renderSessionSection,
+  renderTodaySection,
+  roomTodaySentence,
+  sessionIntroText,
+  sessionPillLabel,
+  sessionPillText,
+  type RoomTodayState,
+} from './together';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
@@ -152,6 +163,10 @@ export class UI {
   private viewAway = false;
   /** 지금 정각 세션 (main.ts가 매초 알려줘요) */
   private session: SessionState | null = null;
+  /** 지금 방의 오늘 기록 */
+  private roomToday: RoomTodayState = { kind: 'loading' };
+  /** 방 목록에 보이는 방들의 오늘 기록 (방 slug → 합계) */
+  private roomsToday: Record<string, RoomToday> = {};
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -407,6 +422,10 @@ export class UI {
       ),
       h('div', { class: 'ir-session', id: 'ir-session' }, this.session ? sessionIntroText(this.session, Date.now()) : ''),
     );
+    // 지금 아무도 없어도 오늘 다녀간 사람들이 있다는 걸 들어가기 전에 보여줘요
+    if (this.roomToday.kind === 'ready' && hasRoomRecord(this.roomToday.today)) {
+      el.append(h('div', { class: 'ir-today' }, `📊 ${roomTodaySentence(this.roomToday.today)}`));
+    }
   }
 
   private tagChips(tags: string[]) {
@@ -436,6 +455,24 @@ export class UI {
     this.counts = c;
     this.renderIntroRoom();
     // 방 만드는 중에는 다시 그리면 입력이 날아가서 목록일 때만
+    if (this.sheet === 'rooms' && this.roomsView === 'list') this.renderSheet();
+  }
+
+  /** 지금 방의 오늘 기록 (main.ts가 방에 들어올 때와 5분마다 읽어요) */
+  setRoomToday(state: RoomTodayState) {
+    this.roomToday = state;
+    this.renderIntroRoom();
+    if (this.sheet === 'together') this.renderSheet();
+  }
+
+  /** 방 목록에서 읽어 둔 한 방의 오늘 기록 (없으면 undefined) */
+  roomTodayOf(slug: string): RoomToday | undefined {
+    return this.roomsToday[slug];
+  }
+
+  /** 방 목록의 오늘 기록 */
+  setRoomsToday(map: Record<string, RoomToday>) {
+    this.roomsToday = map;
     if (this.sheet === 'rooms' && this.roomsView === 'list') this.renderSheet();
   }
 
@@ -516,6 +553,19 @@ export class UI {
     const el = $('#study-today');
     el.hidden = ms < 60e3;
     el.textContent = `오늘 ${elapsedText(ms)}째`;
+  }
+
+  /** '🎯 같이 하는 시간' 시트 내용 */
+  private renderTogether(): HTMLElement[] {
+    if (!this.session) return [];
+    const view = {
+      session: this.session,
+      sessionsToday: getSessionsToday(),
+      peopleHere: this.peers.length + 1,
+      roomName: this.room?.name ?? placeMeta('cafe').name,
+      roomToday: this.roomToday,
+    };
+    return [renderSessionSection(view, Date.now()), renderTodaySection(view)];
   }
 
   /** 정각 세션 (매초). 단계가 바뀌면 시트를 다시 그리고, 아니면 글자만 바꿔요 */
@@ -910,7 +960,7 @@ export class UI {
         if (!this.session) break;
         el.append(
           head('🎯 같이 하는 시간', '매시 정각에 다 같이 시작해요'),
-          renderSessionSection({ session: this.session, sessionsToday: getSessionsToday(), peopleHere: this.peers.length + 1 }, Date.now()),
+          ...this.renderTogether(),
         );
         break;
       }
@@ -1351,6 +1401,8 @@ export class UI {
       .sort(
         (a, b) =>
           (counts[b.slug] ?? 0) - (counts[a.slug] ?? 0) ||
+          // 지금 아무도 없으면 오늘 많이 쓴 방부터 (사람이 다시 올 만한 방)
+          (this.roomsToday[b.slug]?.minutes ?? 0) - (this.roomsToday[a.slug]?.minutes ?? 0) ||
           Number(!!b.builtin) - Number(!!a.builtin) ||
           (b.createdAt ?? 0) - (a.createdAt ?? 0),
       );
@@ -1429,7 +1481,12 @@ export class UI {
             h('span', { class: 'tag place' }, placeMeta(r.place).name),
             ...this.tagChips(r.tags),
           ),
-          h('span', { class: 'ri-count' + (n || here ? ' on' : '') }, label),
+          h(
+            'span',
+            { class: 'ri-count' + (n || here ? ' on' : '') },
+            label,
+            (this.roomsToday[r.slug]?.minutes ?? 0) >= 1 ? h('small', { class: 'ri-today' }, `오늘 ${minutesText(this.roomsToday[r.slug].minutes)}`) : null,
+          ),
         ),
       );
     };

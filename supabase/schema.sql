@@ -589,3 +589,129 @@ create index if not exists commit_reports_created_idx on public.commit_reports (
 
 revoke all on function public.report_commit(text, text, text, text) from public, anon, authenticated;
 grant execute on function public.report_commit(text, text, text, text) to anon, authenticated;
+
+
+-- ── 6. 같이 하는 시간: 방마다 시간대별 모각코 기록 ─────────
+-- "오늘 이 카페에서 23명이 41시간 모각코했어요"와 "이 방은 보통 밤 10시에 붐벼요"에 써요.
+-- 누가 했는지는 남기지 않아요. 방 · 날짜 · 시각(KST)별 합계만 있어요.
+-- 로그인이 없어서 숫자를 부풀리는 걸 완전히 막을 수는 없어요. 그래서
+--   한 번에 더할 수 있는 시간(5분), 서비스 전체 호출 수(1분에 600번), 한 방 한 시간 합계(60명 × 60분)에 상한을 둬요.
+-- 보여주기용 숫자라 이 정도로 막아요. 30일 지난 기록은 지워요.
+create table if not exists public.room_hours (
+  room text not null check (room ~ '^[a-z0-9-]{3,32}$'),
+  day date not null,
+  hour smallint not null check (hour between 0 and 23),
+  minutes int not null default 0 check (minutes between 0 and 3600),
+  visits int not null default 0 check (visits between 0 and 300),
+  primary key (room, day, hour)
+);
+
+alter table public.room_hours enable row level security;
+revoke all on public.room_hours from anon, authenticated;
+
+-- 같이 하는 시간 함수들의 호출 수 (1분 단위, 서비스 전체). 사람을 알아보는 값은 없어요
+create table if not exists public.together_calls (
+  minute timestamptz primary key,
+  calls int not null default 0 check (calls >= 0)
+);
+
+alter table public.together_calls enable row level security;
+revoke all on public.together_calls from anon, authenticated;
+
+-- 이번 1분 동안의 호출 수를 하나 늘리고, 한도 안이면 true
+create or replace function public.together_call_ok()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  calls_per_minute constant int := 600;
+  v_calls int;
+begin
+  insert into public.together_calls as t (minute, calls) values (date_trunc('minute', now()), 1)
+  on conflict (minute) do update set calls = t.calls + 1
+  returning t.calls into v_calls;
+  return v_calls <= calls_per_minute;
+end;
+$$;
+
+-- 방에 있던 시간 더하기 (브라우저가 5분마다, 그 방에 오늘 처음 들어왔을 때 p_visit = true로 불러요)
+-- 비밀번호 방은 확인값(p_check)이 맞아야 해요
+create or replace function public.add_room_time(p_room text, p_minutes int, p_visit boolean, p_check text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  kst timestamp := now() at time zone 'Asia/Seoul';
+begin
+  if p_room is null or p_room !~ '^[a-z0-9-]{3,32}$' then
+    raise exception 'bad room';
+  end if;
+  if p_minutes is null or p_minutes not between 0 and 5 then
+    raise exception 'bad minutes';
+  end if;
+  if p_minutes = 0 and not coalesce(p_visit, false) then
+    return;
+  end if;
+  if not (public.is_builtin_room(p_room) or exists (select 1 from public.rooms where slug = p_room)) then
+    raise exception 'unknown room';
+  end if;
+  if public.room_is_locked(p_room) and not public.room_key_ok(p_room, p_check) then
+    raise exception 'wrong key';
+  end if;
+  if not public.together_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+  insert into public.room_hours as r (room, day, hour, minutes, visits)
+  values (p_room, kst::date, extract(hour from kst)::smallint, p_minutes, case when p_visit then 1 else 0 end)
+  on conflict (room, day, hour) do update
+    set minutes = least(r.minutes + excluded.minutes, 3600),
+        visits = least(r.visits + excluded.visits, 300);
+  -- 가끔(약 2%) 오래된 기록과 지난 호출 수를 정리해요
+  if random() < 0.02 then
+    delete from public.room_hours where day < kst::date - 30;
+    delete from public.together_calls where minute < now() - interval '10 minutes';
+  end if;
+end;
+$$;
+
+-- 오늘(KST) 한 방의 합계. 비밀번호 방도 합계는 보여줘요 (방 목록에 이름과 인원이 보이는 것과 같은 수준)
+create or replace function public.room_today(p_room text)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select json_build_object('minutes', coalesce(sum(minutes), 0), 'visits', coalesce(sum(visits), 0))
+  from public.room_hours
+  where room = p_room and day = (now() at time zone 'Asia/Seoul')::date;
+$$;
+
+-- 오늘(KST) 방 목록에 보이는 방들의 합계 (기본 방 + 공개 방). 링크로만 들어오는 방은 주소가 드러나지 않게 빼요
+create or replace function public.rooms_today()
+returns table (room text, minutes int, visits int)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select h.room, sum(h.minutes)::int, sum(h.visits)::int
+  from public.room_hours h
+  where h.day = (now() at time zone 'Asia/Seoul')::date
+    and (public.is_builtin_room(h.room) or exists (select 1 from public.rooms r where r.slug = h.room and r.is_public))
+  group by h.room
+  order by 2 desc
+  limit 200;
+$$;
+
+revoke all on function public.together_call_ok() from public, anon, authenticated;
+revoke all on function public.add_room_time(text, int, boolean, text) from public, anon, authenticated;
+grant execute on function public.add_room_time(text, int, boolean, text) to anon, authenticated;
+revoke all on function public.room_today(text) from public, anon, authenticated;
+grant execute on function public.room_today(text) to anon, authenticated;
+revoke all on function public.rooms_today() from public, anon, authenticated;
+grant execute on function public.rooms_today() to anon, authenticated;

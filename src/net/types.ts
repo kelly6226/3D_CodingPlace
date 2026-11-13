@@ -52,6 +52,21 @@ export type NetEvent =
 
 export type JoinResult = 'ok' | 'wrong' | 'error';
 
+/** 오늘(KST) 한 방에서 쌓인 모각코 합계. 누가 했는지는 없어요 */
+export interface RoomToday {
+  minutes: number;
+  /** 오늘 이 방에 다녀간 브라우저 수 (같은 사람이 기기를 바꾸면 두 번 세요) */
+  visits: number;
+}
+
+/** 방에 있던 시간 보고 (5분마다, 그리고 오늘 처음 들어왔을 때) */
+export interface RoomTimeReport {
+  /** 0~5분 */
+  minutes: number;
+  /** 오늘 이 방에 처음 들어왔으면 true */
+  visit: boolean;
+}
+
 export interface NetHandlers {
   /** 지금 방에 있는 사람 전체(나 제외). 들어오고 나갈 때마다 호출 */
   onPeers(peers: PeerState[]): void;
@@ -107,4 +122,14 @@ export interface Net {
   hasRoomAccess(room: RoomInfo): Promise<boolean>;
   /** 비밀번호를 서버에서 대조해요. 맞으면 'ok'로 이 브라우저에 열쇠를 기억해 둬요 */
   joinRoom(slug: string, password: string): Promise<JoinResult>;
+
+  // ── 같이 하는 시간 (방별 기록) ─────────────────────
+  /** 실시간 서버에 기록이 남는지. 데모 모드에서는 false라서 화면에 "연결되면 보여요"라고 적어요 */
+  readonly keepsRoomStats: boolean;
+  /** 방에 있던 시간을 더해요. 실패해도 조용히 넘어가요 (보여주기용 기록이라서) */
+  addRoomTime(room: string, report: RoomTimeReport): Promise<void>;
+  /** 오늘 이 방의 합계. 못 읽으면 null */
+  loadRoomToday(room: string): Promise<RoomToday | null>;
+  /** 오늘 방 목록에 보이는 방들의 합계 (방 slug → 합계) */
+  loadRoomsToday(): Promise<Record<string, RoomToday>>;
 }

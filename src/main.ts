@@ -29,7 +29,9 @@ import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
+import { RoomTimeReporter } from './together/roomTime';
 import { SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
+import { hasRoomRecord, roomTodaySentence } from './ui/together';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -75,6 +77,8 @@ let startInstance = 1;
 let commits: Commit[] = [];
 let enteredAt = 0;
 let connWarned = false;
+/** 방에 있던 시간을 5분마다 서버에 더해요 (net이 정해진 뒤 boot에서 만들어요) */
+let roomTime: RoomTimeReporter | null = null;
 
 // ── 1. 폰트 → 3D 장면 준비 ─────────────────────────
 async function boot() {
@@ -107,6 +111,7 @@ async function boot() {
     net = new DemoNet();
   }
   ui.setMode(net.mode);
+  roomTime = new RoomTimeReporter((slug, report) => net.addRoomTime(slug, report));
 
   // 링크로 들어왔으면 그 방, 아니면 기본 방
   const fromUrl = roomFromUrl();
@@ -136,9 +141,35 @@ async function boot() {
   ui.setCurrentRoom(room, !!found);
   ui.setRoom(startInstance);
   void refreshRooms();
+  void refreshRoomToday();
+  window.setInterval(() => void refreshRoomToday(), ROOM_TODAY_REFRESH_MS);
   net.watchCounts((c) => ui.setCounts(c));
   await loadRoomCommits();
   ui.ready();
+}
+
+// ── 같이 하는 시간: 방별 오늘 기록 ─────────────────
+/** 오늘 기록을 다시 읽는 간격 (브라우저들이 5분마다 더해요) */
+const ROOM_TODAY_REFRESH_MS = 5 * 60e3;
+/** 방에 들어온 뒤 '다녀감'이 서버에 더해질 때까지 기다렸다 읽어요 */
+const ROOM_TODAY_AFTER_ENTER_MS = 1500;
+
+/** 지금 방과 방 목록의 오늘 기록을 읽어요. 데모 모드는 기록이 없다고 알려요 */
+async function refreshRoomToday() {
+  if (!net.keepsRoomStats) {
+    ui.setRoomToday({ kind: 'off' });
+    return;
+  }
+  const slug = room.slug;
+  const [today, all] = await Promise.all([net.loadRoomToday(slug), net.loadRoomsToday()]);
+  ui.setRoomsToday(all);
+  if (slug === room.slug) ui.setRoomToday({ kind: 'ready', today });
+}
+
+/** 방이 바뀌면 이전 방 숫자가 잠깐이라도 보이지 않게 비우고 다시 읽어요 */
+function reloadRoomToday(delayMs = 0) {
+  ui.setRoomToday(net.keepsRoomStats ? { kind: 'loading' } : { kind: 'off' });
+  window.setTimeout(() => void refreshRoomToday(), delayMs);
 }
 
 let roomsCache: RoomInfo[] = [];
@@ -216,6 +247,8 @@ async function enter(p: store.Profile) {
   );
   // 연결이 늦어도 방 구경은 먼저 할 수 있게
   await Promise.race([connecting, wait(8000)]);
+  roomTime?.enter(room.slug);
+  reloadRoomToday(ROOM_TODAY_AFTER_ENTER_MS);
   if (room.slug !== DEFAULT_ROOM || roomFromUrl().slug) history.replaceState(null, '', `/r/${room.slug}`);
 
   await wait(700);
@@ -345,6 +378,7 @@ async function pickRoom(slug: string, push = true) {
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
     history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
+    reloadRoomToday();
     await loadRoomCommits();
     return;
   }
@@ -385,7 +419,9 @@ async function switchRoom(r: RoomInfo, push = true) {
   void loadRoomCommits();
   await Promise.race([net.switchRoom(r), wait(8000)]);
   switching = false;
-  ui.toast(`🚪 ${r.name}에 들어왔어요`, 'good');
+  roomTime?.enter(r.slug);
+  reloadRoomToday(ROOM_TODAY_AFTER_ENTER_MS);
+  ui.toast(enteredMessage(r), 'good', 4200);
   await wait(600);
   autoSeat(false);
 }
@@ -424,6 +460,12 @@ async function createRoom({ name, tags, isPublic, place, noise, password = '' }:
   else await pickRoom(r.slug);
   ui.toast(createdMessage(r, copied), 'good', 6000);
   return null;
+}
+
+/** 방을 옮겼을 때: 오늘 기록이 있으면 같이 알려줘요 (지금 아무도 없어도 다들 다녀간 곳이라는 걸) */
+function enteredMessage(r: RoomInfo): string {
+  const today = ui.roomTodayOf(r.slug);
+  return hasRoomRecord(today) ? `🚪 ${r.name}에 들어왔어요 · ${roomTodaySentence(today)}` : `🚪 ${r.name}에 들어왔어요`;
 }
 
 function createdMessage(r: RoomInfo, copied: boolean): string {
@@ -883,6 +925,7 @@ const STUDY_SINCE_DRIFT_MS = 30e3;
  */
 function addStudyTime(ms: number) {
   if (sessionAt(Date.now()).phase === 'focus') focusedThisSession += ms;
+  roomTime?.add(ms);
   const total = store.addStudyMs(ms);
   ui.setStudyToday(total);
   const now = Date.now();
@@ -951,6 +994,11 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
 }
 
 watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseChange });
+
+// 탭을 숨기거나 닫기 직전에 모아 둔 시간을 보내요 (닫히면 1분 미만은 버려져요)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') void roomTime?.flush();
+});
 
 // 진짜 키보드를 치면 내 아바타도 열심히 침 (무슨 키인지는 안 봐요)
 addEventListener('keydown', (e) => {
