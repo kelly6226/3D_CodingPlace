@@ -2,7 +2,7 @@
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
 import type { BusyHours, RoomToday, SeatTrace } from '../net/types';
 import { dailyIcs, googleCalendarUrl } from '../together/calendar';
-import { BREAK_MINUTES, FOCUS_MINUTES, clockText, type SessionState } from '../together/session';
+import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, clockText, type SessionState } from '../together/session';
 import { h } from './dom';
 
 /** 서버에서 읽는 기록의 상태. 데모 모드처럼 서버가 기록을 안 남기면 'off' */
@@ -76,11 +76,15 @@ export function renderSessionSection(v: TogetherView, now: number): HTMLElement 
     h(
       'div',
       { class: 'profile-stats' },
-      h('span', { class: 'profile-stat' }, `👥 지금 이 방 ${v.peopleHere}명`),
+      h('span', { class: 'profile-stat', id: 'tg-people' }, peopleHereText(v.peopleHere)),
       h('span', { class: 'profile-stat' }, v.sessionsToday > 0 ? `✅ 오늘 끝낸 세션 ${v.sessionsToday}개` : '✅ 오늘 첫 세션을 끝내 봐요'),
     ),
-    h('small', { class: 'form-hint' }, `매시 정각에 다 같이 시작해서 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 조금 늦게 와도 40분 넘게 있으면 세션 하나로 쳐요.`),
+    h('small', { class: 'form-hint' }, `매시 정각에 다 같이 시작해서 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 조금 늦게 와도 ${SESSION_DONE_MIN_MS / 60e3}분 넘게 있으면 세션 하나로 쳐요.`),
   );
+}
+
+export function peopleHereText(n: number): string {
+  return `👥 지금 이 방 ${n}명`;
 }
 
 /** 시트를 다시 그리지 않고 남은 시간과 진행 막대만 바꿔요 (매초 불러요) */
@@ -158,6 +162,11 @@ export function hourLabel(hour: number): string {
   return `밤 ${hour - 12}시`;
 }
 
+/** 이보다 평균 인원이 적으면 사실상 아무도 없는 시간으로 봐요 */
+const BUSY_EMPTY_PEOPLE = 0.05;
+/** 사람이 조금이라도 있던 시각은 막대가 안 보일 만큼 짧아지지 않게 (막대 높이 %) */
+const BUSY_BAR_MIN_PCT = 6;
+
 /** 이보다 평균 인원이 적으면 "붐비는 시간"이라고 부르지 않아요 */
 const BUSY_PEAK_MIN_PEOPLE = 0.5;
 /** 이보다 기록한 날이 적으면 "아직 정확하지 않아요"라고 덧붙여요 */
@@ -178,9 +187,15 @@ export function busyPeak(b: BusyHours | null): { hour: number; people: number } 
   return avg[hour] >= BUSY_PEAK_MIN_PEOPLE ? { hour, people: avg[hour] } : null;
 }
 
+/** 막대 높이(%): 가장 붐비는 시각이 100% */
+function barHeightPct(people: number, max: number): number {
+  if (max <= 0 || people <= 0) return 0;
+  return Math.max(BUSY_BAR_MIN_PCT, (people / max) * 100);
+}
+
 /** 평균 인원을 읽기 쉽게: 0.4명 / 3.2명 / 12명 */
 function peopleText(n: number): string {
-  if (n < 0.05) return '거의 없음';
+  if (n < BUSY_EMPTY_PEOPLE) return '거의 없음';
   return n < 10 ? `${n.toFixed(1)}명` : `${Math.round(n)}명`;
 }
 
@@ -213,7 +228,8 @@ export function renderBusySection(v: TogetherView, myHour: number | null): HTMLE
     const tags = [hour === v.nowHour ? '지금' : '', hour === myHour ? '내 시간' : ''].filter(Boolean).join(' · ');
     return `${hourLabel(hour)}${tags ? ` (${tags})` : ''} · 평균 ${peopleText(avg[hour])}`;
   };
-  const caption = h('p', { class: 'tg-busy-caption', 'aria-live': 'polite' }, '');
+  // 막대마다 같은 설명이 aria-label로 있어서, 이 줄은 화면에 보이는 사람을 위한 거예요 (읽어 주지 않게 live는 안 둬요)
+  const caption = h('p', { class: 'tg-busy-caption' }, '');
   const showDefault = () => (caption.textContent = `가장 붐비는 시간은 ${describe(peak.hour)}`);
   showDefault();
   const bars = avg.map((n, hour) =>
@@ -227,7 +243,7 @@ export function renderBusySection(v: TogetherView, myHour: number | null): HTMLE
         onfocus: () => (caption.textContent = describe(hour)),
         onclick: () => (caption.textContent = describe(hour)),
       },
-      h('i', { style: `height:${max > 0 ? Math.max(n > 0 ? 6 : 0, (n / max) * 100).toFixed(1) : 0}%` }),
+      h('i', { style: `height:${barHeightPct(n, max).toFixed(1)}%` }),
     ),
   );
   const chart = h('div', { class: 'tg-busy', role: 'group', 'aria-label': '시각별 평균 인원' }, ...bars);
@@ -281,7 +297,7 @@ export function renderMyHourSection(v: TogetherView, myHour: number | null, acti
   const busy = v.busyHours.kind === 'ready' ? v.busyHours.value : null;
   const people = busy && busy.days > 0 ? averagePeople(busy)[myHour] : null;
   const now = Date.now();
-  if (people !== null && people >= 0.05) box.append(h('p', { class: 'tg-lead' }, `이 방은 ${hourLabel(myHour)}에 보통 ${peopleText(people)} 있어요.`));
+  if (people !== null && people >= BUSY_EMPTY_PEOPLE) box.append(h('p', { class: 'tg-lead' }, `이 방은 ${hourLabel(myHour)}에 보통 ${peopleText(people)} 있어요.`));
   box.append(
     h(
       'div',
