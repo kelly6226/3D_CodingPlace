@@ -19,6 +19,18 @@ export type SyncState =
 /** 버튼을 누른 결과. 실패하면 화면에 그대로 보여줄 문구 */
 export type SyncOutcome = { ok: true } | { ok: false; reason: string };
 
+/** 링크로 들어왔을 때 '이 기록을 이어할까요?'에 보여줄 것 */
+export interface SyncPreview {
+  name: string;
+  color: string;
+  /** 시간이 쌓인 날 수 (잔디 칸 수) */
+  days: number;
+  /** 모든 날을 더한 시간(ms) */
+  totalMs: number;
+}
+
+export type SyncPreviewResult = { ok: true; preview: SyncPreview } | { ok: false; reason: string };
+
 /** 시작할 때 서버와 맞춘 결과 */
 export type SyncStart =
   | 'off'
@@ -171,6 +183,20 @@ export class DeviceSync {
     } catch (e) {
       // 코드가 지워졌으면(다른 기기에서 기록 지우기) 다음에 열 때 start()가 연결을 끊어요
       console.warn('[sync] 서버에 알리지 못했어요', e);
+    }
+  }
+
+  /** 이어하기 전에 그 코드의 기록을 미리 봐요. 이 기기에는 아무것도 저장하지 않아요 */
+  async preview(code: string): Promise<SyncPreviewResult> {
+    try {
+      // 아직 이 기기 번호가 없어서 임시 번호로 물어요 (서버는 이 번호를 기록하지 않아요)
+      const raw = await this.api.pull(code, store.randomId());
+      if (!raw) return { ok: false, reason: '이 링크의 기록을 찾을 수 없어요. 다른 기기에서 기록을 지웠을 수 있어요.' };
+      const { profile } = cleanRemote(raw, localSynced().profile);
+      const days = Object.values(cleanDays(raw.others)).filter((ms) => ms > 0);
+      return { ok: true, preview: { name: profile.name, color: profile.color, days: days.length, totalMs: days.reduce((a, b) => a + b, 0) } };
+    } catch (e) {
+      return { ok: false, reason: failureText(e) };
     }
   }
 

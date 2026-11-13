@@ -3,11 +3,16 @@
 // 사용자는 코드를 외우지 않아요. 내 링크를 카톡 '나와의 채팅' 같은 곳에 보내 두고, 다른 기기에서 그 링크를 열어요.
 // 20글자 코드는 링크를 못 열 때를 위해 접어 둬요.
 import { formatSyncCode } from '../sync/code';
-import type { SyncState } from '../sync/deviceSync';
+import type { SyncPreview, SyncState } from '../sync/deviceSync';
 import { h } from './dom';
+
+/** 링크로 들어왔을 때: 그 링크의 기록을 미리 보여주고 버튼 하나로 이어해요 */
+export type SyncArrival = { code: string } & ({ kind: 'loading' } | { kind: 'ready'; preview: SyncPreview } | { kind: 'error'; reason: string });
 
 /** 시트에 보여줄 것 */
 export interface SyncView {
+  /** 링크로 들어왔으면 그 링크의 기록. 있으면 다른 내용 대신 이것만 보여줘요 */
+  arrival: SyncArrival | null;
   state: SyncState;
   /** 코드 입력 칸에 적혀 있던 글자 (다시 그려도 이어 가요) */
   draft: string;
@@ -36,6 +41,8 @@ export interface SyncActions {
   openExternal(): void;
   unlink(): void;
   erase(): void;
+  /** 링크로 들어온 화면에서 '나중에' */
+  dismissArrival(): void;
 }
 
 /** 끝 네 글자만 보여줘요: ••••-••••-••••-••••-WXYZ */
@@ -44,11 +51,68 @@ function maskedCode(code: string): string {
   return [...groups.slice(0, -1).map((g) => '•'.repeat(g.length)), groups[groups.length - 1]].join('-');
 }
 
+/** 시트 머리글 */
+export function syncSheetTitle(v: Pick<SyncView, 'arrival'>): string {
+  return v.arrival ? '이 기기에서 이어할까요?' : '다른 기기에서 이어하기';
+}
+
 export function renderSyncSheet(v: SyncView, a: SyncActions): HTMLElement[] {
   const kakao = v.inKakao ? [renderKakaoNote(a)] : [];
   const error = v.error ? [h('p', { class: 'sync-error', role: 'alert' }, v.error)] : [];
+  if (v.arrival) return [...kakao, ...renderArrival(v.arrival, v, a), ...error];
   const body = v.state.kind === 'linked' ? renderLinked(v.state.code, v.state.shared, v, a) : renderUnlinked(v, a);
   return [...kakao, ...body, ...error];
+}
+
+/** "12시간 30분" / "45분" / "1분 미만" */
+function durationText(ms: number): string {
+  const min = Math.floor(ms / 60e3);
+  if (min < 1) return '1분 미만';
+  const hours = Math.floor(min / 60);
+  if (hours === 0) return `${min}분`;
+  return min % 60 === 0 ? `${hours}시간` : `${hours}시간 ${min % 60}분`;
+}
+
+/** 링크로 들어온 화면: 어떤 기록인지 보여주고, 할 일은 '이어하기' 하나만 */
+function renderArrival(arrival: SyncArrival, v: SyncView, a: SyncActions): HTMLElement[] {
+  const later = h('button', { type: 'button', class: 'ghost wide', onclick: () => a.dismissArrival() }, '나중에');
+  if (arrival.kind === 'error') {
+    return [h('p', { class: 'sync-error', role: 'alert' }, arrival.reason), later];
+  }
+  const card =
+    arrival.kind === 'loading'
+      ? h('div', { class: 'sync-arrival', 'aria-busy': 'true' }, h('p', { class: 'sync-lead' }, '기록을 불러오는 중이에요…'))
+      : h(
+          'div',
+          { class: 'sync-arrival' },
+          h('i', { class: 'sync-arrival-dot', style: `background:${arrival.preview.color}`, 'aria-hidden': 'true' }),
+          h(
+            'div',
+            {},
+            h('b', { class: 'sync-arrival-name' }, arrival.preview.name),
+            h(
+              'p',
+              { class: 'sync-lead' },
+              arrival.preview.days > 0 ? `잔디 ${arrival.preview.days}칸 · 모두 ${durationText(arrival.preview.totalMs)}` : '아직 쌓인 시간은 없어요',
+            ),
+          ),
+        );
+  return [
+    card,
+    h(
+      'button',
+      {
+        type: 'button',
+        // 카톡 안이면 '기본 브라우저로 열기'가 먼저라서 이 버튼은 한 단계 낮춰요
+        class: `${v.inKakao ? 'ghost' : 'primary'} wide sync-arrival-go`,
+        disabled: v.busy || arrival.kind !== 'ready',
+        onclick: () => a.join(arrival.code),
+      },
+      v.busy ? '이어하는 중…' : '이 기기에서 이어하기',
+    ),
+    h('small', { class: 'sheet-note' }, '이 기기의 닉네임과 캐릭터는 위 것으로 바뀌고, 이 기기에 쌓인 시간은 그 기록에 더해져요.'),
+    later,
+  ];
 }
 
 /** 카카오톡 안의 브라우저는 저장 공간이 따로라서, 기본 브라우저에서 연결하게 안내해요 */
