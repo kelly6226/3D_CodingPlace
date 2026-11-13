@@ -2731,3 +2731,86 @@ button.place-name {
     transition: none;
   }
 }
+
+/* ── 다른 기기에서 이어하기 ───────────────────────── */
+.sync-intro-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sync-open {
+  margin-top: 12px;
+}
+.sync-lead {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.sync-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.sync-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sync-row input::placeholder {
+  text-transform: none;
+  color: var(--muted);
+}
+.sync-row .primary,
+.sync-row .ghost {
+  flex: none;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.sync-code-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.sync-code {
+  flex: 1;
+  min-width: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+.sync-erase {
+  margin-top: 8px;
+  color: var(--danger);
+}
+.sync-error {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--danger);
+}
+/* 내용이 짧아서, 가운데 시트를 내용 높이만큼만 */
+.sheet.center.sheet-sync {
+  height: auto;
+  max-height: min(85vh, 720px, calc(100% - 16px));
+}
+.sync-join {
+  margin-top: 16px;
+}

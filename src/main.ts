@@ -4,6 +4,7 @@ import {
   CHAT_SEND_GAP_MS,
   CONTEXT_LOSS_TOAST_MS,
   DEFAULT_ROOM,
+  DEVICE_SYNC_ENABLED,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
   REPORTS_TO_HIDE,
@@ -29,6 +30,9 @@ import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
+import { SyncApi } from './sync/api';
+import { formatSyncCode, syncLink, takeSyncCodeFromUrl } from './sync/code';
+import { DeviceSync, type SyncStart } from './sync/deviceSync';
 import { RoomTimeReporter } from './together/roomTime';
 import { SeatTimeReporter } from './together/seatTime';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
@@ -56,6 +60,14 @@ ui.setSound(store.getSound());
 sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
+const isOnline = !!supabaseUrl && !!supabaseKey && params.get('demo') !== '1';
+
+/** 다른 기기에서 이어하기. 서버가 없으면(데모 모드) null */
+const deviceSync = isOnline && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(supabaseUrl!, supabaseKey!)) : null;
+/** 이어하기 링크(#sync=…)로 들어왔으면 그 코드. 주소에서는 바로 지워요 */
+const syncCodeFromLink = deviceSync ? takeSyncCodeFromUrl() : null;
 
 /** 주소에서 방 찾기: /r/<방>, 예전 형식 ?room=pangyo-2 도 받아줌 */
 function roomFromUrl(): { slug: string | null; instance: number } {
@@ -86,6 +98,8 @@ let seatTime: SeatTimeReporter | null = null;
 // ── 1. 폰트 → 3D 장면 준비 ─────────────────────────
 async function boot() {
   ui.setProgress(0.1);
+  // 다른 기기에서 바꾼 프로필을 입장 화면이 열려 있는 동안 받아와요 (폰트·3D 준비와 같이)
+  const syncStarting = startDeviceSync();
   const placesP = import('./world/places');
   const worldP = import('./world/world');
   try {
@@ -105,11 +119,9 @@ async function boot() {
   places = await placesP;
   ui.setProgress(0.35);
 
-  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
-  if (url && key && params.get('demo') !== '1') {
+  if (isOnline) {
     const { OnlineNet } = await import('./net/online');
-    net = new OnlineNet(url, key, profile.id);
+    net = new OnlineNet(supabaseUrl!, supabaseKey!, profile.id);
   } else {
     net = new DemoNet();
   }
@@ -149,7 +161,75 @@ async function boot() {
   window.setInterval(() => void refreshRoomToday(), ROOM_TODAY_REFRESH_MS);
   net.watchCounts((c) => ui.setCounts(c));
   await loadRoomCommits();
+  await syncStarting;
   ui.ready();
+  if (syncCodeFromLink) ui.openSync(syncCodeFromLink);
+}
+
+// ── 다른 기기에서 이어하기 ────────────────────────
+async function startDeviceSync() {
+  if (!deviceSync) return;
+  const result = await deviceSync.start();
+  showSyncStart(result);
+  ui.setSyncState(deviceSync.state());
+  deviceSync.startAutoFlush();
+}
+
+function showSyncStart(result: SyncStart) {
+  if (result === 'applied') ui.replaceIntroProfile(store.getProfile());
+  if (result === 'gone') ui.toast('다른 기기에서 이어하기 기록을 지워서, 이 기기도 연결을 끊었어요.', 'info', 6000);
+}
+
+async function createSyncCode() {
+  const result = await deviceSync!.create();
+  if (result.ok) {
+    ui.setSyncState(deviceSync!.state());
+    ui.toast('코드를 만들었어요. 다른 기기에서 이 코드를 넣으면 이어져요', 'good');
+  }
+  return result;
+}
+
+async function joinSyncCode(code: string) {
+  const result = await deviceSync!.join(code);
+  // 프로필·방 기록·화면을 처음부터 새 기록으로 맞추려고 새로 불러요
+  if (result.ok) location.reload();
+  return result;
+}
+
+async function unlinkSync() {
+  const ok = await ui.confirm('이 기기에서 연결을 끊을까요?', '이 기기의 기록은 그대로 남고, 앞으로는 다른 기기와 맞추지 않아요. 같은 코드로 다시 이어할 수 있어요.', '연결 끊기', '취소');
+  if (!ok) return;
+  deviceSync!.unlink();
+  ui.setSyncState(deviceSync!.state());
+  ui.toast('이 기기에서 연결을 끊었어요');
+}
+
+async function eraseSync() {
+  const ok = await ui.confirm(
+    '서버에 남은 기록을 지울까요?',
+    '이 코드로 저장한 프로필과 날짜별 시간을 서버에서 지워요. 되살릴 수 없고, 다른 기기들도 다음에 열 때 연결이 끊겨요. 각 기기에 있던 기록은 남아요.',
+    '지우기',
+    '취소',
+  );
+  if (!ok) return;
+  const result = await deviceSync!.erase();
+  if (!result.ok) {
+    ui.toast(result.reason, 'bad', 5000);
+    return;
+  }
+  ui.setSyncState(deviceSync!.state());
+  ui.toast('서버에 남은 기록을 지웠어요');
+}
+
+async function copySync(what: 'code' | 'link') {
+  const state = deviceSync?.state();
+  if (state?.kind !== 'linked') return;
+  const value = what === 'code' ? formatSyncCode(state.code) : syncLink(state.code);
+  if (!(await copyText(value))) {
+    ui.toast(value, 'info', 10000);
+    return;
+  }
+  ui.toast(what === 'code' ? '코드를 복사했어요. 남에게 보여주지 마세요' : '링크를 복사했어요. 내 다른 기기에서 열어 보세요', 'good');
 }
 
 // ── 정각 모각코: 방별 오늘 기록 ─────────────────
@@ -977,6 +1057,7 @@ const STUDY_SINCE_DRIFT_MS = 30e3;
  */
 function addStudyTime(ms: number) {
   const total = store.addStudyMs(ms);
+  store.addSyncMineMs(ms);
   ui.setStudyToday(total);
   const now = Date.now();
   if (Math.abs(studyTodayAt(self.studySince, now) - total) > STUDY_SINCE_DRIFT_MS) shareStudyTime(total, now);
@@ -1135,6 +1216,11 @@ ui.bind({
     ui.toast('프로필을 바꿨어요');
   },
   onReportCommit: (c) => void reportCommit(c),
+  onSyncCreate: createSyncCode,
+  onSyncJoin: joinSyncCode,
+  onSyncUnlink: () => void unlinkSync(),
+  onSyncErase: () => void eraseSync(),
+  onSyncCopy: (what) => void copySync(what),
   onReplayTips: showTips,
   onWave: (id) => {
     emote('wave', id);
