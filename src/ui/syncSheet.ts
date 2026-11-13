@@ -1,5 +1,7 @@
 // '다른 기기에서 이어하기' 시트의 내용
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
+// 사용자는 코드를 외우지 않아요. 내 링크를 카톡 '나와의 채팅' 같은 곳에 보내 두고, 다른 기기에서 그 링크를 열어요.
+// 20글자 코드는 링크를 못 열 때를 위해 접어 둬요.
 import { formatSyncCode } from '../sync/code';
 import type { SyncState } from '../sync/deviceSync';
 import { h } from './dom';
@@ -15,6 +17,10 @@ export interface SyncView {
   error: string;
   /** 코드를 가리지 않고 보여줄지 (화면 공유 중에 보이지 않게 처음엔 가려요) */
   revealed: boolean;
+  /** 이 브라우저에 공유 창이 있는지 (없으면 링크 복사로 대신해요) */
+  canShare: boolean;
+  /** 카카오톡 안의 브라우저인지 (여기서 연결하면 카톡 안에만 남아요) */
+  inKakao: boolean;
 }
 
 export interface SyncActions {
@@ -22,8 +28,12 @@ export interface SyncActions {
   join(code: string): void;
   draft(text: string): void;
   reveal(): void;
+  /** 공유 창으로 내 링크 보내기 (없으면 복사) */
+  share(): void;
   copyCode(): void;
   copyLink(): void;
+  /** 카카오톡 안의 브라우저에서 기본 브라우저로 다시 열기 */
+  openExternal(): void;
   unlink(): void;
   erase(): void;
 }
@@ -35,12 +45,23 @@ function maskedCode(code: string): string {
 }
 
 export function renderSyncSheet(v: SyncView, a: SyncActions): HTMLElement[] {
-  const error = v.error ? h('p', { class: 'sync-error', role: 'alert' }, v.error) : null;
-  if (v.state.kind === 'linked') return renderLinked(v.state.code, v, a, error);
-  return renderUnlinked(v, a, error);
+  const kakao = v.inKakao ? [renderKakaoNote(a)] : [];
+  const error = v.error ? [h('p', { class: 'sync-error', role: 'alert' }, v.error)] : [];
+  const body = v.state.kind === 'linked' ? renderLinked(v.state.code, v.state.shared, v, a) : renderUnlinked(v, a);
+  return [...kakao, ...body, ...error];
 }
 
-function renderUnlinked(v: SyncView, a: SyncActions, error: HTMLElement | null): HTMLElement[] {
+/** 카카오톡 안의 브라우저는 저장 공간이 따로라서, 기본 브라우저에서 연결하게 안내해요 */
+function renderKakaoNote(a: SyncActions): HTMLElement {
+  return h(
+    'div',
+    { class: 'sync-callout' },
+    h('span', {}, '지금 카카오톡 안에서 열려 있어요. 여기서 이어하면 카톡 안에서만 기억돼서, 사파리·크롬에서 다시 들어오면 처음부터예요.'),
+    h('button', { type: 'button', class: 'primary', onclick: () => a.openExternal() }, '기본 브라우저로 열기'),
+  );
+}
+
+function renderUnlinked(v: SyncView, a: SyncActions): HTMLElement[] {
   const input = h('input', {
     id: 'sync-code',
     value: v.draft,
@@ -52,12 +73,17 @@ function renderUnlinked(v: SyncView, a: SyncActions, error: HTMLElement | null):
     oninput: (e: Event) => a.draft((e.currentTarget as HTMLInputElement).value),
   });
   return [
-    h('p', { class: 'sync-lead' }, '코드 하나로 다른 기기에서도 같은 캐릭터, 잔디, 매일 오는 시간을 이어 써요. 이메일이나 비밀번호는 받지 않아요.'),
+    h(
+      'p',
+      { class: 'sync-lead' },
+      '회사에서 하던 걸 집에서, 노트북에서 하던 걸 폰에서 이어 써요. 캐릭터, 잔디, 매일 오는 시간이 따라가요. 이메일이나 비밀번호는 받지 않아요.',
+    ),
     h(
       'section',
       { class: 'tg-section' },
-      h('h3', { class: 'sheet-sub' }, '처음이면'),
-      h('button', { type: 'button', class: 'primary wide', disabled: v.busy, onclick: () => a.create() }, '이어하기 코드 만들기'),
+      h('h3', { class: 'sheet-sub' }, '여기서 처음 켜기'),
+      h('button', { type: 'button', class: 'primary wide', disabled: v.busy, onclick: () => a.create() }, '이어하기 켜기'),
+      h('small', { class: 'sheet-note' }, '켜면 내 링크가 생겨요. 그 링크를 카톡 나와의 채팅 같은 곳에 보내 두고, 다른 기기에서 열면 돼요.'),
     ),
     h(
       'form',
@@ -68,39 +94,55 @@ function renderUnlinked(v: SyncView, a: SyncActions, error: HTMLElement | null):
           a.join(input.value);
         },
       },
-      h('label', { for: 'sync-code', class: 'sheet-sub' }, '다른 기기에서 만든 코드가 있으면'),
+      h('label', { for: 'sync-code', class: 'sheet-sub' }, '다른 기기에서 이미 켰다면'),
+      h('p', { class: 'sync-lead' }, '나에게 보내 둔 링크를 이 기기에서 열면 끝이에요. 링크를 열 수 없으면 코드를 넣어 주세요.'),
       h('div', { class: 'sync-row' }, input, h('button', { type: 'submit', class: 'primary', disabled: v.busy }, '이어하기')),
-      h('small', { class: 'sheet-note' }, '이어하면 이 기기의 닉네임과 캐릭터가 그 코드의 것으로 바뀌고, 이 기기에 쌓인 시간은 그 기록에 더해져요. 페이지를 새로 불러와요.'),
+      h('small', { class: 'sheet-note' }, '이어하면 이 기기의 닉네임과 캐릭터가 그쪽 것으로 바뀌고, 이 기기에 쌓인 시간은 그 기록에 더해져요. 페이지를 새로 불러와요.'),
     ),
-    ...(error ? [error] : []),
   ];
 }
 
-function renderLinked(code: string, v: SyncView, a: SyncActions, error: HTMLElement | null): HTMLElement[] {
+function renderLinked(code: string, shared: boolean, v: SyncView, a: SyncActions): HTMLElement[] {
+  const sendLabel = v.canShare ? '내 링크 나에게 보내기' : '내 링크 복사';
+  const send = shared
+    ? h(
+        'section',
+        { class: 'tg-section' },
+        h('p', { class: 'sync-lead' }, '이어하기가 켜져 있어요. 다른 기기에서는 나에게 보내 둔 링크를 열면 돼요.'),
+        h(
+          'div',
+          { class: 'sync-row' },
+          h('button', { type: 'button', class: 'ghost', onclick: () => a.share() }, v.canShare ? '다시 보내기' : '링크 다시 복사'),
+          v.canShare ? h('button', { type: 'button', class: 'ghost', onclick: () => a.copyLink() }, '링크 복사') : null,
+        ),
+      )
+    : h(
+        'section',
+        { class: 'sync-callout' },
+        h('b', {}, '이제 내 링크를 나에게 보내 두세요'),
+        h('span', {}, '카톡 나와의 채팅이나 메모에 두면, 회사든 집이든 그 링크를 열어서 바로 이어할 수 있어요. 안 보내 두면 다른 기기에서 이어갈 방법이 없어요.'),
+        h('button', { type: 'button', class: 'primary', onclick: () => a.share() }, sendLabel),
+      );
   return [
+    send,
     h(
-      'section',
-      { class: 'tg-section' },
-      h('h3', { class: 'sheet-sub' }, '내 이어하기 코드'),
+      'details',
+      { class: 'tg-section sync-code-details' },
+      h('summary', { class: 'sheet-sub' }, '링크를 못 열 때: 코드로 이어하기'),
       h(
         'div',
         { class: 'sync-code-box' },
         h('code', { class: 'sync-code' }, v.revealed ? formatSyncCode(code) : maskedCode(code)),
         v.revealed ? null : h('button', { type: 'button', class: 'ghost-sm', onclick: () => a.reveal() }, '보기'),
+        h('button', { type: 'button', class: 'ghost-sm', onclick: () => a.copyCode() }, '복사'),
       ),
-      h(
-        'div',
-        { class: 'sync-row' },
-        h('button', { type: 'button', class: 'primary', onclick: () => a.copyCode() }, '코드 복사'),
-        h('button', { type: 'button', class: 'ghost', onclick: () => a.copyLink() }, '링크 복사'),
-      ),
-      h(
-        'small',
-        { class: 'sheet-note' },
-        '다른 기기에서 링크를 열거나, 👤 내 프로필 → 다른 기기에서 이어하기에 코드를 넣으면 돼요. ',
-        h('b', {}, '이 코드를 아는 사람은 누구나 내 기록을 이어 쓸 수 있어요.'),
-        ' 남에게 보여주지 말고, 잃어버리면 찾아드릴 수 없으니 따로 적어 두세요.',
-      ),
+      h('small', { class: 'sheet-note' }, '다른 기기의 👤 내 프로필 → 다른 기기에서 이어하기에 이 코드를 넣어도 돼요.'),
+    ),
+    h(
+      'small',
+      { class: 'sheet-note' },
+      h('b', {}, '링크와 코드를 아는 사람은 누구나 내 기록을 이어 쓸 수 있어요.'),
+      ' 단톡방이나 남에게는 보내지 마세요. 함께 쓰는 컴퓨터라면 다 쓰고 아래에서 연결을 끊어 주세요.',
     ),
     h(
       'section',
@@ -110,6 +152,5 @@ function renderLinked(code: string, v: SyncView, a: SyncActions, error: HTMLElem
       h('button', { type: 'button', class: 'ghost wide sync-erase', disabled: v.busy, onclick: () => a.erase() }, '서버에 남은 기록 지우기'),
       h('small', { class: 'sheet-note' }, '연결을 끊어도 이 기기의 기록은 남아요. 서버 기록을 지우면 다른 기기들도 다음에 열 때 연결이 끊겨요.'),
     ),
-    ...(error ? [error] : []),
   ];
 }

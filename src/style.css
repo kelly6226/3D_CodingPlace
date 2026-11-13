@@ -2858,3 +2858,77 @@ button.place-name {
 .sync-join {
   margin-top: 16px;
 }
+/* 이어하기 알리기: 👤 버튼의 점, 프로필 잔디 아래 안내, 새 기기 입장 화면 안내 */
+.hud-tools .icon-btn {
+  position: relative;
+}
+.sync-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 180, 90, 0.3);
+  background: rgba(242, 180, 90, 0.08);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sync-callout .primary {
+  min-height: 38px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.sync-callout.linked {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.sync-new {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+.intro-sync-hint {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(242, 180, 90, 0.3);
+  background: rgba(242, 180, 90, 0.08);
+  font-size: 13px;
+  text-align: center;
+}
+.intro-sync-hint .sync-intro-link {
+  color: var(--amber, #f2b45a);
+  font-weight: 700;
+}
+.sync-callout b {
+  font-size: 14px;
+}
+.sync-code-details {
+  margin-top: 14px;
+}
+.sync-code-details summary {
+  cursor: pointer;
+}
+.sync-code-details .sync-code-box {
+  margin-top: 8px;
+}
+.sheet-sync .sync-callout:first-child {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+@media (max-width: 640px) {
+  .sync-row input {
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+}
