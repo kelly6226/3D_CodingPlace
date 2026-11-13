@@ -2422,3 +2422,118 @@ button.place-name {
     animation: none;
   }
 }
+
+/* ── 🎯 같이 하는 시간 (정각 세션) ─────────────────── */
+.session-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 231, 135, 0.4);
+  background: rgba(10, 30, 18, 0.82);
+  backdrop-filter: blur(10px);
+  color: #c9f5cc;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.session-pill.break {
+  border-color: rgba(242, 180, 90, 0.45);
+  background: rgba(36, 26, 10, 0.86);
+  color: #f6cf93;
+}
+.session-pill:hover {
+  filter: brightness(1.15);
+}
+/* 처음 온 사람에게 눌러 볼 곳을 알려주는 점 (한 번 열면 사라져요) */
+.new-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.ir-session {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: #c9f5cc;
+}
+.ir-session:empty {
+  display: none;
+}
+.tg-now {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(126, 231, 135, 0.3);
+  background: rgba(126, 231, 135, 0.06);
+}
+.tg-now.break {
+  border-color: rgba(242, 180, 90, 0.35);
+  background: rgba(242, 180, 90, 0.07);
+}
+.tg-now-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tg-phase {
+  font-size: 15px;
+  font-weight: 800;
+}
+.tg-timer {
+  font-family: var(--mono);
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+}
+.tg-bar {
+  position: relative;
+  height: 8px;
+  margin: 10px 0 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.tg-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--mint);
+  border-radius: inherit;
+  transition: width 1s linear;
+}
+.tg-now.break .tg-bar-fill {
+  background: var(--amber);
+}
+/* 50분 지점: 여기부터 쉬는 시간 */
+.tg-bar-break {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--bg);
+}
+.tg-next {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tg-now .form-hint {
+  display: block;
+  margin-top: 10px;
+}
+@media (max-width: 640px) {
+  .session-pill {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-bar-fill {
+    transition: none;
+  }
+}

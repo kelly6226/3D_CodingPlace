@@ -32,13 +32,18 @@ import type { Look } from '../look';
 import type { Commit, NewRoom, PeerState } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
 import { studyTodayAt } from '../studyClock';
+import type { SessionState } from '../together/session';
 import { $, h } from './dom';
+import { paintSessionSection, renderSessionSection, sessionIntroText, sessionPillLabel, sessionPillText } from './together';
 import { enableDragScroll } from './dragScroll';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import {
   getPeerMeetCount,
+  getSessionsToday,
   getStudyHistory,
+  hasSeenTogether,
   kstDate,
+  markTogetherSeen,
   type Profile,
 } from '../store';
 
@@ -58,7 +63,7 @@ export interface ChatLine {
   whisperWith?: string;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'together';
 
 /** 방 만들기 화면에서 고른 것 (만든 사람 이름은 main.ts가 채워요) */
 export type RoomDraft = Omit<NewRoom, 'creator'>;
@@ -145,6 +150,8 @@ export class UI {
   private introWardrobe: Wardrobe | null = null;
   /** 시점이 처음에서 벗어났거나 내 캐릭터를 따라가는 중이면 true (시점 버튼이 어느 쪽으로 가는지) */
   private viewAway = false;
+  /** 지금 정각 세션 (main.ts가 매초 알려줘요) */
+  private session: SessionState | null = null;
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -174,6 +181,13 @@ export class UI {
             h('span', { class: 'sep' }, '·'),
             h('span', { id: 'study-today', title: '오늘 모각코한 총 시간', hidden: true }, ''),
           ),
+        ),
+        // 정각 세션: 누르면 '같이 하는 시간' 시트. 처음엔 점을 찍어 눌러 보게 해요
+        h(
+          'button',
+          { type: 'button', class: 'session-pill', id: 'session-btn', onclick: () => this.toggleSheet('together') },
+          h('span', { id: 'session-text' }, ''),
+          h('i', { class: 'new-dot', id: 'session-dot', hidden: hasSeenTogether(), 'aria-hidden': 'true' }),
         ),
         h('div', { class: 'mode-pill', id: 'mode', hidden: true }, ''),
       ),
@@ -391,6 +405,7 @@ export class UI {
           '다른 방',
         ),
       ),
+      h('div', { class: 'ir-session', id: 'ir-session' }, this.session ? sessionIntroText(this.session, Date.now()) : ''),
     );
   }
 
@@ -484,7 +499,7 @@ export class UI {
   setPeers(peers: PeerState[]) {
     this.peers = peers;
     $('#count').textContent = String(peers.length + 1);
-    if (this.sheet === 'people') this.renderSheet();
+    if (this.sheet === 'people' || this.sheet === 'together') this.renderSheet();
   }
 
   /** 위쪽 인원 표시 옆에 내가 이 방에 있은 시간, 사람 목록이 열려 있으면 각자의 시간도 (1초마다 불러요) */
@@ -501,6 +516,22 @@ export class UI {
     const el = $('#study-today');
     el.hidden = ms < 60e3;
     el.textContent = `오늘 ${elapsedText(ms)}째`;
+  }
+
+  /** 정각 세션 (매초). 단계가 바뀌면 시트를 다시 그리고, 아니면 글자만 바꿔요 */
+  setSession(s: SessionState) {
+    const phaseChanged = this.session?.phase !== s.phase;
+    this.session = s;
+    const now = Date.now();
+    const btn = $('#session-btn');
+    $('#session-text').textContent = sessionPillText(s, now);
+    btn.setAttribute('aria-label', sessionPillLabel(s, now));
+    btn.classList.toggle('break', s.phase === 'break');
+    const intro = document.getElementById('ir-session');
+    if (intro) intro.textContent = sessionIntroText(s, now);
+    if (this.sheet !== 'together') return;
+    if (phaseChanged) this.renderSheet();
+    else paintSessionSection($('#sheet'), s, now);
   }
 
   setViewState({ moved, following }: ViewState) {
@@ -828,6 +859,10 @@ export class UI {
     this.closeChat();
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
+    if (kind === 'together') {
+      markTogetherSeen();
+      $('#session-dot').hidden = true;
+    }
     this.sheet = kind;
     document.querySelectorAll('.act').forEach((b) => b.classList.remove('active'));
     $(`#act-${kind}`)?.classList.add('active');
@@ -857,7 +892,7 @@ export class UI {
     el.innerHTML = '';
     // 다시 그릴 때마다 클래스를 새로 정하니, 모양을 정하는 클래스는 모두 여기서 붙여요
     // 방 고르기와 커밋 방명록은 화면 가운데에 크게 (style.css .sheet.center, 방명록은 .wide로 더 넓게)
-    const centered = this.sheet === 'rooms' || this.sheet === 'commit';
+    const centered = this.sheet === 'rooms' || this.sheet === 'commit' || this.sheet === 'together';
     el.className = `sheet sheet-${this.sheet}` + (centered ? ' center' : '') + (this.sheet === 'commit' ? ' wide' : '');
     const head = (title: string, sub?: string) =>
       h('header', {}, h('h2', {}, title), sub ? h('p', {}, sub) : null, h('button', { class: 'x', onclick: () => this.closeSheet(), 'aria-label': '닫기' }, '✕'));
@@ -869,6 +904,14 @@ export class UI {
       }
       case 'noise': {
         this.renderNoise(el, head);
+        break;
+      }
+      case 'together': {
+        if (!this.session) break;
+        el.append(
+          head('🎯 같이 하는 시간', '매시 정각에 다 같이 시작해요'),
+          renderSessionSection({ session: this.session, sessionsToday: getSessionsToday(), peopleHere: this.peers.length + 1 }, Date.now()),
+        );
         break;
       }
       case 'status': {
@@ -1073,6 +1116,7 @@ export class UI {
             { class: 'profile-stats' },
             h('span', { class: 'profile-stat' }, streak > 0 ? `🔥 연속 ${streak}일째` : '🌱 오늘부터 시작해봐요'),
             h('span', { class: 'profile-stat' }, `⏱ 오늘 ${elapsedText(history[today] ?? 0)}`),
+            h('span', { class: 'profile-stat' }, `✅ 오늘 세션 ${getSessionsToday()}개`),
           ),
           this.renderStudyGraph(history),
           h('h3', { class: 'sheet-sub' }, '✏️ 정보 수정'),
