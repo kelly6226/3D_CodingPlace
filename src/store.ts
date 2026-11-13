@@ -1,4 +1,5 @@
-// 브라우저에만 남는 개인 기록 (프로필, 커피, 소리 설정)
+// 브라우저에 남는 개인 기록 (프로필, 커피, 소리 설정)
+// 이어하기 코드로 연결하면 일부(프로필, 내 모각코 시간, 배경 소리, 날짜별 시간)는 sync/deviceSync.ts가 서버와 맞춰요
 import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS, isNoiseId, type NoiseId } from './config';
 import { DEFAULT_OUTFIT, normalizeOutfit, type Outfit } from './look';
 
@@ -43,6 +44,23 @@ interface Saved {
   tracesHinted?: boolean;
   /** 오늘(KST) 들어가 본 방들. 방마다 하루 한 번만 '다녀감'으로 세려고 기억해요 */
   visited?: { date: string; rooms: string[] };
+  /** 다른 기기에서 이어하기 (sync/deviceSync.ts). 연결하지 않았으면 없어요 */
+  sync?: SyncLink;
+}
+
+/** 이 기기가 이어하기 코드로 연결된 상태 */
+export interface SyncLink {
+  code: string;
+  /** 이어하기에만 쓰는 이 기기의 번호 (방에서 쓰는 Profile.id와 따로예요) */
+  device: string;
+  /** 서버가 프로필·설정을 마지막으로 바꾼 시각. 이 기기가 마지막으로 맞췄을 때의 값이에요 */
+  at: string;
+  /** 그때 서버와 같았던 프로필·설정 (JSON). 지금 값과 다르면 이 기기에서 바꾼 거예요 */
+  snapshot: string;
+  /** 이 기기가 날짜별로 한 시간(ms). 연결하기 전 이 기기의 기록도 들어 있어요 */
+  mine: Record<string, number>;
+  /** mine을 아직 통째로 서버에 보내지 못했으면 true (그 뒤로는 최근 이틀만 보내요) */
+  sendAllDays: boolean;
 }
 
 export interface KnownPeer {
@@ -141,6 +159,18 @@ export function setRoomNoise(slug: string, id: NoiseId) {
   persist();
 }
 
+/** 방마다 고른 배경 소리 전부 (이어하기로 다른 기기와 맞출 때) */
+export function getNoiseChoices(): Record<string, NoiseId> {
+  const out: Record<string, NoiseId> = {};
+  for (const [slug, id] of Object.entries(cache.noise ?? {})) if (isNoiseId(id)) out[slug] = id;
+  return out;
+}
+
+export function setNoiseChoices(choices: Record<string, NoiseId>) {
+  cache.noise = { ...choices };
+  persist();
+}
+
 export function clearRoomNoise(slug: string) {
   if (!cache.noise || !(slug in cache.noise)) return;
   const saved = { ...cache.noise };
@@ -204,6 +234,12 @@ function pruneByCutoff(hist: Record<string, number>, days: number): Record<strin
   const out: Record<string, number> = {};
   for (const [d, ms] of Object.entries(hist)) if (d >= cutoff) out[d] = ms;
   return out;
+}
+
+/** 날짜별 누적 시간을 통째로 바꿔요 (이어하기: 다른 기기들 + 이 기기) */
+export function replaceStudyHistory(hist: Record<string, number>) {
+  cache.studyHistory = pruneByCutoff(hist, STUDY_HISTORY_DAYS);
+  persist();
 }
 
 export function getDemoCommits<T>(): T[] {
@@ -317,4 +353,32 @@ export function takeTracesHint(): boolean {
   cache.tracesHinted = true;
   persist();
   return true;
+}
+
+const SYNC_DEVICE_RE = /^[A-Za-z0-9_-]{8,40}$/;
+
+export function getSyncLink(): SyncLink | null {
+  const l = cache.sync;
+  if (!l || typeof l.code !== 'string' || typeof l.device !== 'string' || !SYNC_DEVICE_RE.test(l.device)) return null;
+  return { code: l.code, device: l.device, at: String(l.at ?? ''), snapshot: String(l.snapshot ?? ''), mine: { ...l.mine }, sendAllDays: l.sendAllDays !== false };
+}
+
+export function saveSyncLink(link: SyncLink) {
+  cache.sync = { ...link, mine: pruneByCutoff(link.mine, STUDY_HISTORY_DAYS) };
+  persist();
+}
+
+/** 이 기기에서만 연결을 끊어요 (이 기기의 기록은 남아요) */
+export function clearSyncLink() {
+  delete cache.sync;
+  persist();
+}
+
+/** 이어하기로 연결돼 있으면 이 기기가 오늘 한 시간에 더해요 (연결 안 돼 있으면 아무것도 안 해요) */
+export function addSyncMineMs(ms: number) {
+  const link = cache.sync;
+  if (!link) return;
+  const d = kstDate();
+  link.mine = pruneByCutoff({ ...link.mine, [d]: (link.mine?.[d] ?? 0) + ms }, STUDY_HISTORY_DAYS);
+  persist();
 }

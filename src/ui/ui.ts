@@ -54,6 +54,8 @@ import {
 import { enableDragScroll } from './dragScroll';
 import { loadPrivacyPolicy } from './privacy';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
+import { renderSyncSheet } from './syncSheet';
+import type { SyncOutcome, SyncState } from '../sync/deviceSync';
 import {
   getMyHour,
   getPeerMeetCount,
@@ -82,7 +84,7 @@ export interface ChatLine {
   whisperWith?: string;
 }
 
-export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'privacy' | 'together';
+export type SheetKind = 'rooms' | 'status' | 'emote' | 'commit' | 'people' | 'profile' | 'wardrobe' | 'noise' | 'privacy' | 'together' | 'sync';
 
 /** 방 만들기 화면에서 고른 것 (만든 사람 이름은 main.ts가 채워요) */
 export type RoomDraft = Omit<NewRoom, 'creator'>;
@@ -128,6 +130,15 @@ export interface UIHandlers {
   onCreateRoom(draft: RoomDraft): Promise<string | null>;
   /** 입장 버튼을 눌렀을 때, 입장 화면을 닫기 전에 불러요. 비밀번호 방이면 비밀번호를 확인하고, 못 들어가면 false */
   onUnlockRoom(): Promise<boolean>;
+  /** 이어하기 코드 만들기 */
+  onSyncCreate(): Promise<SyncOutcome>;
+  /** 받은 코드로 이어하기. 성공하면 main.ts가 페이지를 새로 불러요 */
+  onSyncJoin(code: string): Promise<SyncOutcome>;
+  /** 이 기기에서 연결 끊기 (확인 창은 main.ts가 띄워요) */
+  onSyncUnlink(): void;
+  /** 서버에 남은 기록 지우기 (확인 창은 main.ts가 띄워요) */
+  onSyncErase(): void;
+  onSyncCopy(what: 'code' | 'link'): void;
 }
 
 export class UI {
@@ -177,6 +188,12 @@ export class UI {
   private roomsToday: Record<string, RoomToday> = {};
   /** 지금 방이 보통 몇 시에 붐비는지 */
   private busyHours: BusyHoursState = { kind: 'loading' };
+  /** 다른 기기에서 이어하기 */
+  private syncState: SyncState = { kind: 'off' };
+  private syncDraft = '';
+  private syncBusy = false;
+  private syncError = '';
+  private syncRevealed = false;
 
   constructor(private root: HTMLElement) {
     root.append(
@@ -347,6 +364,12 @@ export class UI {
         h('a', { href: FEEDBACK_URL }, '피드백 보내기'),
         ' · ',
         this.privacyLink(),
+        h(
+          'span',
+          { id: 'intro-sync', hidden: this.syncState.kind === 'off' },
+          ' · ',
+          h('button', { type: 'button', class: 'sync-intro-link', onclick: () => this.openSync() }, '다른 기기에서 이어하기'),
+        ),
       ),
     );
     this.root.append(h('div', { class: 'intro', id: 'intro' }, form));
@@ -513,12 +536,26 @@ export class UI {
   private introBtn: HTMLButtonElement | null = null;
   private introBar: HTMLElement | null = null;
   private returning = false;
+  private progress = 0;
+  private isReady = false;
 
   setProgress(p: number) {
+    this.progress = p;
     if (this.introBar) this.introBar.style.width = `${Math.round(p * 100)}%`;
   }
 
+  /** 입장하기 전에 프로필이 바뀌면(다른 기기에서 이어받았을 때) 입장 화면을 새 프로필로 다시 그려요 */
+  replaceIntroProfile(profile: Profile) {
+    if (this.entered) return;
+    this.introWardrobe?.close();
+    document.getElementById('intro')?.remove();
+    this.showIntro(profile, true);
+    if (this.isReady) this.ready();
+    else this.setProgress(this.progress);
+  }
+
   ready() {
+    this.isReady = true;
     this.setProgress(1);
     if (this.introBtn) {
       this.introBtn.disabled = false;
@@ -566,6 +603,35 @@ export class UI {
     if (this.sheet !== 'people') return;
     for (const el of document.querySelectorAll<HTMLElement>('.people .since')) el.textContent = stayText(Number(el.dataset.joined));
     for (const el of document.querySelectorAll<HTMLElement>('.people .today')) el.textContent = todayText(Number(el.dataset.since));
+  }
+
+  /** 이어하기 상태가 바뀌면 (시작할 때, 코드를 만들거나 끊었을 때) */
+  setSyncState(state: SyncState) {
+    this.syncState = state;
+    this.syncError = '';
+    if (state.kind !== 'linked') this.syncRevealed = false;
+    const introLink = document.getElementById('intro-sync');
+    if (introLink) introLink.hidden = state.kind === 'off';
+    if (this.sheet === 'sync' || this.sheet === 'profile') this.renderSheet();
+  }
+
+  /** 이어하기 시트 열기. 링크로 받은 코드가 있으면 입력 칸에 넣어 둬요 */
+  openSync(code?: string) {
+    if (code) this.syncDraft = code;
+    this.syncError = '';
+    this.openSheet('sync');
+  }
+
+  /** 이어하기 버튼: 기다리는 동안 버튼을 막고, 실패하면 이유를 시트에 보여줘요 */
+  private async runSync(task: () => Promise<SyncOutcome>) {
+    if (this.syncBusy) return;
+    this.syncBusy = true;
+    this.syncError = '';
+    this.renderSheet();
+    const result = await task();
+    this.syncBusy = false;
+    if (!result.ok) this.syncError = result.reason;
+    if (this.sheet === 'sync') this.renderSheet();
   }
 
   /** 위쪽에 오늘 누적 공부 시간을 보여줘요. 1분 넘기 전엔 아직 숨겨요 */
@@ -974,7 +1040,7 @@ export class UI {
     el.innerHTML = '';
     // 다시 그릴 때마다 클래스를 새로 정하니, 모양을 정하는 클래스는 모두 여기서 붙여요
     // 방 고르기와 커밋 방명록은 화면 가운데에 크게 (style.css .sheet.center, 방명록은 .wide로 더 넓게)
-    const centered = this.sheet === 'rooms' || this.sheet === 'commit' || this.sheet === 'privacy';
+    const centered = this.sheet === 'rooms' || this.sheet === 'commit' || this.sheet === 'privacy' || this.sheet === 'sync';
     el.className = `sheet sheet-${this.sheet}` + (centered ? ' center' : '') + (this.sheet === 'commit' ? ' wide' : '');
     const head = (title: string, sub?: string) =>
       h('header', {}, h('h2', {}, title), sub ? h('p', {}, sub) : null, h('button', { class: 'x', onclick: () => this.closeSheet(), 'aria-label': '닫기' }, '✕'));
@@ -1247,11 +1313,40 @@ export class UI {
             },
             '처음 안내 다시 보기',
           ),
+          ...(this.syncState.kind === 'off'
+            ? []
+            : [h('button', { type: 'button', class: 'ghost wide sync-open', onclick: () => this.openSync() }, '📱 다른 기기에서 이어하기')]),
           h(
             'small',
             { class: 'sheet-note' },
-            '프로필은 이 브라우저에만 저장돼요. 다른 기기나 시크릿 창에서는 처음부터 시작해요. · ',
+            this.syncState.kind === 'linked'
+              ? '이어하기 코드로 연결돼 있어서 다른 기기와 같은 기록을 써요. · '
+              : '프로필은 이 브라우저에만 저장돼요. 다른 기기나 시크릿 창에서는 처음부터 시작해요. · ',
             h('a', { href: FEEDBACK_URL }, '피드백 보내기'),
+          ),
+        );
+        break;
+      }
+      case 'sync': {
+        el.append(
+          head('다른 기기에서 이어하기'),
+          ...renderSyncSheet(
+            { state: this.syncState, draft: this.syncDraft, busy: this.syncBusy, error: this.syncError, revealed: this.syncRevealed },
+            {
+              create: () => void this.runSync(() => this.h.onSyncCreate()),
+              join: (code) => void this.runSync(() => this.h.onSyncJoin(code)),
+              draft: (text) => {
+                this.syncDraft = text;
+              },
+              reveal: () => {
+                this.syncRevealed = true;
+                this.renderSheet();
+              },
+              copyCode: () => this.h.onSyncCopy('code'),
+              copyLink: () => this.h.onSyncCopy('link'),
+              unlink: () => this.h.onSyncUnlink(),
+              erase: () => this.h.onSyncErase(),
+            },
           ),
         );
         break;
