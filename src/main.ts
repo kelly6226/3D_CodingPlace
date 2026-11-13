@@ -32,8 +32,9 @@ import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
 import { SyncApi } from './sync/api';
-import { formatSyncCode, syncLink, takeSyncCodeFromUrl } from './sync/code';
+import { formatSyncCode, parseSyncCode, syncLink, takeSyncCodeFromUrl } from './sync/code';
 import { DeviceSync, type SyncStart } from './sync/deviceSync';
+import { canShareLink, kakaoExternalUrl } from './sync/env';
 import { RoomTimeReporter } from './together/roomTime';
 import { SeatTimeReporter } from './together/seatTime';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
@@ -170,7 +171,7 @@ async function boot() {
   await loadRoomCommits();
   await syncStarting;
   ui.ready();
-  if (syncCodeFromLink) ui.openSync(syncCodeFromLink);
+  if (syncCodeFromLink) openSyncLink(syncCodeFromLink);
 }
 
 // ── 다른 기기에서 이어하기 ────────────────────────
@@ -182,18 +183,69 @@ async function startDeviceSync() {
   deviceSync.startAutoFlush();
 }
 
+/** 이어하기를 아직 안 켰고 안내 창도 안 열어 봤으면, 기록이 쌓인 순간에 알려줘요 (하루 한 번, 모두 세 번까지) */
+function shouldNudgeSync(): boolean {
+  return deviceSync?.state().kind === 'unlinked' && !store.hasSeenSync() && store.takeSyncNudge();
+}
+
 function showSyncStart(result: SyncStart) {
   if (result === 'applied') ui.replaceIntroProfile(store.getProfile());
   if (result === 'gone') ui.toast('다른 기기에서 이어하기 기록을 지워서, 이 기기도 연결을 끊었어요.', 'info', 6000);
 }
 
+/** 이어하기 링크로 들어왔을 때. 이미 연결된 기기면 다시 묻지 않아요 */
+function openSyncLink(code: string) {
+  const state = deviceSync!.state();
+  if (state.kind === 'linked' && state.code === code) {
+    ui.toast('이 기기는 이미 이어져 있어요', 'good');
+    return;
+  }
+  ui.openSync(code);
+  if (state.kind === 'linked') {
+    ui.toast('이 기기는 다른 이어하기에 연결돼 있어요. 이 링크로 바꾸려면 먼저 연결을 끊어 주세요', 'info', 7000);
+  }
+}
+
 async function createSyncCode() {
   const result = await deviceSync!.create();
-  if (result.ok) {
-    ui.setSyncState(deviceSync!.state());
-    ui.toast('코드를 만들었어요. 다른 기기에서 이 코드를 넣으면 이어져요', 'good');
-  }
+  // 시트가 '나에게 보내기'로 바뀌어서, 다음에 할 일은 거기서 알려줘요
+  if (result.ok) ui.setSyncState(deviceSync!.state());
   return result;
+}
+
+/** 내 링크를 공유 창으로 보내요. 공유 창이 없거나 실패하면 복사로 대신해요 */
+async function shareSyncLink() {
+  const state = deviceSync?.state();
+  if (state?.kind !== 'linked') return;
+  if (!canShareLink()) {
+    await copySync('link');
+    return;
+  }
+  try {
+    await navigator.share({
+      title: '온라인 모각코 이어하기',
+      text: '온라인 모각코 이어하기 링크예요. 다른 기기에서 열면 내 캐릭터와 잔디가 이어져요. 남에게는 보내지 마세요.',
+      url: syncLink(state.code),
+    });
+    markSyncShared();
+    ui.toast('보냈어요. 다른 기기에서 이 링크를 열면 이어져요', 'good');
+  } catch (e) {
+    // 사용자가 공유 창을 닫은 거면 아무것도 안 해요
+    if (e instanceof DOMException && e.name === 'AbortError') return;
+    await copySync('link');
+  }
+}
+
+function markSyncShared() {
+  store.markSyncShared();
+  ui.setSyncState(deviceSync!.state());
+}
+
+/** 카카오톡 안의 브라우저에서 이 페이지(링크로 왔으면 그 코드까지)를 기본 브라우저로 다시 열어요 */
+function openSyncExternal(draft: string) {
+  const code = parseSyncCode(draft);
+  const url = code ? syncLink(code) : location.href;
+  location.href = kakaoExternalUrl(url);
 }
 
 async function joinSyncCode(code: string) {
@@ -245,7 +297,9 @@ async function copySync(what: 'code' | 'link') {
     ui.toast(value, 'info', 10000);
     return;
   }
-  ui.toast(what === 'code' ? '코드를 복사했어요. 남에게 보여주지 마세요' : '링크를 복사했어요. 내 다른 기기에서 열어 보세요', 'good');
+  // 복사했으면 어딘가에 붙여 둘 거라 보고, '아직 안 보냈어요' 안내를 그만해요
+  markSyncShared();
+  ui.toast(what === 'code' ? '코드를 복사했어요. 남에게 보여주지 마세요' : '복사했어요. 카톡 나와의 채팅이나 메모에 붙여 두세요', 'good');
 }
 
 // ── 정각 모각코: 방별 오늘 기록 ─────────────────
@@ -1129,9 +1183,11 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
     const n = store.addSessionDone();
     meAvatar().emote('✅', `${n}칸째`);
     ui.toast(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
-    // 한 칸 채운 직후에, 아직 내 시간을 안 정했으면 하루 한 번 알려줘요
+    // 한 칸 채운 직후에 안내를 하나만: 아직 내 시간을 안 정했으면 그것부터, 아니면 이어하기
     if (store.getMyHour() === null && store.takeMyHourNudge()) {
       window.setTimeout(() => ui.toast("내일도 이 시간에 올 거면 왼쪽 위 '집중' 버튼에서 매일 오는 시간을 정해 두세요", 'info', 7000), NUDGE_DELAY_MS);
+    } else if (shouldNudgeSync()) {
+      window.setTimeout(() => ui.toast('📱 오늘 기록은 이 브라우저에만 남아요. 회사·집, 폰에서도 이어 쓰려면 오른쪽 위 👤에서 이어하기를 켜 두세요', 'info', 8000), NUDGE_DELAY_MS);
     }
     return;
   }
@@ -1220,6 +1276,8 @@ ui.bind({
   onSyncUnlink: () => void unlinkSync(),
   onSyncErase: () => void eraseSync(),
   onSyncCopy: (what) => void copySync(what),
+  onSyncShare: () => void shareSyncLink(),
+  onSyncOpenExternal: openSyncExternal,
   onReplayTips: showTips,
   onWave: (id) => {
     emote('wave', id);

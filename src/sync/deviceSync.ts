@@ -10,7 +10,11 @@ import { DAY_MS, cleanDays, cleanProfile, cleanRemote, type Remote, type SyncedP
 import * as store from '../store';
 
 /** 화면이 알아야 하는 상태. 서버가 없으면(데모 모드) 'off' */
-export type SyncState = { kind: 'off' } | { kind: 'unlinked' } | { kind: 'linked'; code: string };
+export type SyncState =
+  | { kind: 'off' }
+  | { kind: 'unlinked' }
+  /** shared: 링크나 코드를 나에게 보내 둔 적 있는지 (없으면 다른 기기에서 이어갈 방법이 없어요) */
+  | { kind: 'linked'; code: string; shared: boolean };
 
 /** 버튼을 누른 결과. 실패하면 화면에 그대로 보여줄 문구 */
 export type SyncOutcome = { ok: true } | { ok: false; reason: string };
@@ -93,7 +97,7 @@ export class DeviceSync {
 
   state(): SyncState {
     const link = store.getSyncLink();
-    return link ? { kind: 'linked', code: link.code } : { kind: 'unlinked' };
+    return link ? { kind: 'linked', code: link.code, shared: link.shared } : { kind: 'unlinked' };
   }
 
   /**
@@ -184,6 +188,7 @@ export class DeviceSync {
         snapshot: snapshotOf(local),
         mine: store.getStudyHistory(),
         sendAllDays: true,
+        shared: false,
       });
     } catch (e) {
       return { ok: false, reason: failureText(e) };
@@ -207,7 +212,8 @@ export class DeviceSync {
       const remote = cleanRemote(raw, localSynced().profile);
       const mine = store.getStudyHistory();
       applyToLocal(remote);
-      store.saveSyncLink({ code, device, at: remote.updatedAt, snapshot: snapshotOf(remote), mine, sendAllDays: true });
+      // 받은 링크나 코드로 이어한 기기는 이미 어딘가에 링크를 갖고 있어서 '보냈다'로 봐요
+      store.saveSyncLink({ code, device, at: remote.updatedAt, snapshot: snapshotOf(remote), mine, sendAllDays: true, shared: true });
       store.replaceStudyHistory(mergeDays(cleanDays(raw.others), mine));
     } catch (e) {
       return { ok: false, reason: failureText(e) };

@@ -46,6 +46,10 @@ interface Saved {
   visited?: { date: string; rooms: string[] };
   /** 다른 기기에서 이어하기 (sync/deviceSync.ts). 연결하지 않았으면 없어요 */
   sync?: SyncLink;
+  /** '다른 기기에서 이어하기' 창을 열어 본 적 있는지 (처음엔 👤 버튼에 점을 찍어 알려요) */
+  syncSeen?: boolean;
+  /** '다른 기기에서도 이어 쓰려면' 안내를 마지막으로 보여준 날과 지금까지 보여준 횟수 */
+  syncNudged?: { date: string; count: number };
 }
 
 /** 이 기기가 이어하기 코드로 연결된 상태 */
@@ -61,6 +65,8 @@ export interface SyncLink {
   mine: Record<string, number>;
   /** mine을 아직 통째로 서버에 보내지 못했으면 true (그 뒤로는 최근 이틀만 보내요) */
   sendAllDays: boolean;
+  /** 이어하기 링크나 코드를 나에게 보내거나 복사한 적 있는지. 없으면 다른 기기에서 이어갈 수 없어서 계속 알려요 */
+  shared: boolean;
 }
 
 export interface KnownPeer {
@@ -360,11 +366,18 @@ const SYNC_DEVICE_RE = /^[A-Za-z0-9_-]{8,40}$/;
 export function getSyncLink(): SyncLink | null {
   const l = cache.sync;
   if (!l || typeof l.code !== 'string' || typeof l.device !== 'string' || !SYNC_DEVICE_RE.test(l.device)) return null;
-  return { code: l.code, device: l.device, at: String(l.at ?? ''), snapshot: String(l.snapshot ?? ''), mine: { ...l.mine }, sendAllDays: l.sendAllDays !== false };
+  return { code: l.code, device: l.device, at: String(l.at ?? ''), snapshot: String(l.snapshot ?? ''), mine: { ...l.mine }, sendAllDays: l.sendAllDays !== false, shared: l.shared === true };
 }
 
 export function saveSyncLink(link: SyncLink) {
   cache.sync = { ...link, mine: pruneByCutoff(link.mine, STUDY_HISTORY_DAYS) };
+  persist();
+}
+
+/** 이어하기 링크나 코드를 나에게 보냈어요 (보낸 뒤로는 '아직 안 보냈어요' 안내를 그만해요) */
+export function markSyncShared() {
+  if (!cache.sync || cache.sync.shared) return;
+  cache.sync.shared = true;
   persist();
 }
 
@@ -381,4 +394,28 @@ export function addSyncMineMs(ms: number) {
   const d = kstDate();
   link.mine = pruneByCutoff({ ...link.mine, [d]: (link.mine?.[d] ?? 0) + ms }, STUDY_HISTORY_DAYS);
   persist();
+}
+
+export function hasSeenSync(): boolean {
+  return cache.syncSeen === true;
+}
+
+export function markSyncSeen() {
+  if (cache.syncSeen) return;
+  cache.syncSeen = true;
+  persist();
+}
+
+/** 이어하기 안내는 하루 한 번, 모두 이만큼만 (계속 안 열어 보면 원하지 않는 걸로 보고 그만해요) */
+const SYNC_NUDGE_MAX = 3;
+
+/** '다른 기기에서도 이어 쓰려면' 안내를 보여줄 차례면 true를 돌려주고 보여줬다고 기억해요 */
+export function takeSyncNudge(): boolean {
+  const d = kstDate();
+  const prev = cache.syncNudged;
+  const count = typeof prev?.count === 'number' ? prev.count : 0;
+  if (prev?.date === d || count >= SYNC_NUDGE_MAX) return false;
+  cache.syncNudged = { date: d, count: count + 1 };
+  persist();
+  return true;
 }
