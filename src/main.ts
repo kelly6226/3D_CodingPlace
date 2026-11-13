@@ -31,7 +31,7 @@ import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
 import { RoomTimeReporter } from './together/roomTime';
 import { SeatTimeReporter } from './together/seatTime';
-import { SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
+import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
 import { hasRoomRecord, roomTodaySentence, seatTraceLine } from './ui/together';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
@@ -261,7 +261,7 @@ async function enter(p: store.Profile) {
   world.addAvatar(self, true);
   ui.setSelf(self);
   ui.setStudyToday(store.getStudyMsToday());
-  startStudyClock({ onElapsed: addStudyTime, onSkipped: skipAsleepTime });
+  startStudyClock({ onElapsed: onStudyElapsed, onSkipped: skipAsleepTime });
 
   const connecting = net.connect(
     self,
@@ -329,7 +329,7 @@ function showTips() {
       {
         emoji: '🎯',
         title: '정각에 다 같이 시작해요',
-        body: '매시 정각부터 50분 집중하고 10분 쉬어요. 누르면 오늘 이 방 기록, 사람이 많이 오는 시간, 내 모각코 시간 정하기가 있어요.',
+        body: `매시 정각부터 ${FOCUS_MINUTES}분 집중하고 ${BREAK_MINUTES}분 쉬어요. 누르면 오늘 이 방 기록, 사람이 많이 오는 시간, 내 모각코 시간 정하기가 있어요.`,
         target: () => document.getElementById('session-btn'),
       },
       {
@@ -976,13 +976,18 @@ const STUDY_SINCE_DRIFT_MS = 30e3;
  * 방 사람들에게는 매번 보내지 않아요. 기준 시각(studySince)을 한 번 알면 각자 화면에서 계산해요
  */
 function addStudyTime(ms: number) {
-  if (sessionAt(Date.now()).phase === 'focus') focusedThisSession += ms;
-  roomTime?.add(ms);
-  seatTime?.add(ms, room.slug, self.seat);
   const total = store.addStudyMs(ms);
   ui.setStudyToday(total);
   const now = Date.now();
   if (Math.abs(studyTodayAt(self.studySince, now) - total) > STUDY_SINCE_DRIFT_MS) shareStudyTime(total, now);
+}
+
+/** studyClock이 실제로 흐른 시간을 알려줄 때: 오늘 누적, 정각 세션, 방·자리 기록에 각각 나눠 줘요 */
+function onStudyElapsed(ms: number) {
+  addStudyTime(ms);
+  if (sessionAt(Date.now()).phase === 'focus') focusedThisSession += ms;
+  roomTime?.add(ms);
+  seatTime?.add(ms, room.slug, self.seat);
 }
 
 /** 노트북을 덮었다 연 것처럼 오래 멈췄던 시간은 오늘 누적에도, 이 방에 있은 시간(⏱)에도 넣지 않아요 */
@@ -1027,7 +1032,7 @@ function onFrame(dt: number) {
 /** 세션 끝 토스트 다음에 안내 토스트를 띄우기까지 */
 const NUDGE_DELAY_MS = 2500;
 
-/** 이번 집중 시간에 실제로 있었던 시간(ms). 40분을 넘기면 세션 하나를 끝낸 걸로 쳐요 */
+/** 이번 집중 시간에 실제로 있었던 시간(ms). SESSION_DONE_MIN_MS를 넘기면 세션 하나를 끝낸 걸로 쳐요 */
 let focusedThisSession = 0;
 
 /** 집중 ↔ 휴식이 바뀔 때: 끝낸 세션을 세고, 알림음과 함께 알려줘요. 입장 전에는 조용히 */
@@ -1037,13 +1042,13 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
   if (!self) return;
   sound.chime();
   if (next.phase === 'focus') {
-    ui.toast('🎯 정각이에요. 지금부터 50분, 다 같이 집중해요', 'good', 5000);
+    ui.toast(`🎯 정각이에요. 지금부터 ${FOCUS_MINUTES}분, 다 같이 집중해요`, 'good', 5000);
     return;
   }
   if (finished) {
     const n = store.addSessionDone();
     meAvatar().emote('✅', `세션 ${n}`);
-    ui.toast(`✅ 세션 끝! 오늘 ${n}번째예요. 10분 쉬고 정각에 다시 시작해요`, 'good', 6000);
+    ui.toast(`✅ 세션 끝! 오늘 ${n}번째예요. ${BREAK_MINUTES}분 쉬고 정각에 다시 시작해요`, 'good', 6000);
     // 세션을 끝낸 기분 좋은 때에, 아직 내 시간을 안 정했으면 하루 한 번 알려줘요
     if (store.getMyHour() === null && store.takeMyHourNudge()) {
       window.setTimeout(() => ui.toast("🙋 내일도 이 시간에 올래요? 왼쪽 위 🎯 버튼에서 '내 모각코 시간'을 정할 수 있어요", 'info', 7000), NUDGE_DELAY_MS);

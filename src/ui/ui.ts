@@ -41,6 +41,7 @@ import {
   hourLabel,
   minutesText,
   paintSessionSection,
+  peopleHereText,
   renderBusySection,
   renderMyHourSection,
   renderSessionSection,
@@ -555,7 +556,10 @@ export class UI {
   setPeers(peers: PeerState[]) {
     this.peers = peers;
     $('#count').textContent = String(peers.length + 1);
-    if (this.sheet === 'people' || this.sheet === 'together') this.renderSheet();
+    if (this.sheet === 'people') this.renderSheet();
+    // 같이 하는 시간 시트는 시간 고르기 칸이 열려 있을 수 있어서, 다시 그리지 않고 인원 글자만 바꿔요
+    const people = document.getElementById('tg-people');
+    if (this.sheet === 'together' && people) people.textContent = peopleHereText(peers.length + 1);
   }
 
   /** 위쪽 인원 표시 옆에 내가 이 방에 있은 시간, 사람 목록이 열려 있으면 각자의 시간도 (1초마다 불러요) */

@@ -39,7 +39,7 @@ export function clockText(ms: number): string {
 export interface SessionWatchHandlers {
   /** 매초. 남은 시간 표시용 */
   onTick(s: SessionState): void;
-  /** 집중 ↔ 휴식이 바뀔 때 한 번 */
+  /** 집중 ↔ 휴식이 바뀔 때 한 번 (탭이 오래 잠들었다 깨서 다음 시간의 같은 단계로 건너뛰어도 불러요) */
   onPhaseChange(next: SessionState, prev: SessionState): void;
 }
 
