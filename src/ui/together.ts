@@ -1,11 +1,13 @@
 // '🎯 같이 하는 시간': 정각 세션 버튼(HUD)과 그 버튼으로 여는 시트
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
-import type { RoomToday } from '../net/types';
+import type { BusyHours, RoomToday } from '../net/types';
 import { BREAK_MINUTES, FOCUS_MINUTES, clockText, type SessionState } from '../together/session';
 import { h } from './dom';
 
-/** 방별 기록을 읽은 상태. 데모 모드처럼 서버가 기록을 안 남기면 'off' */
-export type RoomTodayState = { kind: 'off' } | { kind: 'loading' } | { kind: 'ready'; today: RoomToday | null };
+/** 서버에서 읽는 기록의 상태. 데모 모드처럼 서버가 기록을 안 남기면 'off' */
+export type Loaded<T> = { kind: 'off' } | { kind: 'loading' } | { kind: 'ready'; value: T | null };
+export type RoomTodayState = Loaded<RoomToday>;
+export type BusyHoursState = Loaded<BusyHours>;
 
 /** 시트에 보여줄 것 */
 export interface TogetherView {
@@ -16,6 +18,9 @@ export interface TogetherView {
   peopleHere: number;
   roomName: string;
   roomToday: RoomTodayState;
+  busyHours: BusyHoursState;
+  /** 지금 시각 (KST 0~23) */
+  nowHour: number;
 }
 
 const PHASE = {
@@ -111,15 +116,12 @@ export function roomTodaySentence(t: RoomToday): string {
 export function renderTodaySection(v: TogetherView): HTMLElement {
   const box = h('section', { class: 'tg-section', 'aria-label': '오늘 이 방' }, h('h3', { class: 'sheet-sub' }, `📊 오늘 ${v.roomName}`));
   const st = v.roomToday;
-  if (st.kind === 'off') {
-    box.append(h('p', { class: 'tg-empty' }, '실시간 서버에 연결되면 오늘 이 방에 다녀간 사람과 시간이 보여요.'));
+  if (st.kind !== 'ready') {
+    box.append(notReady(st.kind, '오늘 이 방에 다녀간 사람과 시간'));
     return box;
   }
-  if (st.kind === 'loading') {
-    box.append(h('p', { class: 'tg-empty' }, '불러오는 중…'));
-    return box;
-  }
-  if (!hasRoomRecord(st.today)) {
+  const today = st.value;
+  if (!hasRoomRecord(today)) {
     box.append(h('p', { class: 'tg-empty' }, '오늘은 아직 기록이 없어요. 오늘의 첫 기록을 남겨 봐요 🌱'));
     return box;
   }
@@ -127,10 +129,115 @@ export function renderTodaySection(v: TogetherView): HTMLElement {
     h(
       'div',
       { class: 'tg-tiles' },
-      h('div', { class: 'tg-tile' }, h('b', {}, `${st.today.visits}명`), h('small', {}, '다녀간 사람')),
-      h('div', { class: 'tg-tile' }, h('b', {}, minutesText(st.today.minutes)), h('small', {}, '다 같이 모각코한 시간')),
+      h('div', { class: 'tg-tile' }, h('b', {}, `${today.visits}명`), h('small', {}, '다녀간 사람')),
+      h('div', { class: 'tg-tile' }, h('b', {}, minutesText(today.minutes)), h('small', {}, '다 같이 모각코한 시간')),
     ),
     h('small', { class: 'form-hint' }, '누가 했는지는 남기지 않고 합계만 세요. 같은 사람이 다른 기기로 오면 두 번 세요. 5분마다 쌓여요.'),
+  );
+  return box;
+}
+
+/** 아직 못 읽었거나(loading) 서버가 기록을 안 남길 때(off) 보여줄 한 줄 */
+function notReady(kind: 'off' | 'loading', what: string): HTMLElement {
+  return h('p', { class: 'tg-empty' }, kind === 'off' ? `실시간 서버에 연결되면 ${what}이 보여요.` : '불러오는 중…');
+}
+
+/** 시각을 말로: 새벽 2시 / 오전 9시 / 낮 12시 / 오후 3시 / 저녁 7시 / 밤 10시 / 밤 12시 */
+export function hourLabel(hour: number): string {
+  if (hour === 0) return '밤 12시';
+  if (hour < 6) return `새벽 ${hour}시`;
+  if (hour < 12) return `오전 ${hour}시`;
+  if (hour === 12) return '낮 12시';
+  if (hour < 18) return `오후 ${hour - 12}시`;
+  if (hour < 21) return `저녁 ${hour - 12}시`;
+  return `밤 ${hour - 12}시`;
+}
+
+/** 이보다 평균 인원이 적으면 "붐비는 시간"이라고 부르지 않아요 */
+const BUSY_PEAK_MIN_PEOPLE = 0.5;
+/** 이보다 기록한 날이 적으면 "아직 정확하지 않아요"라고 덧붙여요 */
+const BUSY_FEW_DAYS = 3;
+
+/** 시각별 평균 인원 (분 합계 ÷ 기록한 날 수 ÷ 60) */
+export function averagePeople(b: BusyHours): number[] {
+  if (b.days < 1) return b.minutes.map(() => 0);
+  return b.minutes.map((m) => m / b.days / 60);
+}
+
+/** 가장 붐비는 시각. 기록이 거의 없으면 null */
+export function busyPeak(b: BusyHours | null): { hour: number; people: number } | null {
+  if (!b) return null;
+  const avg = averagePeople(b);
+  let hour = 0;
+  for (let i = 1; i < 24; i++) if (avg[i] > avg[hour]) hour = i;
+  return avg[hour] >= BUSY_PEAK_MIN_PEOPLE ? { hour, people: avg[hour] } : null;
+}
+
+/** 평균 인원을 읽기 쉽게: 0.4명 / 3.2명 / 12명 */
+function peopleText(n: number): string {
+  if (n < 0.05) return '거의 없음';
+  return n < 10 ? `${n.toFixed(1)}명` : `${Math.round(n)}명`;
+}
+
+/** 입장 화면 한 줄: "⏰ 이 방은 보통 밤 10시에 가장 붐벼요" */
+export function busyIntroText(b: BusyHours | null): string | null {
+  const peak = busyPeak(b);
+  return peak ? `⏰ 이 방은 보통 ${hourLabel(peak.hour)}에 가장 붐벼요 (평균 ${peopleText(peak.people)})` : null;
+}
+
+/**
+ * 시트의 '붐비는 시간' 칸: 시각별 평균 인원 막대 24개.
+ * 막대에 마우스를 올리거나 누르면 아래 설명 줄이 그 시각으로 바뀌어요 (기본은 가장 붐비는 시각).
+ */
+export function renderBusySection(v: TogetherView, myHour: number | null): HTMLElement {
+  const box = h('section', { class: 'tg-section', 'aria-label': '붐비는 시간' }, h('h3', { class: 'sheet-sub' }, '⏰ 이 방이 붐비는 시간'));
+  const st = v.busyHours;
+  if (st.kind !== 'ready') {
+    box.append(notReady(st.kind, '사람이 많이 오는 시간'));
+    return box;
+  }
+  const busy = st.value;
+  const peak = busyPeak(busy);
+  if (!busy || !peak) {
+    box.append(h('p', { class: 'tg-empty' }, '아직 기록이 쌓이는 중이에요. 며칠 지나면 사람이 많이 오는 시간이 보여요.'));
+    return box;
+  }
+  const avg = averagePeople(busy);
+  const max = Math.max(...avg);
+  const describe = (hour: number) => {
+    const tags = [hour === v.nowHour ? '지금' : '', hour === myHour ? '내 시간' : ''].filter(Boolean).join(' · ');
+    return `${hourLabel(hour)}${tags ? ` (${tags})` : ''} · 평균 ${peopleText(avg[hour])}`;
+  };
+  const caption = h('p', { class: 'tg-busy-caption', 'aria-live': 'polite' }, '');
+  const showDefault = () => (caption.textContent = `가장 붐비는 시간은 ${describe(peak.hour)}`);
+  showDefault();
+  const bars = avg.map((n, hour) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: ['tg-hour', hour === v.nowHour && 'now', hour === myHour && 'mine', hour === peak.hour && 'peak'].filter(Boolean).join(' '),
+        'aria-label': describe(hour),
+        onpointerenter: () => (caption.textContent = describe(hour)),
+        onfocus: () => (caption.textContent = describe(hour)),
+        onclick: () => (caption.textContent = describe(hour)),
+      },
+      h('i', { style: `height:${max > 0 ? Math.max(n > 0 ? 6 : 0, (n / max) * 100).toFixed(1) : 0}%` }),
+    ),
+  );
+  const chart = h('div', { class: 'tg-busy', role: 'group', 'aria-label': '시각별 평균 인원' }, ...bars);
+  chart.addEventListener('pointerleave', showDefault);
+  box.append(
+    chart,
+    h('div', { class: 'tg-busy-axis', 'aria-hidden': 'true' }, ...[0, 6, 12, 18].map((hour) => h('span', { style: `--h:${hour}` }, `${hour}시`))),
+    caption,
+    h(
+      'small',
+      { class: 'form-hint' },
+      busy.days < BUSY_FEW_DAYS
+        ? `기록이 ${busy.days}일치라 아직 정확하지 않아요. 최근 14일 평균으로 보여줘요.`
+        : `최근 14일 중 기록이 있는 ${busy.days}일의 평균이에요. 진한 막대가 지금 시각이에요.`,
+    ),
   );
   return box;
 }

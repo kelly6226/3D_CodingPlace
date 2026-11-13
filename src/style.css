@@ -2592,3 +2592,77 @@ button.place-name {
   display: block;
   margin-top: 8px;
 }
+
+/* 붐비는 시간: 시각별 평균 인원 막대 24개 (한 가지 색, 지금 시각만 진하게) */
+.tg-busy {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  align-items: end;
+  height: 96px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--line);
+}
+.tg-hour {
+  position: relative;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: flex-end;
+}
+.tg-hour i {
+  display: block;
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--mint);
+  opacity: 0.45;
+}
+.tg-hour:hover i,
+.tg-hour:focus-visible i {
+  opacity: 0.8;
+}
+.tg-hour.now i {
+  opacity: 1;
+}
+/* 지금 시각: 막대 위에 점 (색만으로 구분하지 않게) */
+.tg-hour.now::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--fg);
+}
+/* 내 시간: 아래쪽에 전구색 밑줄 */
+.tg-hour.mine::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--amber);
+}
+.tg-busy-axis {
+  position: relative;
+  height: 16px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tg-busy-axis span {
+  position: absolute;
+  left: calc(var(--h) / 24 * 100%);
+}
+.tg-busy-caption {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
