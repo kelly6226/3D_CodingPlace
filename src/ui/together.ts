@@ -204,6 +204,18 @@ function barHeightPct(people: number, max: number): number {
   return Math.max(BUSY_BAR_MIN_PCT, (people / max) * 100);
 }
 
+/** '지금'과 '내 시간'이 이만큼 가까우면 글자가 겹쳐서 줄을 나눠요 */
+const MARK_NEAR_HOURS = 3;
+/** 이 시각보다 바깥쪽 막대 아래 글자는 가운데 맞춤하면 그래프 밖으로 잘려서, 끝에 붙여요 */
+const MARK_EDGE_HOURS = 2;
+
+/** '지금', '내 시간' 글자를 막대 가운데에 둘지, 양 끝 근처면 안쪽 끝에 붙일지 */
+function markAlign(hour: number): 'start' | 'end' | 'center' {
+  if (hour < MARK_EDGE_HOURS) return 'start';
+  if (hour >= 24 - MARK_EDGE_HOURS) return 'end';
+  return 'center';
+}
+
 /** 평균 인원을 읽기 쉽게: 0.4명 / 3.2명 / 12명 */
 function peopleText(n: number): string {
   if (n < BUSY_EMPTY_PEOPLE) return '거의 없음';
@@ -256,14 +268,16 @@ export function renderBusySection(v: TogetherView, myHour: number | null): HTMLE
   chart.addEventListener('pointerleave', () => (caption.textContent = peakText));
   // 지금 시각과 내 시간이 같으면 '지금'만 써요
   const marks = [{ hour: v.nowHour, text: '지금', cls: 'now' }];
-  if (myHour !== null && myHour !== v.nowHour) marks.push({ hour: myHour, text: '내 시간', cls: 'mine' });
+  // 두 글자가 가까우면 겹쳐서 '내 시간'은 한 줄 아래로 내려요
+  const mineCls = myHour !== null && Math.abs(myHour - v.nowHour) <= MARK_NEAR_HOURS ? 'mine lower' : 'mine';
+  if (myHour !== null && myHour !== v.nowHour) marks.push({ hour: myHour, text: '내 시간', cls: mineCls });
   box.append(
     chart,
     h(
       'div',
       { class: 'tg-busy-axis', 'aria-hidden': 'true' },
       ...[0, 6, 12, 18].map((hour) => h('span', { style: `--h:${hour}` }, `${hour}시`)),
-      ...marks.map((m) => h('span', { class: `mark ${m.cls}`, style: `--h:${m.hour}` }, m.text)),
+      ...marks.map((m) => h('span', { class: `mark ${m.cls} ${markAlign(m.hour)}`, style: `--h:${m.hour}` }, m.text)),
     ),
     caption,
     h('small', { class: 'tg-foot' }, busy.days < BUSY_FEW_DAYS ? `아직 ${busy.days}일치 기록이라 정확하지 않아요.` : '최근 2주 평균이에요.'),
