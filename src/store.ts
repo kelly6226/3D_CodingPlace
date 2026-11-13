@@ -31,6 +31,10 @@ interface Saved {
   roomKeys?: Record<string, StoredRoomKey>;
   /** 전에 만난 적 있는 사람들 (peer id → 몇 번 만났는지, 마지막으로 만난 시각). 오래된 것부터 밀려나요 */
   knownPeers?: Record<string, KnownPeer>;
+  /** 오늘(KST) 끝낸 정각 세션 수 */
+  sessions?: { date: string; count: number };
+  /** '🎯 같이 하는 시간' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
+  togetherSeen?: boolean;
 }
 
 export interface KnownPeer {
@@ -239,5 +243,28 @@ export function markPeerMet(id: string) {
   const ids = Object.keys(known).sort((a, b) => known[a].last - known[b].last);
   for (const old of ids.slice(0, Math.max(0, ids.length - KNOWN_PEERS_MAX))) delete known[old];
   cache.knownPeers = known;
+  persist();
+}
+
+export function getSessionsToday(): number {
+  const d = kstDate();
+  return cache.sessions?.date === d ? cache.sessions.count : 0;
+}
+
+/** 정각 세션을 하나 끝냈어요. 오늘 몇 번째인지 돌려줘요 */
+export function addSessionDone(): number {
+  const count = getSessionsToday() + 1;
+  cache.sessions = { date: kstDate(), count };
+  persist();
+  return count;
+}
+
+export function hasSeenTogether(): boolean {
+  return cache.togetherSeen === true;
+}
+
+export function markTogetherSeen() {
+  if (cache.togetherSeen) return;
+  cache.togetherSeen = true;
   persist();
 }

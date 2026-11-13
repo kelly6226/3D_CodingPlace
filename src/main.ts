@@ -29,6 +29,7 @@ import { DemoNet, randomHash } from './net/demo';
 import type { Commit, Net, NetEvent, PeerState } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
+import { SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
 import { Tips } from './ui/tips';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
@@ -243,6 +244,12 @@ function showTips() {
           const me = world.avatars.get(self.id);
           return me ? world.toScreen(me.position.clone().setY(2)) : null;
         },
+      },
+      {
+        emoji: '🎯',
+        title: '정각에 다 같이 시작해요',
+        body: '매시 정각부터 50분 집중하고 10분 쉬어요. 누르면 남은 시간과 오늘 끝낸 세션을 볼 수 있어요.',
+        target: () => document.getElementById('session-btn'),
       },
       {
         emoji: '💬',
@@ -875,6 +882,7 @@ const STUDY_SINCE_DRIFT_MS = 30e3;
  * 방 사람들에게는 매번 보내지 않아요. 기준 시각(studySince)을 한 번 알면 각자 화면에서 계산해요
  */
 function addStudyTime(ms: number) {
+  if (sessionAt(Date.now()).phase === 'focus') focusedThisSession += ms;
   const total = store.addStudyMs(ms);
   ui.setStudyToday(total);
   const now = Date.now();
@@ -918,6 +926,31 @@ function onFrame(dt: number) {
     for (const a of world.avatars.values()) a.renderTag();
   }
 }
+
+// ── 정각 세션 ─────────────────────────────────────
+/** 이번 집중 시간에 실제로 있었던 시간(ms). 40분을 넘기면 세션 하나를 끝낸 걸로 쳐요 */
+let focusedThisSession = 0;
+
+/** 집중 ↔ 휴식이 바뀔 때: 끝낸 세션을 세고, 알림음과 함께 알려줘요. 입장 전에는 조용히 */
+function onSessionPhaseChange(next: SessionState, prev: SessionState) {
+  const finished = prev.phase === 'focus' && focusedThisSession >= SESSION_DONE_MIN_MS;
+  focusedThisSession = 0;
+  if (!self) return;
+  sound.chime();
+  if (next.phase === 'focus') {
+    ui.toast('🎯 정각이에요. 지금부터 50분, 다 같이 집중해요', 'good', 5000);
+    return;
+  }
+  if (finished) {
+    const n = store.addSessionDone();
+    meAvatar().emote('✅', `세션 ${n}`);
+    ui.toast(`✅ 세션 끝! 오늘 ${n}번째예요. 10분 쉬고 정각에 다시 시작해요`, 'good', 6000);
+    return;
+  }
+  ui.toast('☕ 쉬는 시간이에요. 정각에 다시 다 같이 시작해요', 'info', 5000);
+}
+
+watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseChange });
 
 // 진짜 키보드를 치면 내 아바타도 열심히 침 (무슨 키인지는 안 봐요)
 addEventListener('keydown', (e) => {
