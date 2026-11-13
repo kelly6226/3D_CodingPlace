@@ -215,11 +215,9 @@ async function shareSyncLink() {
     return;
   }
   try {
-    await navigator.share({
-      title: '온라인 모각코 이어하기',
-      text: '온라인 모각코 이어하기 링크예요. 다른 기기에서 열면 내 캐릭터와 잔디가 이어져요. 남에게는 보내지 마세요.',
-      url: syncLink(state.code),
-    });
+    // 받는 앱마다 title·text·url을 붙이는 방식이 달라서(띄어쓰기 없이 이어 붙이는 앱도 있어요),
+    // 링크 뒤에 글자가 달라붙지 않게 안내 글과 링크를 한 덩어리로, 링크를 맨 끝 줄에 둬요
+    await navigator.share({ text: syncShareText(state.code) });
     markSyncShared();
     ui.toast('보냈어요. 다른 기기에서 이 링크를 열면 이어져요', 'good');
   } catch (e) {
@@ -227,6 +225,11 @@ async function shareSyncLink() {
     if (e instanceof DOMException && e.name === 'AbortError') return;
     await copySync('link');
   }
+}
+
+/** 나에게 보내는 글. 링크는 맨 끝 줄에 따로 (뒤에 아무것도 붙지 않게) */
+function syncShareText(code: string): string {
+  return `온라인 모각코 이어하기 링크예요. 다른 기기에서 열면 내 캐릭터와 잔디가 이어져요. 남에게는 보내지 마세요.\n${syncLink(code)}`;
 }
 
 function markSyncShared() {
