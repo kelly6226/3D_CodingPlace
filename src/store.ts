@@ -48,6 +48,8 @@ interface Saved {
   sync?: SyncLink;
   /** '다른 기기에서 이어하기' 창을 열어 본 적 있는지 (처음엔 👤 버튼에 점을 찍어 알려요) */
   syncSeen?: boolean;
+  /** 방금 링크로 이어하고 새로 불렀는지 (다음에 열 때 '이어졌어요'를 한 번 알려요) */
+  syncJustJoined?: boolean;
   /** '다른 기기에서도 이어 쓰려면' 안내를 마지막으로 보여준 날과 지금까지 보여준 횟수 */
   syncNudged?: { date: string; count: number };
 }
@@ -416,6 +418,20 @@ export function takeSyncNudge(): boolean {
   const count = typeof prev?.count === 'number' ? prev.count : 0;
   if (prev?.date === d || count >= SYNC_NUDGE_MAX) return false;
   cache.syncNudged = { date: d, count: count + 1 };
+  persist();
+  return true;
+}
+
+/** 이어하기를 마치고 새로 부르기 직전에 불러요 */
+export function markSyncJustJoined() {
+  cache.syncJustJoined = true;
+  persist();
+}
+
+/** 방금 이어했으면 true를 돌려주고 잊어요 (한 번만 알려요) */
+export function takeSyncJustJoined(): boolean {
+  if (!cache.syncJustJoined) return false;
+  delete cache.syncJustJoined;
   persist();
   return true;
 }

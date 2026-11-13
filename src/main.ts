@@ -182,6 +182,7 @@ function shouldNudgeSync(): boolean {
 }
 
 function showSyncStart(result: SyncStart) {
+  if (store.takeSyncJustJoined()) ui.toast('이어졌어요. 다른 기기에서 쓰던 캐릭터와 잔디예요', 'good', 5000);
   if (result === 'applied') ui.replaceIntroProfile(store.getProfile());
   if (result === 'gone') ui.toast('다른 기기에서 이어하기 기록을 지워서, 이 기기도 연결을 끊었어요.', 'info', 6000);
 }
@@ -193,10 +194,12 @@ function openSyncLink(code: string) {
     ui.toast('이 기기는 이미 이어져 있어요', 'good');
     return;
   }
-  ui.openSync(code);
   if (state.kind === 'linked') {
+    ui.openSync();
     ui.toast('이 기기는 다른 이어하기에 연결돼 있어요. 이 링크로 바꾸려면 먼저 연결을 끊어 주세요', 'info', 7000);
+    return;
   }
+  void ui.openSyncArrival(code);
 }
 
 async function createSyncCode() {
@@ -246,8 +249,11 @@ function openSyncExternal(draft: string) {
 
 async function joinSyncCode(code: string) {
   const result = await deviceSync!.join(code);
-  // 프로필·방 기록·화면을 처음부터 새 기록으로 맞추려고 새로 불러요
-  if (result.ok) location.reload();
+  // 프로필·방 기록·화면을 처음부터 새 기록으로 맞추려고 새로 불러요. 다시 열리면 '이어졌어요'를 알려요
+  if (result.ok) {
+    store.markSyncJustJoined();
+    location.reload();
+  }
   return result;
 }
 
@@ -1282,6 +1288,7 @@ ui.bind({
   onSyncCopy: (what) => void copySync(what),
   onSyncShare: () => void shareSyncLink(),
   onSyncOpenExternal: openSyncExternal,
+  onSyncPreview: (code) => deviceSync!.preview(code),
   onReplayTips: showTips,
   onWave: (id) => {
     emote('wave', id);
