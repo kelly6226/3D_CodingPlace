@@ -1,6 +1,6 @@
 // '🎯 같이 하는 시간': 정각 세션 버튼(HUD)과 그 버튼으로 여는 시트
 // ui.ts가 시트 틀(머리글, 스크롤)을 맡고, 여기서는 안의 내용만 그려요.
-import type { BusyHours, RoomToday } from '../net/types';
+import type { BusyHours, RoomToday, SeatTrace } from '../net/types';
 import { dailyIcs, googleCalendarUrl } from '../together/calendar';
 import { BREAK_MINUTES, FOCUS_MINUTES, clockText, type SessionState } from '../together/session';
 import { h } from './dom';
@@ -133,7 +133,11 @@ export function renderTodaySection(v: TogetherView): HTMLElement {
       h('div', { class: 'tg-tile' }, h('b', {}, `${today.visits}명`), h('small', {}, '다녀간 사람')),
       h('div', { class: 'tg-tile' }, h('b', {}, minutesText(today.minutes)), h('small', {}, '다 같이 모각코한 시간')),
     ),
-    h('small', { class: 'form-hint' }, '누가 했는지는 남기지 않고 합계만 세요. 같은 사람이 다른 기기로 오면 두 번 세요. 5분마다 쌓여요.'),
+    h(
+      'small',
+      { class: 'form-hint' },
+      '누가 했는지는 남기지 않고 합계만 세요. 같은 사람이 다른 기기로 오면 두 번 세요. 5분마다 쌓여요. 자리에 놓인 ☕ 컵은 최근 12시간 안에 다녀간 사람들의 흔적이에요.',
+    ),
   );
   return box;
 }
@@ -307,4 +311,17 @@ function downloadText(text: string, filename: string, type: string) {
   a.remove();
   // 바로 지우면 일부 브라우저가 받기 전에 끊겨서 잠시 뒤에 지워요
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** "2시간 전" / "35분 전" / "방금" */
+function agoText(at: number, now: number): string {
+  const min = Math.floor(Math.max(0, now - at) / 60e3);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분 전`;
+  return `${Math.floor(min / 60)}시간 전`;
+}
+
+/** 흔적(식은 커피잔)을 눌렀을 때: "☕ 2시간 전, 누군가 이 자리에서 1시간 40분 모각코하고 갔어요" */
+export function seatTraceLine(t: SeatTrace, now: number): string {
+  return `☕ ${agoText(t.leftAt, now)}, 누군가 이 자리에서 ${minutesText(t.minutes)} 모각코하고 갔어요`;
 }

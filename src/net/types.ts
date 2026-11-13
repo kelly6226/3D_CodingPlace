@@ -67,6 +67,15 @@ export interface BusyHours {
   minutes: number[];
 }
 
+/** 누가 앉았다 간 자리의 흔적. 누구였는지는 없어요 */
+export interface SeatTrace {
+  seat: string;
+  minutes: number;
+  startedAt: number;
+  /** 마지막으로 앉아 있던 시각 */
+  leftAt: number;
+}
+
 /** 방에 있던 시간 보고 (5분마다, 그리고 오늘 처음 들어왔을 때) */
 export interface RoomTimeReport {
   /** 0~5분 */
@@ -142,4 +151,8 @@ export interface Net {
   loadRoomsToday(): Promise<Record<string, RoomToday>>;
   /** 이 방이 보통 몇 시에 붐비는지. 못 읽으면 null */
   loadBusyHours(room: string): Promise<BusyHours | null>;
+  /** 이 자리에 앉아 있던 시간을 더해요 (1~5분). 실패해도 조용히 넘어가요 */
+  addSeatTime(room: string, seat: string, minutes: number): Promise<void>;
+  /** 최근 12시간 안에 10분 넘게 앉았던 자리들 */
+  loadSeatTraces(room: string): Promise<SeatTrace[]>;
 }

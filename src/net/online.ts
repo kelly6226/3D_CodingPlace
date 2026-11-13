@@ -25,10 +25,10 @@ import {
   type RoomInfo,
 } from '../config';
 import * as store from '../store';
-import type { BusyHours, Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState, RoomTimeReport, RoomToday } from './types';
+import type { BusyHours, Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState, RoomTimeReport, RoomToday, SeatTrace } from './types';
 import { maskIfBad } from './badwords';
 import { deriveRoomKey } from './roomKey';
-import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, cleanBusyHours, cleanRoomToday, cleanRoomsToday, text } from './validate';
+import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, cleanBusyHours, cleanRoomToday, cleanRoomsToday, cleanSeatTraces, text } from './validate';
 
 interface RoomRow {
   slug: string;
@@ -555,5 +555,26 @@ export class OnlineNet implements Net {
       return null;
     }
     return cleanBusyHours(data);
+  }
+
+  async addSeatTime(room: string, seat: string, minutes: number) {
+    if (!ROOM_SLUG_RE.test(room)) return;
+    const { error } = await this.sb.rpc('add_seat_time', {
+      p_room: room,
+      p_seat: seat,
+      p_minutes: Math.max(1, Math.min(5, Math.floor(minutes))),
+      p_check: store.getRoomKey(room)?.check ?? null,
+    });
+    if (error) console.warn('[seat time] 기록 실패', error.message);
+  }
+
+  async loadSeatTraces(room: string): Promise<SeatTrace[]> {
+    if (!ROOM_SLUG_RE.test(room)) return [];
+    const { data, error } = await this.sb.rpc('room_seat_traces', { p_room: room });
+    if (error) {
+      console.warn('[seat time] 흔적 읽기 실패', error.message);
+      return [];
+    }
+    return cleanSeatTraces(data);
   }
 }

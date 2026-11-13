@@ -740,3 +740,76 @@ $$;
 
 revoke all on function public.room_busy_hours(text) from public, anon, authenticated;
 grant execute on function public.room_busy_hours(text) to anon, authenticated;
+
+
+-- ── 7. 자리에 남은 흔적 ─────────────────────────────
+-- 누가 앉았던 자리에 식은 커피잔을 남겨서, 빈 방에 들어와도 다들 방금 다녀간 걸 보여줘요.
+-- 누구였는지는 남기지 않아요. 방 · 자리 · 언제부터 언제까지 · 몇 분만 있어요.
+-- 자리에 앉아 있는 동안 브라우저가 5분마다 add_seat_time을 불러요. 8분 넘게 소식이 없으면 일어난 걸로 봐요.
+-- 한 자리에는 가장 최근 흔적 하나만 남고, 2일 지난 흔적은 지워요. 호출 한도는 6번과 같이 써요.
+create table if not exists public.seat_traces (
+  room text not null check (room ~ '^[a-z0-9-]{3,32}$'),
+  seat text not null check (seat ~ '^[a-z0-9-]{1,32}$'),
+  started_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  minutes int not null default 0 check (minutes between 0 and 1440),
+  primary key (room, seat)
+);
+
+alter table public.seat_traces enable row level security;
+revoke all on public.seat_traces from anon, authenticated;
+
+create or replace function public.add_seat_time(p_room text, p_seat text, p_minutes int, p_check text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_room is null or p_room !~ '^[a-z0-9-]{3,32}$' or p_seat is null or p_seat !~ '^[a-z0-9-]{1,32}$' then
+    raise exception 'bad seat';
+  end if;
+  if p_minutes is null or p_minutes not between 1 and 5 then
+    raise exception 'bad minutes';
+  end if;
+  if not (public.is_builtin_room(p_room) or exists (select 1 from public.rooms where slug = p_room)) then
+    raise exception 'unknown room';
+  end if;
+  if public.room_is_locked(p_room) and not public.room_key_ok(p_room, p_check) then
+    raise exception 'wrong key';
+  end if;
+  if not public.together_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+  -- 8분 안에 다시 오면 같은 사람이 계속 앉아 있는 걸로 이어 세고, 아니면 새 흔적으로 시작해요
+  insert into public.seat_traces as t (room, seat, started_at, updated_at, minutes)
+  values (p_room, p_seat, now() - make_interval(mins => p_minutes), now(), p_minutes)
+  on conflict (room, seat) do update
+    set minutes = case when t.updated_at > now() - interval '8 minutes' then least(t.minutes + excluded.minutes, 1440) else excluded.minutes end,
+        started_at = case when t.updated_at > now() - interval '8 minutes' then t.started_at else excluded.started_at end,
+        updated_at = now();
+  if random() < 0.02 then
+    delete from public.seat_traces where updated_at < now() - interval '2 days';
+  end if;
+end;
+$$;
+
+-- 최근 12시간 안에 10분 넘게 앉았던 자리들 (가장 최근 것부터 40개)
+create or replace function public.room_seat_traces(p_room text)
+returns table (seat text, minutes int, started_at timestamptz, left_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.seat, t.minutes, t.started_at, t.updated_at
+  from public.seat_traces t
+  where t.room = p_room and t.updated_at > now() - interval '12 hours' and t.minutes >= 10
+  order by t.updated_at desc
+  limit 40;
+$$;
+
+revoke all on function public.add_seat_time(text, text, int, text) from public, anon, authenticated;
+grant execute on function public.add_seat_time(text, text, int, text) to anon, authenticated;
+revoke all on function public.room_seat_traces(text) from public, anon, authenticated;
+grant execute on function public.room_seat_traces(text) to anon, authenticated;

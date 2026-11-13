@@ -18,7 +18,7 @@ import {
 import { normalizeOutfit } from '../look';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskIfBad } from './badwords';
-import type { BusyHours, Commit, NetEvent, PeerState, RoomToday } from './types';
+import type { BusyHours, Commit, NetEvent, PeerState, RoomToday, SeatTrace } from './types';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const HASH_RE = /^[0-9a-f]{7}$/;
@@ -226,4 +226,33 @@ export function cleanBusyHours(raw: unknown): BusyHours | null {
     days: clamp(Math.floor(num(raw.days, 0)), 0, 14),
     minutes: raw.minutes.map((m) => clamp(Math.floor(num(m, 0)), 0, BUSY_HOUR_MINUTES_MAX)),
   };
+}
+
+const SEAT_RE = /^[a-z0-9-]{1,32}$/;
+/** DB가 돌려주는 최대 개수 (schema.sql 7번 room_seat_traces) */
+const SEAT_TRACES_MAX = 40;
+/** DB가 최근 12시간만 돌려줘요. 시계가 조금 다를 수 있어서 넉넉하게 */
+const SEAT_TRACE_MAX_AGE_MS = 13 * 3600e3;
+
+const time = (v: unknown) => (typeof v === 'string' ? Date.parse(v) : NaN);
+
+/** room_seat_traces의 결과. 자리 이름은 모양만 보고, 지금 장소에 있는 자리인지는 그리는 쪽이 확인해요 */
+export function cleanSeatTraces(raw: unknown): SeatTrace[] {
+  if (!Array.isArray(raw)) return [];
+  const now = Date.now();
+  const out: SeatTrace[] = [];
+  for (const row of raw.slice(0, SEAT_TRACES_MAX)) {
+    if (!isObj(row) || typeof row.seat !== 'string' || !SEAT_RE.test(row.seat)) continue;
+    const leftAt = time(row.left_at);
+    const startedAt = time(row.started_at);
+    if (!Number.isFinite(leftAt) || !Number.isFinite(startedAt)) continue;
+    if (leftAt < now - SEAT_TRACE_MAX_AGE_MS) continue;
+    out.push({
+      seat: row.seat,
+      minutes: clamp(Math.floor(num(row.minutes, 0)), 0, 1440),
+      startedAt: Math.min(startedAt, leftAt),
+      leftAt: Math.min(leftAt, now),
+    });
+  }
+  return out;
 }
