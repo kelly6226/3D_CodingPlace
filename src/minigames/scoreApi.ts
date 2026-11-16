@@ -23,6 +23,19 @@ export interface Board {
   me: { rank: number; score: number } | null;
 }
 
+/** 이번 주 1위 */
+export interface Leader {
+  name: string;
+  score: number;
+}
+
+/** 점수를 올린 뒤 이번 주 내 순위와 1위 */
+export interface SubmitResult {
+  rank: number;
+  score: number;
+  top: Leader | null;
+}
+
 /** 실패 이유. 화면 문구는 부르는 쪽(arcade.ts)이 정해요 */
 export type ScoreFailure = 'bad_name' | 'busy' | 'offline' | 'server';
 
@@ -44,6 +57,13 @@ function cleanRank(raw: unknown): { rank: number; score: number } | null {
   const { rank, score } = raw as Record<string, unknown>;
   if (!Number.isInteger(rank) || !Number.isInteger(score)) return null;
   return { rank: rank as number, score: score as number };
+}
+
+function cleanLeader(raw: unknown): Leader | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { name, score } = raw as Record<string, unknown>;
+  if (typeof name !== 'string' || !name.trim() || !Number.isInteger(score)) return null;
+  return { name: name.slice(0, 20), score: score as number };
 }
 
 function cleanRow(raw: unknown): BoardRow | null {
@@ -73,12 +93,24 @@ export class ScoreApi {
     private key: string,
   ) {}
 
-  /** 이번 판 점수를 올려요. 서버는 이번 주 내 최고 점수만 남기고, 내 순위를 돌려줘요 */
-  async submit(game: GameId, player: Player, score: number): Promise<{ rank: number; score: number }> {
+  /** 이번 판 점수를 올려요. 서버는 이번 주 내 최고 점수만 남기고, 내 순위와 1위를 돌려줘요 */
+  async submit(game: GameId, player: Player, score: number): Promise<SubmitResult> {
     const raw = await this.rpc('submit_game_score', { p_game: game, p_player: player.id, p_name: player.name, p_color: player.color, p_score: score });
     const ranked = cleanRank(raw);
     if (!ranked) throw new ScoreError('server', 'bad response');
-    return ranked;
+    return { ...ranked, top: cleanLeader((raw as Record<string, unknown>).top) };
+  }
+
+  /** 게임마다 이번 주 1위 (목록에 보여줄 것) */
+  async leaders(): Promise<Partial<Record<GameId, Leader>>> {
+    const raw = await this.rpc('game_leaders', {});
+    const out: Partial<Record<GameId, Leader>> = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [game, value] of Object.entries(raw)) {
+      const leader = cleanLeader(value);
+      if (leader) out[game as GameId] = leader;
+    }
+    return out;
   }
 
   /** 이 게임의 이번 주 TOP 10과 내 순위 */
