@@ -36,6 +36,8 @@ interface Saved {
   sessions?: { date: string; count: number };
   /** '정각 모각코' 시트를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
   togetherSeen?: boolean;
+  /** 🎮 탕비실 오락기를 열어 본 적 있는지 (처음엔 버튼에 점을 찍어 알려요) */
+  arcadeSeen?: boolean;
   /** 내 모각코 시간 (KST 0~23시). 정하지 않았으면 없어요 */
   myHour?: number;
   /** '내 시간을 정해 보세요' 안내를 마지막으로 보여준 날 (하루 한 번만) */
@@ -318,6 +320,16 @@ export function hasSeenTogether(): boolean {
 export function markTogetherSeen() {
   if (cache.togetherSeen) return;
   cache.togetherSeen = true;
+  persist();
+}
+
+export function hasSeenArcade(): boolean {
+  return cache.arcadeSeen === true;
+}
+
+export function markArcadeSeen() {
+  if (cache.arcadeSeen) return;
+  cache.arcadeSeen = true;
   persist();
 }
 

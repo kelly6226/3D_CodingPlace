@@ -1206,7 +1206,14 @@ begin
 
   return json_build_object(
     'rank', 1 + (select count(*) from public.game_scores where game = p_game and week = v_week and score > v_best),
-    'score', v_best
+    'score', v_best,
+    'top', (
+      select json_build_object('name', name, 'score', score)
+      from public.game_scores
+      where game = p_game and week = v_week
+      order by score desc, updated_at
+      limit 1
+    )
   );
 end;
 $$;
@@ -1235,8 +1242,27 @@ as $$
   );
 $$;
 
+-- 게임마다 이번 주 1위 (오락기 목록에 보여줘요). { "게임": { name, score } }
+create or replace function public.game_leaders()
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(json_object_agg(game, json_build_object('name', name, 'score', score)), '{}'::json)
+  from (
+    select distinct on (game) game, name, score
+    from public.game_scores
+    where week = public.game_week()
+    order by game, score desc, updated_at
+  ) leaders;
+$$;
+
 revoke all on function public.game_call_ok() from public, anon, authenticated;
 revoke all on function public.game_week() from public, anon, authenticated;
+revoke all on function public.game_leaders() from public, anon, authenticated;
+grant execute on function public.game_leaders() to anon, authenticated;
 revoke all on function public.game_score_max(text) from public, anon, authenticated;
 revoke all on function public.submit_game_score(text, text, text, text, int) from public, anon, authenticated;
 grant execute on function public.submit_game_score(text, text, text, text, int) to anon, authenticated;

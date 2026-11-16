@@ -2996,10 +2996,16 @@ button.place-name {
 .arcade-game:hover {
   border-color: rgba(242, 180, 90, 0.5);
 }
-.ag-emoji {
+/* 게임 그림 (도트를 캔버스로 그려요) */
+.ag-icon {
   flex: none;
-  font-size: 30px;
-  line-height: 1;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  image-rendering: pixelated;
 }
 .ag-text {
   display: flex;
@@ -3018,6 +3024,14 @@ button.place-name {
   font-weight: 700;
   color: var(--amber);
 }
+.ag-leader {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.ag-leader:empty {
+  display: none;
+}
 .arcade-foot {
   display: block;
   margin-top: 10px;
@@ -3035,6 +3049,10 @@ button.place-name {
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+}
+.arcade-play-head canvas {
+  flex: none;
+  image-rendering: pixelated;
 }
 .arcade-back {
   min-height: 36px;
@@ -3090,6 +3108,22 @@ button.place-name {
 .ar-record.new {
   color: var(--amber);
   font-weight: 800;
+}
+/* 내 최고 기록을 깼을 때: 점수가 통통 튀어요 */
+.arcade-result.celebrate .ar-score {
+  color: var(--amber);
+  animation: arcade-pop 0.6s ease-out;
+}
+@keyframes arcade-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 /* 게임마다 🏆 순위 버튼 (카드 오른쪽 위) */
 .arcade-item {
@@ -3179,4 +3213,7 @@ button.place-name {
   font-size: 13px;
   font-weight: 700;
   color: var(--amber);
+}
+.arcade-result .primary {
+  font-family: var(--font);
 }

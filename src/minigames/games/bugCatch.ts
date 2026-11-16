@@ -1,10 +1,13 @@
 // 버그 잡기: 30초 동안 에디터에서 기어 나오는 버그를 눌러 잡아요.
-// 🪳 프로덕션 버그는 빠르고 점수가 크고, 🦋는 '기능'이라 잡으면 점수가 깎여요.
+// 빨간 프로덕션 버그는 빠르고 점수가 크고, 나비는 '기능'이라 잡으면 점수가 깎여요.
 import { sound } from '../../audio';
-import { C, FloatTexts, TOP_BAR_H, drawEmoji, drawLabel, drawTopBar, isWithin, randomBetween } from '../draw';
-import { STAGE_H, STAGE_W, type GameRound } from '../types';
+import { C, FloatTexts, TOP_BAR_H, buzz, drawLabel, drawTopBar, isWithin, randomBetween } from '../draw';
+import { drawSprite, type SpriteName } from '../sprites';
+import { STAGE_H, STAGE_W, type GameModule, type GameRound } from '../types';
 
 const ROUND_SEC = 30;
+/** 이만큼 남으면 남은 시간을 빨갛게 */
+const HURRY_SEC = 5;
 const EDITOR = { x: 14, y: TOP_BAR_H + 12, w: STAGE_W - 28, h: STAGE_H - TOP_BAR_H - 26 };
 const GUTTER_W = 30;
 const LINE_H = 18;
@@ -15,19 +18,31 @@ const SPAWN_GAP_END = 0.3;
 /** 시작하고 첫 버그가 나오기까지 (초) */
 const FIRST_SPAWN_SEC = 0.3;
 const MAX_ON_SCREEN = 7;
-const BUG_HIT_R = 28;
-const BUG_SIZE = 30;
+const BUG_HIT_R = 30;
+const BUG_SIZE = 42;
 /** 나타나고 사라질 때 커지고 작아지는 시간(초) */
 const POP_SEC = 0.15;
 /** 이만큼마다 방향을 바꿔요 (초) */
 const TURN_GAP = [0.35, 0.9] as const;
+/** 다리·날개를 움직이는 빠르기 (초마다 그림이 바뀌는 횟수) */
+const WIGGLE_PER_SEC = 8;
+const FEATURE_BUZZ_MS = 80;
 
 type BugKind = 'bug' | 'prod' | 'feature';
 
-const KINDS: Record<BugKind, { emoji: string; points: number; lifeSec: number; speed: number }> = {
-  bug: { emoji: '🐛', points: 1, lifeSec: 1.7, speed: 45 },
-  prod: { emoji: '🪳', points: 3, lifeSec: 1.05, speed: 115 },
-  feature: { emoji: '🦋', points: -2, lifeSec: 2, speed: 35 },
+interface KindDef {
+  frames: readonly [SpriteName, SpriteName];
+  points: number;
+  lifeSec: number;
+  speed: number;
+  /** 가는 쪽으로 머리를 돌릴지 (나비는 그대로) */
+  turns: boolean;
+}
+
+const KINDS: Record<BugKind, KindDef> = {
+  bug: { frames: ['bug0', 'bug1'], points: 1, lifeSec: 1.7, speed: 45, turns: true },
+  prod: { frames: ['prodBug0', 'prodBug1'], points: 3, lifeSec: 1.05, speed: 115, turns: true },
+  feature: { frames: ['feature0', 'feature1'], points: -2, lifeSec: 2, speed: 35, turns: false },
 };
 
 /** 나올 확률. 나머지는 평범한 버그 */
@@ -80,12 +95,27 @@ function popScale(bug: Bug) {
   return Math.max(0, Math.min(grow, shrink));
 }
 
-/** 에디터 줄마다 코드처럼 보이는 막대 (들여쓰기, 길이) */
-function makeCodeLines(count: number) {
-  return Array.from({ length: count }, () => ({ indent: Math.floor(Math.random() * 3), width: randomBetween(40, 200) }));
+function drawBug(g: CanvasRenderingContext2D, bug: Bug) {
+  const size = BUG_SIZE * popScale(bug);
+  if (size <= 0) return;
+  const kind = KINDS[bug.kind];
+  const frame = kind.frames[Math.floor(bug.age * WIGGLE_PER_SEC) % 2];
+  // 그림은 머리가 위쪽이라, 가는 방향으로 돌리려면 90도를 더해요
+  const rotate = kind.turns ? Math.atan2(bug.vy, bug.vx) + Math.PI / 2 : 0;
+  drawSprite(g, frame, bug.x, bug.y, size, { rotate });
 }
 
-export function createBugCatch(): GameRound {
+/** 에디터 줄마다 코드처럼 보이는 막대 (들여쓰기, 길이, 색) */
+const CODE_COLORS = ['rgba(162, 166, 180, 0.18)', 'rgba(199, 146, 234, 0.22)', 'rgba(126, 231, 135, 0.18)', 'rgba(88, 166, 255, 0.2)'] as const;
+function makeCodeLines(count: number) {
+  return Array.from({ length: count }, () => ({
+    indent: Math.floor(Math.random() * 3),
+    width: randomBetween(40, 200),
+    color: CODE_COLORS[Math.floor(Math.random() * CODE_COLORS.length)],
+  }));
+}
+
+function createBugCatch(): GameRound {
   const floats = new FloatTexts();
   const codeLines = makeCodeLines(Math.floor(EDITOR.h / LINE_H));
   let bugs: Bug[] = [];
@@ -117,8 +147,8 @@ export function createBugCatch(): GameRound {
     g.fillRect(EDITOR.x, EDITOR.y, EDITOR.w, EDITOR.h);
     codeLines.forEach((line, i) => {
       const y = EDITOR.y + 12 + i * LINE_H;
-      drawLabel(g, String(i + 1), EDITOR.x + GUTTER_W - 8, y, { size: 10, weight: 500, align: 'right', color: 'rgba(162, 166, 180, 0.5)' });
-      g.fillStyle = 'rgba(162, 166, 180, 0.16)';
+      drawLabel(g, String(i + 1), EDITOR.x + GUTTER_W - 8, y, { size: 10, weight: 500, align: 'right', color: 'rgba(162, 166, 180, 0.5)', mono: true });
+      g.fillStyle = line.color;
       g.fillRect(EDITOR.x + GUTTER_W + 6 + line.indent * 14, y - 3, line.width, 6);
     });
   }
@@ -148,13 +178,10 @@ export function createBugCatch(): GameRound {
       g.fillStyle = C.bg;
       g.fillRect(0, 0, STAGE_W, STAGE_H);
       drawEditor(g);
-      for (const bug of bugs) {
-        const size = BUG_SIZE * popScale(bug);
-        if (size > 0) drawEmoji(g, KINDS[bug.kind].emoji, bug.x, bug.y, size);
-      }
+      for (const bug of bugs) drawBug(g, bug);
       floats.draw(g);
       const left = Math.max(0, Math.ceil(ROUND_SEC - elapsed));
-      drawTopBar(g, `잡은 점수 ${score}`, `⏱ ${left}초`);
+      drawTopBar(g, `점수 ${score}`, { text: `${left}초`, color: left <= HURRY_SEC ? C.danger : C.fg });
     },
 
     tap(x, y) {
@@ -166,6 +193,7 @@ export function createBugCatch(): GameRound {
       if (bug.kind === 'feature') {
         floats.add(`${points} 그건 기능이에요`, bug.x, bug.y - 20, C.danger);
         sound.quack();
+        buzz(FEATURE_BUZZ_MS);
         return;
       }
       floats.add(`+${points}`, bug.x, bug.y - 20, bug.kind === 'prod' ? C.mint : C.amber);
@@ -181,3 +209,12 @@ export function createBugCatch(): GameRound {
     },
   };
 }
+
+export const bugCatch: GameModule = {
+  intro: {
+    title: '버그 잡기',
+    rules: [`${ROUND_SEC}초 동안 버그를 눌러 잡아요`, `빨간 프로덕션 버그는 ${KINDS.prod.points}점`, `나비는 기능이에요. 잡으면 ${KINDS.feature.points}점`],
+    controls: { touch: '버그를 톡 눌러요', keys: '마우스로 버그를 클릭해요' },
+  },
+  create: createBugCatch,
+};

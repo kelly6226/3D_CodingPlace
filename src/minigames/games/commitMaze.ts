@@ -1,8 +1,9 @@
 // 커밋 미로: 미로를 돌며 커밋(잔디 칸)을 다 먹어요. 회의·질문·장애 알림에 붙잡히면 목숨이 하나 줄어요.
-// ☕를 마시면 잠깐 동안 그 셋이 잠들어서 거꾸로 잡을 수 있어요.
+// 커피를 마시면 잠깐 동안 그 셋이 잠들어서 거꾸로 잡을 수 있어요. 나는 내 아바타와 같은 색 후드티를 입어요.
 import { sound } from '../../audio';
-import { C, FloatTexts, TOP_BAR_H, drawEmoji, drawTopBar, isWithin, pickOne } from '../draw';
-import { STAGE_H, STAGE_W, type Direction, type GameRound } from '../types';
+import { C, FloatTexts, TOP_BAR_H, buzz, drawLabel, drawTopBar, isWithin, lifeText, pickOne } from '../draw';
+import { drawSprite, type SpriteName } from '../sprites';
+import { STAGE_H, STAGE_W, type Direction, type GameModule, type GameRound, type RoundOptions } from '../types';
 
 // # 벽, . 커밋, o 커피, E 방해꾼 출발점, P 내 출발점 (좌우 대칭)
 const MAP = [
@@ -47,20 +48,24 @@ const COFFEE_WARN_SEC = 1.5;
 const CAUGHT_PAUSE_SEC = 1.2;
 const ENEMY_RESPAWN_SEC = 2.5;
 /** 첫 방해꾼이 나오기까지, 그 뒤로 하나씩 나오는 간격 (초) */
-const ENEMY_FIRST_RELEASE_SEC = 1;
+const ENEMY_FIRST_RELEASE_SEC = 2;
 const ENEMY_RELEASE_GAP_SEC = 2;
 /** 이 거리(칸)보다 가까우면 부딪힌 걸로 쳐요 */
 const TOUCH_TILES = 0.6;
 
-const WALL_COLOR = '#262f48';
+const WALL_COLOR = '#222a42';
+const WALL_EDGE = '#3a4668';
+const WALL_EDGE_PX = 2;
 
 const POINTS = { commit: 1, coffee: 5, enemy: 20, level: 50 } as const;
 
-const ENEMIES = [
-  { emoji: '📅', name: '회의', chaseRate: 0.8 },
-  { emoji: '🙋', name: '질문 있어요', chaseRate: 0.55 },
-  { emoji: '🚨', name: '장애 알림', chaseRate: 0.35 },
-] as const;
+const ENEMIES: readonly { sprite: SpriteName; name: string; chaseRate: number }[] = [
+  { sprite: 'meeting', name: '회의', chaseRate: 0.8 },
+  { sprite: 'question', name: '질문 있어요', chaseRate: 0.55 },
+  { sprite: 'alert', name: '장애 알림', chaseRate: 0.35 },
+];
+const SPRITE_SIZE = TILE * 1.1;
+const CAUGHT_BUZZ_MS = 150;
 
 const STEP: Record<Direction, { dc: number; dr: number }> = {
   up: { dc: 0, dr: -1 },
@@ -160,7 +165,8 @@ function freshCommits(): Map<number, 'commit' | 'coffee'> {
   return items;
 }
 
-export function createCommitMaze(): GameRound {
+function createCommitMaze({ playerColor }: RoundOptions): GameRound {
+  const outfit = { a: playerColor };
   const floats = new FloatTexts();
   let items = freshCommits();
   let player = moverAt(PLAYER_HOME);
@@ -280,6 +286,7 @@ export function createCommitMaze(): GameRound {
       lives -= 1;
       floats.add(`${enemy.kind.name}에 붙잡힘`, me.x, me.y - 16, C.danger);
       sound.quack();
+      buzz(CAUGHT_BUZZ_MS);
       pauseSec = CAUGHT_PAUSE_SEC;
       if (lives > 0) resetPositions();
       return;
@@ -287,10 +294,19 @@ export function createCommitMaze(): GameRound {
   }
 
   function drawMaze(g: CanvasRenderingContext2D) {
-    g.fillStyle = WALL_COLOR;
     MAP.forEach((row, r) =>
       [...row].forEach((ch, c) => {
-        if (ch === '#') g.fillRect(c * TILE + 1, MAZE_TOP + r * TILE + 1, TILE - 2, TILE - 2);
+        if (ch !== '#') return;
+        const x = c * TILE;
+        const y = MAZE_TOP + r * TILE;
+        g.fillStyle = WALL_COLOR;
+        g.fillRect(x, y, TILE, TILE);
+        // 통로와 맞닿은 쪽에 밝은 선을 그어 벽 모양이 보이게
+        g.fillStyle = WALL_EDGE;
+        if (isOpen(c, r - 1)) g.fillRect(x, y, TILE, WALL_EDGE_PX);
+        if (isOpen(c, r + 1)) g.fillRect(x, y + TILE - WALL_EDGE_PX, TILE, WALL_EDGE_PX);
+        if (isOpen(c - 1, r)) g.fillRect(x, y, WALL_EDGE_PX, TILE);
+        if (isOpen(c + 1, r)) g.fillRect(x + TILE - WALL_EDGE_PX, y, WALL_EDGE_PX, TILE);
       }),
     );
     const commitSize = TILE * 0.22;
@@ -298,7 +314,7 @@ export function createCommitMaze(): GameRound {
       const x = ((k % COLS) + 0.5) * TILE;
       const y = MAZE_TOP + (Math.floor(k / COLS) + 0.5) * TILE;
       if (item === 'coffee') {
-        drawEmoji(g, '☕', x, y, TILE * (0.7 + Math.sin(clock * 6) * 0.06));
+        drawSprite(g, 'coffee', x, y, TILE * (0.95 + Math.sin(clock * 6) * 0.08));
         continue;
       }
       g.fillStyle = C.grass;
@@ -311,7 +327,8 @@ export function createCommitMaze(): GameRound {
     const scared = isScared(enemy);
     const blink = scared && coffeeLeft < COFFEE_WARN_SEC && Math.floor(clock * 8) % 2 === 0;
     g.globalAlpha = enemy.waitSec > 0 ? 0.35 : 1;
-    drawEmoji(g, scared && !blink ? '💤' : enemy.kind.emoji, at.x, at.y, TILE * 0.9);
+    drawSprite(g, enemy.kind.sprite, at.x, at.y, SPRITE_SIZE, { asleep: scared && !blink });
+    if (scared) drawLabel(g, 'z', at.x + TILE * 0.45, at.y - TILE * 0.45, { size: 11, color: C.fg, weight: 800, mono: true });
     g.globalAlpha = 1;
   }
 
@@ -336,9 +353,9 @@ export function createCommitMaze(): GameRound {
       drawMaze(g);
       for (const enemy of enemies) drawEnemy(g, enemy);
       const me = pixelOf(player);
-      drawEmoji(g, '🧑‍💻', me.x, me.y, TILE * 0.95);
+      drawSprite(g, 'me', me.x, me.y, SPRITE_SIZE, { recolor: outfit, flipX: player.dir === 'left' });
       floats.draw(g);
-      drawTopBar(g, `커밋 ${score}`, `${'❤️'.repeat(Math.max(0, lives))}  Lv.${level}`);
+      drawTopBar(g, `Lv.${level}  ${score}점`, { text: lifeText(lives, LIVES), color: C.danger });
     },
 
     /** 누른 곳이 내 캐릭터에서 어느 쪽인지로 방향을 정해요 */
@@ -361,3 +378,12 @@ export function createCommitMaze(): GameRound {
     },
   };
 }
+
+export const commitMaze: GameModule = {
+  intro: {
+    title: '커밋 미로',
+    rules: ['초록 커밋을 다 모으면 다음 레벨', '회의·질문·장애 알림에 닿으면 ♥ −1', `커피를 마시면 ${COFFEE_SEC}초 동안 거꾸로 잡아요`],
+    controls: { touch: '가고 싶은 쪽을 누르거나 쓸어요', keys: '방향키나 WASD' },
+  },
+  create: createCommitMaze,
+};

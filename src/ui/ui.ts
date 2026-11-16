@@ -64,9 +64,11 @@ import {
   getSessionsToday,
   getStudyHistory,
   hasSeenSync,
+  hasSeenArcade,
   hasSeenTogether,
   kstDate,
   markSyncSeen,
+  markArcadeSeen,
   markTogetherSeen,
   setMyHour,
   type Profile,
@@ -253,7 +255,14 @@ export class UI {
         'div',
         { class: 'hud hud-tools' },
         // 쉬는 시간엔 반짝여서 한 판 하라고 알려요 (setSession이 켜고 꺼요)
-        MINIGAMES_ENABLED && h('button', { class: 'icon-btn', id: 'arcade-btn', onclick: () => this.h.onArcade(), 'aria-label': '미니게임 (탕비실 오락기)', title: '미니게임' }, '🎮'),
+        // 처음엔 빨간 점을 찍어 눌러 보게 해요
+        MINIGAMES_ENABLED &&
+          h(
+            'button',
+            { class: 'icon-btn', id: 'arcade-btn', onclick: () => this.openArcade(), 'aria-label': '미니게임 (탕비실 오락기)', title: '미니게임' },
+            '🎮',
+            h('i', { class: 'new-dot', id: 'arcade-dot', hidden: hasSeenArcade(), 'aria-hidden': 'true' }),
+          ),
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
         h(
@@ -305,6 +314,12 @@ export class UI {
       }
     });
     window.setTimeout(() => $('#hint').classList.add('gone'), 9000);
+  }
+
+  private openArcade() {
+    markArcadeSeen();
+    $('#arcade-dot').hidden = true;
+    this.h.onArcade();
   }
 
   private action(kind: SheetKind, icon: string, label: string, iconId?: string) {

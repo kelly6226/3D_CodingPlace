@@ -1,6 +1,6 @@
 // 게임 한 판을 캔버스에 돌려요: 화면 크기 맞추기, 매 프레임 그리기, 누르기·쓸어넘기기·키보드 입력
 import { C, drawLabel } from './draw';
-import { STAGE_H, STAGE_W, type Direction, type GameRound } from './types';
+import { STAGE_H, STAGE_W, type Direction, type GameRound, type RoundIntro } from './types';
 
 /** 프레임 사이가 이보다 길면(다른 탭을 다녀옴) 이만큼만 흐른 걸로 쳐요 */
 const MAX_FRAME_SEC = 0.05;
@@ -8,6 +8,12 @@ const MAX_FRAME_SEC = 0.05;
 const MAX_PIXEL_RATIO = 2;
 /** 손가락을 이만큼(CSS px) 넘게 밀면 쓸어넘기기로 봐요 */
 const SWIPE_MIN_PX = 24;
+/** 시작 화면의 '눌러서 시작'이 진해졌다 옅어지는 빠르기 (초마다 몇 번) */
+const READY_PULSE_PER_SEC = 1.2;
+const READY_LINE_H = 24;
+
+/** 터치가 주된 입력인 기기인지 (시작 화면에 폰 조작법을 보여줄지) */
+const isTouchFirst = () => window.matchMedia('(pointer: coarse)').matches;
 
 const STEER_KEYS: Record<string, Direction> = {
   ArrowUp: 'up',
@@ -40,14 +46,14 @@ export class RoundView {
 
   constructor(
     private round: GameRound,
-    title: string,
+    private intro: RoundIntro,
     private onOver: (score: number) => void,
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'arcade-canvas';
     this.canvas.setAttribute('role', 'img');
     this.canvas.tabIndex = 0;
-    this.canvas.setAttribute('aria-label', `${title} 게임 화면. 화면을 누르거나 스페이스를 눌러서 시작해요`);
+    this.canvas.setAttribute('aria-label', `${intro.title} 게임 화면. ${intro.rules.join(' ')} ${intro.controls.keys}. 화면을 누르거나 스페이스를 눌러서 시작해요`);
     this.g = this.canvas.getContext('2d')!;
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
@@ -143,10 +149,21 @@ export class RoundView {
     this.raf = requestAnimationFrame(this.frame);
   };
 
+  /** 시작 전: 게임 화면 위에 하는 법을 띄워요 */
   private drawReady() {
-    this.g.fillStyle = 'rgba(5, 7, 14, 0.55)';
-    this.g.fillRect(0, 0, STAGE_W, STAGE_H);
-    drawLabel(this.g, '눌러서 시작', STAGE_W / 2, STAGE_H / 2, { size: 22, color: C.amber, weight: 800 });
-    drawLabel(this.g, '화면을 누르거나 스페이스', STAGE_W / 2, STAGE_H / 2 + 30, { size: 12 });
+    const g = this.g;
+    const { title, rules, controls } = this.intro;
+    const touch = isTouchFirst();
+    g.fillStyle = 'rgba(5, 7, 14, 0.78)';
+    g.fillRect(0, 0, STAGE_W, STAGE_H);
+    const top = STAGE_H / 2 - ((rules.length + 4) * READY_LINE_H) / 2;
+    drawLabel(g, title, STAGE_W / 2, top, { size: 22, color: C.fg, weight: 800 });
+    rules.forEach((rule, i) => drawLabel(g, rule, STAGE_W / 2, top + (i + 2) * READY_LINE_H, { size: 13, color: C.fg, weight: 500 }));
+    const after = top + (rules.length + 2) * READY_LINE_H;
+    drawLabel(g, touch ? controls.touch : controls.keys, STAGE_W / 2, after + 4, { size: 12, color: C.muted, weight: 600 });
+    const pulse = 0.55 + 0.45 * Math.sin((performance.now() / 1000) * READY_PULSE_PER_SEC * Math.PI * 2);
+    g.globalAlpha = pulse;
+    drawLabel(g, touch ? '▶ 탭해서 시작' : '▶ 클릭하거나 스페이스로 시작', STAGE_W / 2, after + READY_LINE_H * 2, { size: 18, color: C.amber, weight: 800 });
+    g.globalAlpha = 1;
   }
 }
