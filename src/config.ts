@@ -19,6 +19,12 @@ export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent
 export const PRIVATE_ROOMS_ENABLED = false;
 
 /**
+ * 🎮 탕비실 오락기(미니게임). 언제든 열 수 있고, 쉬는 시간엔 버튼이 반짝여요.
+ * 토스 앱 안에서는 게임물 등급분류에 해당하는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
+ */
+export const MINIGAMES_ENABLED = true;
+
+/**
  * 다른 기기에서 이어하기(이어하기 코드). 서버(Supabase)가 없는 데모 모드에서는 늘 꺼져요.
  * 토스 앱 안에서는 로그인 규정(토스 로그인만 허용)에 걸리는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
  */
