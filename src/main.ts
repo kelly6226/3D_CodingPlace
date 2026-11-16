@@ -429,7 +429,7 @@ async function enter(p: store.Profile) {
         lastMoves.clear();
         metThisSession.clear();
         ui.clearChat();
-        ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
+        ui.notify(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
     },
     room,
@@ -614,7 +614,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   switching = false;
   roomTime?.enter(r.slug);
   reloadRoomToday(ROOM_TODAY_AFTER_ENTER_MS);
-  ui.toast(enteredMessage(r), 'good', 4200);
+  ui.notify(enteredMessage(r), 'good', 4200);
   await wait(600);
   autoSeat(false);
 }
@@ -855,14 +855,16 @@ function triggerDeploy(name: string) {
   const d = placeMeta(room.place).deploy;
   world.room.alarm(sec);
   sound.siren(sec - 0.5);
-  ui.alarm(d.alarm.replace('{name}', name), sec);
+  const alarmText = d.alarm.replace('{name}', name);
+  ui.alarm(alarmText, sec);
+  ui.addNotice(alarmText);
   let i = 0;
   for (const a of world.avatars.values()) {
     const e = pick(['🔥 불났다', '🤯 뭐야', '🙏 롤백 제발', '😱 내 코드 아님']);
     window.setTimeout(() => a.emote(e.split(' ')[0], e.slice(e.indexOf(' ') + 1)), 300 + i++ * 180);
   }
   window.setTimeout(() => {
-    ui.toast(d.done, 'good', 4200);
+    ui.notify(d.done, 'good', 4200);
     sound.chime();
   }, sec * 1000 + 300);
 }
@@ -914,7 +916,7 @@ async function commit(type: string, msg: string): Promise<string | null> {
   myCommitHashes.add(c.hash);
   addCommit(c);
   meAvatar().emote('⎇', 'commit!');
-  ui.toast(`[main ${c.hash}] ${c.msg}`, 'good');
+  ui.notify(`[main ${c.hash}] ${c.msg}`, 'good');
   return null;
 }
 
@@ -963,7 +965,7 @@ function onPeers(presencePeers: PeerState[]) {
         a.state.seat = p.seat;
         if (p.seat) a.goTo(p.x, p.z, p.seat);
         else if (p.x !== SPAWN.x || p.z !== SPAWN.z) a.goTo(p.x, p.z);
-        ui.toast(`👋 ${p.name}님이 모각코에 들어왔어요`);
+        ui.notify(`👋 ${p.name}님이 모각코에 들어왔어요`);
       } else {
         a = world.addAvatar(p, false);
       }
@@ -988,7 +990,7 @@ function onPeers(presencePeers: PeerState[]) {
     world.removeAvatar(id);
     known.delete(id);
     lastMoves.delete(id);
-    if (name) ui.toast(`${name}님이 퇴근했어요`);
+    if (name) ui.notify(`${name}님이 퇴근했어요`);
   }
   ui.setPeers(peers);
   syncTraceVisibility();
@@ -1015,7 +1017,7 @@ function onEvent(e: NetEvent) {
       const em = emoteById(e.emote);
       if (!a || !em) return;
       a.emote(em.emoji, em.label);
-      if (e.to && e.to === self?.id) ui.toast(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
+      if (e.to && e.to === self?.id) ui.notify(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
       break;
     }
     case 'act': {
@@ -1037,7 +1039,7 @@ function onEvent(e: NetEvent) {
       break;
     case 'commit':
       addCommit(e.commit);
-      ui.toast(`⎇ ${e.commit.name}: ${e.commit.msg}`);
+      ui.notify(`⎇ ${e.commit.name}: ${e.commit.msg}`);
       break;
     case 'coffee':
       world.avatars.get(e.id)?.sip();
@@ -1195,20 +1197,27 @@ async function openArcade() {
 function shareNewRecord(game: GameId, score: number) {
   meAvatar().emote('🏆', '신기록');
   net.send({ type: 'record', id: self.id, game, score });
+  void recordSentence(game, score).then((text) => text && ui.addNotice(`🏆 나: ${text}`));
+}
+
+/** '버그 잡기에서 신기록! (23점)'. 게임 이름과 점수 글은 오락기 목록에서 가져와요 (없는 게임이면 null) */
+async function recordSentence(game: GameId, score: number): Promise<string | null> {
+  const { GAMES } = await import('./minigames/catalog');
+  const def = GAMES.find((g) => g.id === game);
+  return def ? `${def.title}에서 신기록! (${def.formatScore(score)})` : null;
 }
 
 const RECORD_TOAST_MS = 5000;
 
-/** 다른 사람의 신기록: 그 사람 머리 위와 토스트로. 게임 이름과 점수 글은 오락기 목록에서 가져와요 */
+/** 다른 사람의 신기록: 그 사람 머리 위와 토스트로 띄우고 채팅에도 남겨요 */
 async function showPeerRecord(e: Extract<NetEvent, { type: 'record' }>) {
   if (!MINIGAMES_ENABLED) return; // 오락기가 꺼진 곳(토스 앱)에서는 알림도 안 띄워요
   const a = world.avatars.get(e.id);
   if (!a || a.isSelf) return;
-  const { GAMES } = await import('./minigames/catalog');
-  const def = GAMES.find((g) => g.id === e.game);
-  if (!def) return;
+  const text = await recordSentence(e.game, e.score);
+  if (!text) return;
   a.emote('🏆', '신기록');
-  ui.toast(`🏆 ${a.state.name}님이 ${def.title}에서 신기록! (${def.formatScore(e.score)})`, 'good', RECORD_TOAST_MS);
+  ui.notify(`🏆 ${a.state.name}님이 ${text}`, 'good', RECORD_TOAST_MS);
 }
 
 // ── 정각 세션 ─────────────────────────────────────
@@ -1231,14 +1240,14 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
   if (!self) return;
   sound.chime();
   if (next.phase === 'focus') {
-    ui.toast(`${hourLabel(next.hour)} 정각이에요. ${FOCUS_MINUTES}분 동안 같이 집중해요`, 'good', 5000);
+    ui.notify(`${hourLabel(next.hour)} 정각이에요. ${FOCUS_MINUTES}분 동안 같이 집중해요`, 'good', 5000);
     return;
   }
   const nextStart = hourLabel((next.hour + 1) % 24);
   if (finished) {
     const n = store.addSessionDone();
     meAvatar().emote('✅', `${n}칸째`);
-    ui.toast(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
+    ui.notify(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
     // 한 칸 채운 직후에 안내를 하나만: 아직 내 시간을 안 정했으면 그것부터, 아니면 이어하기
     if (store.getMyHour() === null && store.takeMyHourNudge()) {
       window.setTimeout(() => ui.toast("내일도 이 시간에 올 거면 왼쪽 위 '집중' 버튼에서 매일 오는 시간을 정해 두세요", 'info', 7000), NUDGE_DELAY_MS);
@@ -1249,7 +1258,7 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
     }
     return;
   }
-  ui.toast(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
+  ui.notify(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
   nudgeBreakGame();
 }
 
@@ -1342,7 +1351,7 @@ ui.bind({
   onWave: (id) => {
     emote('wave', id);
     const a = world.avatars.get(id);
-    if (a) ui.toast(`${a.state.name}님에게 손을 흔들었어요`);
+    if (a) ui.notify(`${a.state.name}님에게 손을 흔들었어요`);
   },
   onFocusPeer: (id) => {
     const a = world.avatars.get(id);

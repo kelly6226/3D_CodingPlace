@@ -75,7 +75,10 @@ import {
 } from '../store';
 
 /** 채팅 목록에 쌓아두는 줄 수. 넘으면 오래된 것부터 지워요 (저장은 안 해요) */
-const CHAT_LOG_MAX = 30;
+/** 채팅 칸에 남겨 두는 줄 수 (대화와 알림을 합쳐서). 넘으면 오래된 것부터 지워요 */
+const CHAT_LOG_MAX = 60;
+/** 채팅 칸 맨 아래에서 이만큼(px) 안쪽이면 '맨 아래를 보는 중'으로 봐요 */
+const CHAT_STICK_PX = 24;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const CHAT_FOCUS_DELAY_MS = 30;
 /** 대화상자가 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
@@ -992,7 +995,7 @@ export class UI {
       h(
         'header',
         { class: 'chat-head' },
-        h('p', {}, '말풍선으로 잠깐 보여요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
+        h('p', {}, '말풍선으로 잠깐 보여요. 알림도 여기 남아요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
       this.chatLog,
@@ -1081,7 +1084,7 @@ export class UI {
           )
         : null;
     const who = line.whisperWith ? (line.mine ? `🤫 나 → ${line.whisperWith}` : `🤫 ${line.name}`) : line.name;
-    this.chatLog.append(
+    this.appendChatLine(
       h(
         'li',
         { class: [line.mine && 'mine', line.whisperWith && 'whisper'].filter(Boolean).join(' ') || undefined },
@@ -1090,10 +1093,30 @@ export class UI {
         pin,
       ),
     );
-    while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
-    this.chatLog.scrollTop = this.chatLog.scrollHeight;
     // 패널이 닫혀 있으면 새 글이 왔다는 표시만 해둬요
     if (!line.mine && this.chatPanel.hidden) this.chatBtn.classList.add('unread');
+  }
+
+  /**
+   * 토스트로 잠깐 띄우고, 채팅 칸에도 시각과 함께 남겨요 (나중에 채팅을 열어 다시 볼 수 있게).
+   * 사람이 들고 나는 일처럼 자주 오는 알림이라 💬 버튼에 새 글 표시는 하지 않아요
+   */
+  notify(text: string, kind: 'info' | 'good' | 'bad' = 'info', ms?: number) {
+    this.toast(text, kind, ms);
+    this.addNotice(text);
+  }
+
+  /** 채팅 칸에만 알림 한 줄 (토스트 없이). 배포 경보처럼 화면에 따로 띄우는 알림을 남길 때 */
+  addNotice(text: string) {
+    this.appendChatLine(h('li', { class: 'notice' }, h('time', { class: 'when' }, clockOf(new Date())), h('span', { class: 'msg' }, text)));
+  }
+
+  private appendChatLine(li: HTMLElement) {
+    // 맨 아래를 보고 있을 때만 따라 내려가요 (위로 올려 지난 글을 읽는 중이면 그대로)
+    const atBottom = this.chatLog.scrollHeight - this.chatLog.scrollTop - this.chatLog.clientHeight < CHAT_STICK_PX;
+    this.chatLog.append(li);
+    while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
+    if (atBottom) this.chatLog.scrollTop = this.chatLog.scrollHeight;
   }
 
   /** 방을 옮기면 이전 방의 대화는 비워요 */
@@ -2035,4 +2058,9 @@ export function ago(at: number) {
   if (s < 3600) return `${Math.floor(s / 60)}분 전`;
   if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
   return `${Math.floor(s / 86400)}일 전`;
+}
+
+/** 알림 줄에 붙이는 시각 (KST, 15:43) */
+function clockOf(d: Date): string {
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
 }
