@@ -1,7 +1,7 @@
 // 야근 러너: 크롬 공룡처럼 뛰어서 회의·멘션·핫픽스를 넘어요. 오후 6시부터 몇 시까지 버티는지가 점수예요.
 // 달리는 캐릭터는 내 아바타와 같은 색 후드티를 입어요.
 import { sound } from '../../audio';
-import { C, FloatTexts, buzz, drawLabel, drawTopBar, pickOne, randomBetween } from '../draw';
+import { C, FloatTexts, TOP_BAR_H, buzz, drawLabel, drawTopBar, pickOne, randomBetween } from '../draw';
 import { overtimeClock } from '../overtimeClock';
 import { drawSprite, type SpriteName } from '../sprites';
 import { STAGE_H, STAGE_W, type GameModule, type GameRound, type RoundOptions } from '../types';
@@ -51,6 +51,23 @@ const CLOCK_MIN_PER_SEC = 5;
 const STEPS_PER_SEC = 10;
 const CRASH_BUZZ_MS = 150;
 
+/** 밤하늘: 별은 판마다 자리를 정하고 조금씩 반짝여요. 달은 오른쪽 위에 초승달로 */
+const STAR_COUNT = 36;
+const STAR_AREA = { top: TOP_BAR_H + 10, bottom: GROUND_Y - 200 };
+/** 별이 땅보다 이만큼 느리게 흘러가요 (멀리 있어서) */
+const STAR_PARALLAX = 0.03;
+const STAR_TWINKLE_SPEED = 2;
+const MOON = { x: STAGE_W - 72, y: TOP_BAR_H + 62, r: 20, color: '#ffe6a8' };
+/** 초승달을 만들려고 겹쳐서 가리는 원이 오른쪽 위로 비켜난 거리 */
+const MOON_BITE = { dx: 9, dy: -5 };
+
+interface Star {
+  x: number;
+  y: number;
+  size: number;
+  phase: number;
+}
+
 interface Obstacle {
   x: number;
   sprite: SpriteName;
@@ -74,9 +91,37 @@ function makeSkyline() {
   return buildings;
 }
 
+function makeStars(): Star[] {
+  return Array.from({ length: STAR_COUNT }, () => ({
+    x: randomBetween(0, STAGE_W),
+    y: randomBetween(STAR_AREA.top, STAR_AREA.bottom),
+    size: Math.random() < 0.2 ? 2 : 1,
+    phase: randomBetween(0, Math.PI * 2),
+  }));
+}
+
+function drawNightSky(g: CanvasRenderingContext2D, stars: readonly Star[], scroll: number, clock: number) {
+  g.fillStyle = '#ffffff';
+  for (const s of stars) {
+    g.globalAlpha = 0.35 + 0.35 * Math.sin(clock * STAR_TWINKLE_SPEED + s.phase);
+    const x = (((s.x - scroll * STAR_PARALLAX) % STAGE_W) + STAGE_W) % STAGE_W;
+    g.fillRect(x, s.y, s.size, s.size);
+  }
+  g.globalAlpha = 1;
+  g.beginPath();
+  g.arc(MOON.x, MOON.y, MOON.r, 0, Math.PI * 2);
+  g.fillStyle = MOON.color;
+  g.fill();
+  g.beginPath();
+  g.arc(MOON.x + MOON_BITE.dx, MOON.y + MOON_BITE.dy, MOON.r, 0, Math.PI * 2);
+  g.fillStyle = C.bg;
+  g.fill();
+}
+
 function createOvertimeRunner({ playerColor }: RoundOptions): GameRound {
   const floats = new FloatTexts();
   const skyline = makeSkyline();
+  const stars = makeStars();
   const outfit = { a: playerColor };
   let obstacles: Obstacle[] = [];
   let coffees: Coffee[] = [];
@@ -113,6 +158,7 @@ function createOvertimeRunner({ playerColor }: RoundOptions): GameRound {
   function drawBackground(g: CanvasRenderingContext2D) {
     g.fillStyle = C.bg;
     g.fillRect(0, 0, STAGE_W, STAGE_H);
+    drawNightSky(g, stars, scroll, elapsed);
     // 건물은 땅보다 1/5 빠르기로 흘러가요
     const far = (scroll * 0.2) % (STAGE_W * 2);
     for (const b of skyline) {
@@ -198,7 +244,11 @@ function createOvertimeRunner({ playerColor }: RoundOptions): GameRound {
 export const overtimeRunner: GameModule = {
   intro: {
     title: '야근 러너',
-    rules: ['회의·멘션·핫픽스·버그를 뛰어넘어요', `커피를 마시면 ${COFFEE_BONUS_MIN}분 더 버텨요`, '갈수록 빨라져요. 몇 시까지 버틸까요?'],
+    rules: [
+      { icon: 'meeting', text: '회의·멘션·핫픽스·버그를 뛰어넘어요' },
+      { icon: 'coffee', text: `커피를 마시면 ${COFFEE_BONUS_MIN}분 더 버텨요` },
+      { icon: 'run0', text: '갈수록 빨라져요. 몇 시까지 버틸까요?' },
+    ],
     controls: { touch: '화면을 톡 눌러 점프', keys: '스페이스나 ↑로 점프' },
   },
   create: createOvertimeRunner,

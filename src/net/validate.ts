@@ -16,6 +16,7 @@ import {
   actionById,
 } from '../config';
 import { normalizeOutfit } from '../look';
+import { isGameId } from '../minigames/ids';
 import { ROOM, SPAWN, seatById } from '../world/layout';
 import { maskIfBad } from './badwords';
 import type { BusyHours, Commit, NetEvent, PeerState, RoomToday, SeatTrace } from './types';
@@ -93,6 +94,9 @@ function studySinceOf(raw: Record<string, unknown>, now: number): number {
   return clamp(num(raw.studySince, legacy), now - STUDY_SINCE_MAX_AGE_MS, now);
 }
 
+/** 신기록 알림에 받아 줄 가장 큰 점수 (화면에 보여주기만 해서 넉넉하게. 서버 스코어 판 상한은 schema.sql 9번) */
+const RECORD_SCORE_MAX = 1_000_000;
+
 /** Broadcast로 받은 이벤트 */
 export function cleanEvent(raw: unknown): NetEvent | null {
   if (!isObj(raw)) return null;
@@ -138,6 +142,12 @@ export function cleanEvent(raw: unknown): NetEvent | null {
       const pid = id(raw.id);
       return pid ? { type: raw.type, id: pid } : null;
     }
+    case 'record': {
+      const pid = id(raw.id);
+      const score = raw.score;
+      const scoreOk = typeof score === 'number' && Number.isInteger(score) && 0 <= score && score <= RECORD_SCORE_MAX;
+      return pid && isGameId(raw.game) && scoreOk ? { type: 'record', id: pid, game: raw.game, score: score as number } : null;
+    }
   }
   return null;
 }
@@ -175,6 +185,7 @@ const MIN_GAP: Record<Exclude<NetEvent['type'], 'commit' | 'commitHidden'>, numb
   typing: 250,
   coffee: 2000,
   deploy: 20000,
+  record: 30000,
 };
 
 export class RateLimiter {

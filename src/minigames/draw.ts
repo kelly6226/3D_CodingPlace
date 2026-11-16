@@ -19,7 +19,7 @@ export const C = {
   grass: cssColor('--g3'),
 };
 
-const UI_FONT = 'Pretendard, "Apple SD Gothic Neo", sans-serif';
+export const UI_FONT = 'Pretendard, "Apple SD Gothic Neo", sans-serif';
 const MONO_FONT = '"JetBrains Mono", "D2Coding", ui-monospace, monospace';
 
 /** 위쪽 점수 줄의 높이 */

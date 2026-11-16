@@ -213,7 +213,11 @@ function createBugCatch(): GameRound {
 export const bugCatch: GameModule = {
   intro: {
     title: '버그 잡기',
-    rules: [`${ROUND_SEC}초 동안 버그를 눌러 잡아요`, `빨간 프로덕션 버그는 ${KINDS.prod.points}점`, `나비는 기능이에요. 잡으면 ${KINDS.feature.points}점`],
+    rules: [
+      { icon: 'bug0', text: `${ROUND_SEC}초 동안 버그를 눌러 잡아요` },
+      { icon: 'prodBug0', text: `빨간 프로덕션 버그는 ${KINDS.prod.points}점` },
+      { icon: 'feature0', text: `나비는 기능이에요. 잡으면 ${KINDS.feature.points}점` },
+    ],
     controls: { touch: '버그를 톡 눌러요', keys: '마우스로 버그를 클릭해요' },
   },
   create: createBugCatch,

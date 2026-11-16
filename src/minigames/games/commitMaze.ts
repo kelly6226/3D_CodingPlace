@@ -382,7 +382,11 @@ function createCommitMaze({ playerColor }: RoundOptions): GameRound {
 export const commitMaze: GameModule = {
   intro: {
     title: '커밋 미로',
-    rules: ['초록 커밋을 다 모으면 다음 레벨', '회의·질문·장애 알림에 닿으면 ♥ −1', `커피를 마시면 ${COFFEE_SEC}초 동안 거꾸로 잡아요`],
+    rules: [
+      { icon: 'me', text: '초록 커밋을 다 모으면 다음 레벨' },
+      { icon: 'alert', text: '회의·질문·장애 알림에 닿으면 ♥ −1' },
+      { icon: 'coffee', text: `커피를 마시면 ${COFFEE_SEC}초 동안 거꾸로 잡아요` },
+    ],
     controls: { touch: '가고 싶은 쪽을 누르거나 쓸어요', keys: '방향키나 WASD' },
   },
   create: createCommitMaze,
