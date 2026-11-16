@@ -9,6 +9,7 @@ import {
   EMOTES,
   FEEDBACK_URL,
   LANGS,
+  MINIGAMES_ENABLED,
   NOISE_GROUPS,
   NOISES,
   PLACES,
@@ -118,6 +119,8 @@ export interface UIHandlers {
   /** 이 방에서 나만 들을 배경 소리 고르기 */
   onNoise(id: NoiseId): void;
   onShare(): void;
+  /** 🎮 탕비실 오락기 열기 */
+  onArcade(): void;
   /** 시점 버튼: 내 캐릭터 따라 보기 / 방 전체 보기 */
   onView(cmd: ViewCommand): void;
   onProfileSave(p: Profile): void;
@@ -249,6 +252,8 @@ export class UI {
       h(
         'div',
         { class: 'hud hud-tools' },
+        // 쉬는 시간엔 반짝여서 한 판 하라고 알려요 (setSession이 켜고 꺼요)
+        MINIGAMES_ENABLED && h('button', { class: 'icon-btn', id: 'arcade-btn', onclick: () => this.h.onArcade(), 'aria-label': '미니게임 (탕비실 오락기)', title: '미니게임' }, '🎮'),
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '링크 복사' }, '🔗'),
         h(
@@ -773,6 +778,7 @@ export class UI {
     $('#session-text').textContent = sessionPillText(s, now);
     btn.setAttribute('aria-label', sessionPillLabel(s, now));
     btn.classList.toggle('break', s.phase === 'break');
+    document.getElementById('arcade-btn')?.classList.toggle('break', s.phase === 'break');
     const intro = document.getElementById('ir-session');
     if (intro) intro.textContent = sessionIntroText(s, now);
     if (this.sheet !== 'together') return;

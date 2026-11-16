@@ -523,6 +523,9 @@ export class World {
     return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height };
   }
 
+  /** 매 프레임 할 일 (start에서 정해요). 멈췄다 다시 그릴 때 써요 */
+  private loop: (() => void) | null = null;
+
   start(onFrame?: (dt: number) => void) {
     const loop = () => {
       this.timer.update();
@@ -551,7 +554,19 @@ export class World {
       this.renderer.render(this.scene, this.camera);
       this.labels.render(this.scene, this.camera);
     };
+    this.loop = loop;
     this.renderer.setAnimationLoop(loop);
+  }
+
+  /** 다른 화면(미니게임)이 앞을 다 가리는 동안 3D를 그리지 않아요. 아바타 움직임도 멈췄다가 resume에서 이어가요 */
+  pause() {
+    this.renderer.setAnimationLoop(null);
+  }
+
+  resume() {
+    if (!this.loop) return;
+    this.timer.update(); // 멈춰 있던 시간을 한 프레임으로 몰아 계산하지 않게
+    this.renderer.setAnimationLoop(this.loop);
   }
 }
 

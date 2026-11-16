@@ -1078,3 +1078,167 @@ revoke all on function public.sync_study(text, text, jsonb) from public, anon, a
 grant execute on function public.sync_study(text, text, jsonb) to anon, authenticated;
 revoke all on function public.sync_delete(text) from public, anon, authenticated;
 grant execute on function public.sync_delete(text) to anon, authenticated;
+
+
+-- ── 9. 탕비실 오락기 스코어 판 (게임별 이번 주 TOP 10) ─────────
+-- 브라우저마다 무작위로 만든 번호(방에서 쓰는 id)로 게임·주마다 최고 점수 한 줄만 남겨요.
+-- 주는 월요일 0시(KST)에 바뀌고, 4주가 지난 기록은 지워요.
+-- 점수는 브라우저가 보내는 값이라 조작을 완전히 막을 수는 없어요.
+-- 그래서 게임마다 나올 수 있는 점수 위로는 받지 않고, 한 사람이 너무 자주 올리지 못하게 해요.
+create table if not exists public.game_scores (
+  game text not null check (game in ('deploy-guard', 'bug-catch', 'overtime-run', 'commit-maze')),
+  week date not null,
+  player text not null check (player ~ '^[A-Za-z0-9_-]{1,40}$'),
+  name text not null check (char_length(name) between 1 and 20 and btrim(name) <> '' and name !~ '[[:cntrl:]]'),
+  color text not null check (color ~ '^#[0-9a-fA-F]{6}$'),
+  score int not null check (score >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (game, week, player)
+);
+
+create index if not exists game_scores_board_idx on public.game_scores (game, week, score desc, updated_at);
+create index if not exists game_scores_player_idx on public.game_scores (player, updated_at desc);
+
+alter table public.game_scores enable row level security;
+revoke all on public.game_scores from anon, authenticated;
+
+-- 스코어 판 함수들의 호출 수 (1분 단위, 서비스 전체). 사람을 알아보는 값은 없어요
+create table if not exists public.game_calls (
+  minute timestamptz primary key,
+  calls int not null default 0 check (calls >= 0)
+);
+
+alter table public.game_calls enable row level security;
+revoke all on public.game_calls from anon, authenticated;
+
+create or replace function public.game_call_ok()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  calls_per_minute constant int := 600;
+  v_calls int;
+begin
+  insert into public.game_calls as t (minute, calls) values (date_trunc('minute', now()), 1)
+  on conflict (minute) do update set calls = t.calls + 1
+  returning t.calls into v_calls;
+  return v_calls <= calls_per_minute;
+end;
+$$;
+
+-- 이번 주(KST 월요일)
+create or replace function public.game_week()
+returns date
+language sql
+stable
+set search_path = public
+as $$
+  select date_trunc('week', now() at time zone 'Asia/Seoul')::date;
+$$;
+
+-- 게임마다 받을 수 있는 가장 큰 점수 (실제로 나오기 어려운 값보다 넉넉하게)
+-- 배포 막기: 손 1개 1점 / 버그 잡기: 30초 / 야근 러너: 1초에 5분 → 100분 넘게 버텨야 30000 / 커밋 미로: 단계마다 약 700점
+create or replace function public.game_score_max(p_game text)
+returns int
+language sql
+immutable
+set search_path = public
+as $$
+  select case p_game
+    when 'deploy-guard' then 3000
+    when 'bug-catch' then 400
+    when 'overtime-run' then 30000
+    when 'commit-maze' then 100000
+  end;
+$$;
+
+-- 점수 올리기: 이번 주 내 최고 점수보다 높을 때만 바꿔요. 이번 주 내 순위와 최고 점수를 돌려줘요
+create or replace function public.submit_game_score(p_game text, p_player text, p_name text, p_color text, p_score int)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  min_gap constant interval := interval '3 seconds';
+  v_week date := public.game_week();
+  v_name text := btrim(coalesce(p_name, ''));
+  v_best int;
+begin
+  if public.game_score_max(p_game) is null then
+    raise exception 'bad game';
+  end if;
+  if p_player is null or p_player !~ '^[A-Za-z0-9_-]{1,40}$' then
+    raise exception 'bad player';
+  end if;
+  if p_color is null or p_color !~ '^#[0-9a-fA-F]{6}$' then
+    raise exception 'bad color';
+  end if;
+  if p_score is null or p_score not between 0 and public.game_score_max(p_game) then
+    raise exception 'bad score';
+  end if;
+  if char_length(v_name) not between 1 and 20 or v_name ~ '[[:cntrl:]]' or public.has_bad_word(v_name) then
+    raise exception 'bad name';
+  end if;
+  if exists (select 1 from public.game_scores where player = p_player and updated_at > now() - min_gap) then
+    raise exception 'too many scores, slow down';
+  end if;
+  if not public.game_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+
+  insert into public.game_scores as s (game, week, player, name, color, score)
+  values (p_game, v_week, p_player, v_name, p_color, p_score)
+  on conflict (game, week, player) do update
+    set score = greatest(s.score, excluded.score),
+        name = excluded.name,
+        color = excluded.color,
+        updated_at = now()
+  returning s.score into v_best;
+
+  -- 가끔(약 2%) 지난 기록과 지난 호출 수를 정리해요
+  if random() < 0.02 then
+    delete from public.game_scores where week < v_week - 28;
+    delete from public.game_calls where minute < now() - interval '10 minutes';
+  end if;
+
+  return json_build_object(
+    'rank', 1 + (select count(*) from public.game_scores where game = p_game and week = v_week and score > v_best),
+    'score', v_best
+  );
+end;
+$$;
+
+-- 이번 주 TOP 10과 내 순위. 다른 사람의 번호(player)는 돌려주지 않아요
+create or replace function public.game_board(p_game text, p_player text default null)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with week_scores as (
+    select player, name, color, score,
+           rank() over (order by score desc) as rank,
+           row_number() over (order by score desc, updated_at) as pos
+    from public.game_scores
+    where game = p_game and week = public.game_week()
+  )
+  select json_build_object(
+    'top', coalesce((
+      select json_agg(json_build_object('rank', rank, 'name', name, 'color', color, 'score', score, 'mine', player = p_player) order by pos)
+      from week_scores where pos <= 10
+    ), '[]'::json),
+    'me', (select json_build_object('rank', rank, 'score', score) from week_scores where player = p_player)
+  );
+$$;
+
+revoke all on function public.game_call_ok() from public, anon, authenticated;
+revoke all on function public.game_week() from public, anon, authenticated;
+revoke all on function public.game_score_max(text) from public, anon, authenticated;
+revoke all on function public.submit_game_score(text, text, text, text, int) from public, anon, authenticated;
+grant execute on function public.submit_game_score(text, text, text, text, int) to anon, authenticated;
+revoke all on function public.game_board(text, text) from public, anon, authenticated;
+grant execute on function public.game_board(text, text) to anon, authenticated;

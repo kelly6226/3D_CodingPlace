@@ -2919,3 +2919,264 @@ button.place-name {
 .sheet-sync .sync-arrival-go + .sheet-note + .ghost.wide {
   margin-top: 12px;
 }
+
+/* ── 탕비실 오락기 (미니게임) ─────────────────────── */
+/* 쉬는 시간엔 🎮 버튼이 전구색으로 반짝여요 */
+#arcade-btn.break {
+  border-color: rgba(242, 180, 90, 0.6);
+  animation: arcade-glow 2.4s ease-in-out infinite;
+}
+@keyframes arcade-glow {
+  50% {
+    box-shadow: 0 0 0 4px rgba(242, 180, 90, 0.18);
+  }
+}
+.arcade {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  padding: calc(12px + var(--safe-t)) max(12px, var(--safe-r)) calc(12px + var(--safe-b)) max(12px, var(--safe-l));
+  background: rgba(5, 7, 14, 0.82);
+  backdrop-filter: blur(6px);
+}
+.arcade-card {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.arcade-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.arcade-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.arcade-session {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+}
+.arcade-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.arcade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.arcade-game {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  text-align: left;
+}
+.arcade-game:hover {
+  border-color: rgba(242, 180, 90, 0.5);
+}
+.ag-emoji {
+  flex: none;
+  font-size: 30px;
+  line-height: 1;
+}
+.ag-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ag-how {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.ag-best {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.arcade-foot {
+  display: block;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.arcade-loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.arcade-play-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.arcade-back {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.arcade-stage {
+  position: relative;
+  /* 3:4 화면이 카드 높이를 넘지 않게: 높이(화면 - 머리말·여백)에 맞춘 너비와 카드 너비 중 작은 쪽 */
+  width: min(100%, calc((100dvh - 190px - var(--safe-t) - var(--safe-b)) * 0.75));
+  margin: 0 auto;
+}
+.arcade-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  /* 연타해도 화면이 확대되거나 밀리지 않게 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.arcade-result {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px;
+  border-radius: 12px;
+  background: rgba(5, 7, 14, 0.8);
+  text-align: center;
+}
+.arcade-result p {
+  margin: 0;
+}
+.ar-title {
+  font-size: 14px;
+  color: var(--muted);
+}
+.ar-score {
+  margin-top: 6px !important;
+  font-size: 26px;
+  font-weight: 800;
+  word-break: keep-all;
+}
+.ar-record {
+  margin-top: 6px !important;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ar-record.new {
+  color: var(--amber);
+  font-weight: 800;
+}
+/* 게임마다 🏆 순위 버튼 (카드 오른쪽 위) */
+.arcade-item {
+  position: relative;
+}
+.arcade-item .arcade-game {
+  padding-right: 58px;
+}
+.arcade-rank-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  font-size: 18px;
+}
+.arcade-rank-btn:hover {
+  border-color: rgba(242, 180, 90, 0.5);
+}
+.ar-board {
+  margin-top: 8px !important;
+  font-size: 12.5px;
+  color: var(--fg);
+  word-break: keep-all;
+}
+/* 스코어 판 */
+.arcade-board-sub {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  word-break: keep-all;
+}
+.board-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.board-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: 14px;
+}
+.board-list li.mine {
+  background: rgba(242, 180, 90, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(242, 180, 90, 0.55);
+}
+.bd-rank {
+  width: 22px;
+  text-align: right;
+  font-family: var(--mono);
+  font-weight: 800;
+  color: var(--muted);
+}
+.bd-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.bd-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.bd-score {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+}
+.board-me {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber);
+}

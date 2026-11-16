@@ -5,6 +5,7 @@ import {
   CONTEXT_LOSS_TOAST_MS,
   DEFAULT_ROOM,
   DEVICE_SYNC_ENABLED,
+  MINIGAMES_ENABLED,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
   REPORTS_TO_HIDE,
@@ -1172,9 +1173,28 @@ function onFrame(dt: number) {
   }
 }
 
+// ── 탕비실 오락기 ─────────────────────────────────
+/** 🎮를 처음 누를 때 게임 코드를 받아와요 (처음 들어올 때 받는 양은 그대로) */
+async function openArcade() {
+  if (!world || !self) return;
+  const arcade = await import('./minigames/arcade');
+  arcade.openArcade({
+    pauseWorld: () => world.pause(),
+    resumeWorld: () => world.resume(),
+    player: () => ({ id: self.id, name: self.name, color: self.color }),
+    scoreServer: isOnline ? { url: supabaseUrl!, key: supabaseKey! } : null,
+  });
+}
+
 // ── 정각 세션 ─────────────────────────────────────
 /** 세션 끝 토스트 다음에 안내 토스트를 띄우기까지 */
 const NUDGE_DELAY_MS = 2500;
+const BREAK_GAME_NUDGE = '🎮 쉬는 동안 오른쪽 위 오락기에서 한 판 해도 돼요';
+const BREAK_GAME_NUDGE_MS = 6000;
+
+function nudgeBreakGame() {
+  if (MINIGAMES_ENABLED) window.setTimeout(() => ui.toast(BREAK_GAME_NUDGE, 'info', BREAK_GAME_NUDGE_MS), NUDGE_DELAY_MS);
+}
 
 /** 이번 집중 시간에 실제로 있었던 시간(ms). SESSION_DONE_MIN_MS를 넘기면 세션 하나를 끝낸 걸로 쳐요 */
 let focusedThisSession = 0;
@@ -1199,10 +1219,13 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
       window.setTimeout(() => ui.toast("내일도 이 시간에 올 거면 왼쪽 위 '집중' 버튼에서 매일 오는 시간을 정해 두세요", 'info', 7000), NUDGE_DELAY_MS);
     } else if (shouldNudgeSync()) {
       window.setTimeout(() => ui.toast('📱 오늘 기록은 이 브라우저에만 남아요. 회사·집, 폰에서도 이어 쓰려면 오른쪽 위 👤에서 이어하기를 켜 두세요', 'info', 8000), NUDGE_DELAY_MS);
+    } else {
+      nudgeBreakGame();
     }
     return;
   }
   ui.toast(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
+  nudgeBreakGame();
 }
 
 watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseChange });
@@ -1256,6 +1279,7 @@ ui.bind({
     if (on) sound.start();
   },
   onNoise: pickNoise,
+  onArcade: () => void openArcade(),
   onShare: async () => {
     const link = roomUrl(room.slug);
     if (!(await copyText(link))) {
