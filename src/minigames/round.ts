@@ -1,5 +1,6 @@
 // 게임 한 판을 캔버스에 돌려요: 화면 크기 맞추기, 매 프레임 그리기, 누르기·쓸어넘기기·키보드 입력
-import { C, drawLabel } from './draw';
+import { C, UI_FONT, drawLabel } from './draw';
+import { drawSprite } from './sprites';
 import { STAGE_H, STAGE_W, type Direction, type GameRound, type RoundIntro } from './types';
 
 /** 프레임 사이가 이보다 길면(다른 탭을 다녀옴) 이만큼만 흐른 걸로 쳐요 */
@@ -10,7 +11,10 @@ const MAX_PIXEL_RATIO = 2;
 const SWIPE_MIN_PX = 24;
 /** 시작 화면의 '눌러서 시작'이 진해졌다 옅어지는 빠르기 (초마다 몇 번) */
 const READY_PULSE_PER_SEC = 1.2;
-const READY_LINE_H = 24;
+const READY_LINE_H = 30;
+const READY_RULE_SIZE = 13;
+const READY_ICON = 24;
+const READY_ICON_GAP = 10;
 
 /** 터치가 주된 입력인 기기인지 (시작 화면에 폰 조작법을 보여줄지) */
 const isTouchFirst = () => window.matchMedia('(pointer: coarse)').matches;
@@ -53,7 +57,7 @@ export class RoundView {
     this.canvas.className = 'arcade-canvas';
     this.canvas.setAttribute('role', 'img');
     this.canvas.tabIndex = 0;
-    this.canvas.setAttribute('aria-label', `${intro.title} 게임 화면. ${intro.rules.join(' ')} ${intro.controls.keys}. 화면을 누르거나 스페이스를 눌러서 시작해요`);
+    this.canvas.setAttribute('aria-label', `${intro.title} 게임 화면. ${intro.rules.map((r) => r.text).join(' ')} ${intro.controls.keys}. 화면을 누르거나 스페이스를 눌러서 시작해요`);
     this.g = this.canvas.getContext('2d')!;
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
@@ -158,8 +162,16 @@ export class RoundView {
     g.fillRect(0, 0, STAGE_W, STAGE_H);
     const top = STAGE_H / 2 - ((rules.length + 4) * READY_LINE_H) / 2;
     drawLabel(g, title, STAGE_W / 2, top, { size: 22, color: C.fg, weight: 800 });
-    rules.forEach((rule, i) => drawLabel(g, rule, STAGE_W / 2, top + (i + 2) * READY_LINE_H, { size: 13, color: C.fg, weight: 500 }));
-    const after = top + (rules.length + 2) * READY_LINE_H;
+    // 규칙은 그림 칸 + 글을 한 덩어리로 묶어 가운데에 두고, 줄마다 왼쪽을 맞춰요
+    g.font = `500 ${READY_RULE_SIZE}px ${UI_FONT}`;
+    const textW = Math.max(...rules.map((r) => g.measureText(r.text).width));
+    const left = (STAGE_W - (READY_ICON + READY_ICON_GAP + textW)) / 2;
+    rules.forEach((rule, i) => {
+      const y = top + (i + 1.6) * READY_LINE_H;
+      if (rule.icon) drawSprite(g, rule.icon, left + READY_ICON / 2, y, READY_ICON);
+      drawLabel(g, rule.text, left + READY_ICON + READY_ICON_GAP, y, { size: READY_RULE_SIZE, color: C.fg, weight: 500, align: 'left' });
+    });
+    const after = top + (rules.length + 1.6) * READY_LINE_H;
     drawLabel(g, touch ? controls.touch : controls.keys, STAGE_W / 2, after + 4, { size: 12, color: C.muted, weight: 600 });
     const pulse = 0.55 + 0.45 * Math.sin((performance.now() / 1000) * READY_PULSE_PER_SEC * Math.PI * 2);
     g.globalAlpha = pulse;

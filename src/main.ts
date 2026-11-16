@@ -28,6 +28,7 @@ import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
+import type { GameId } from './minigames/ids';
 import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
@@ -1044,6 +1045,9 @@ function onEvent(e: NetEvent) {
     case 'typing':
       world.avatars.get(e.id)?.typeBurst();
       break;
+    case 'record':
+      void showPeerRecord(e);
+      break;
   }
 }
 
@@ -1183,7 +1187,28 @@ async function openArcade() {
     resumeWorld: () => world.resume(),
     player: () => ({ id: self.id, name: self.name, color: self.color }),
     scoreServer: isOnline ? { url: supabaseUrl!, key: supabaseKey! } : null,
+    onNewRecord: shareNewRecord,
   });
+}
+
+/** 내 최고 기록을 깨면 내 머리 위에 띄우고, 방 사람들에게도 한 번 알려요 (실시간 메시지 1개) */
+function shareNewRecord(game: GameId, score: number) {
+  meAvatar().emote('🏆', '신기록');
+  net.send({ type: 'record', id: self.id, game, score });
+}
+
+const RECORD_TOAST_MS = 5000;
+
+/** 다른 사람의 신기록: 그 사람 머리 위와 토스트로. 게임 이름과 점수 글은 오락기 목록에서 가져와요 */
+async function showPeerRecord(e: Extract<NetEvent, { type: 'record' }>) {
+  if (!MINIGAMES_ENABLED) return; // 오락기가 꺼진 곳(토스 앱)에서는 알림도 안 띄워요
+  const a = world.avatars.get(e.id);
+  if (!a || a.isSelf) return;
+  const { GAMES } = await import('./minigames/catalog');
+  const def = GAMES.find((g) => g.id === e.game);
+  if (!def) return;
+  a.emote('🏆', '신기록');
+  ui.toast(`🏆 ${a.state.name}님이 ${def.title}에서 신기록! (${def.formatScore(e.score)})`, 'good', RECORD_TOAST_MS);
 }
 
 // ── 정각 세션 ─────────────────────────────────────

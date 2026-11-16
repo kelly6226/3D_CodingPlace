@@ -232,7 +232,12 @@ function createDeployGuard(): GameRound {
 export const deployGuard: GameModule = {
   intro: {
     title: '금요일 배포 막기',
-    rules: ['배포 버튼으로 오는 손을 눌러 막아요', '초록 소매에 ✓ 도장은 QA 통과한 손', `막지 말고 보내 주면 +${QA_BONUS}점`, `${LIVES}번 배포되면 끝나요`],
+    rules: [
+      { icon: 'hand', text: '배포 버튼으로 오는 손을 눌러 막아요' },
+      { icon: 'qaStamp', text: '초록 소매에 ✓ 도장은 QA 통과한 손' },
+      { text: `막지 말고 보내 주면 +${QA_BONUS}점` },
+      { text: `${LIVES}번 배포되면 끝나요` },
+    ],
     controls: { touch: '손을 톡 눌러요', keys: '마우스로 손을 클릭해요' },
   },
   create: createDeployGuard,

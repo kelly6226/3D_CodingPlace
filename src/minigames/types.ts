@@ -1,4 +1,5 @@
 // 미니게임 한 판이 지켜야 하는 모양
+import type { SpriteName } from './sprites';
 
 /** 게임 화면의 논리 크기. 실제 캔버스는 이 비율(3:4)을 지키며 늘리고 줄여요 */
 export const STAGE_W = 360;
@@ -18,11 +19,17 @@ export interface GameModule {
   create(opts: RoundOptions): GameRound;
 }
 
+/** 시작 화면 규칙 한 줄. 그림이 있으면 글 왼쪽에 같이 보여요 */
+export interface RuleLine {
+  icon?: SpriteName;
+  /** 한 줄에 20자 안팎으로 짧게 */
+  text: string;
+}
+
 /** 시작 전 화면에 보여줄 설명 */
 export interface RoundIntro {
   title: string;
-  /** 한 줄에 20자 안팎으로 짧게 */
-  rules: readonly string[];
+  rules: readonly RuleLine[];
   /** 폰에서 / 키보드로 조작하는 법 */
   controls: { touch: string; keys: string };
 }

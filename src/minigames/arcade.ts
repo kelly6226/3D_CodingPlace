@@ -25,6 +25,8 @@ export interface ArcadeHooks {
   player(): Player;
   /** 실시간 서버. 데모 모드면 null이라 스코어 판 없이 내 기록만 보여요 */
   scoreServer: { url: string; key: string } | null;
+  /** 내 최고 기록을 깼을 때. 같은 방 사람들에게 알리는 건 main.ts 몫이에요 */
+  onNewRecord(game: GameId, score: number): void;
 }
 
 let opened: Arcade | null = null;
@@ -56,7 +58,7 @@ function recordLine(def: GameDef, outcome: RecordOutcome): string {
 /** 순위를 올린 뒤 한 줄: 1위면 축하, 아니면 1위가 누구인지 */
 function rankLine(def: GameDef, mine: SubmitResult): string {
   if (mine.rank === 1) return '🏆 이번 주 전체 1위예요!';
-  const top = mine.top ? ` · 1위 ${mine.top.name} ${def.formatScore(mine.top.score)}` : '';
+  const top = mine.top ? `\n1위 ${mine.top.name} · ${def.formatScore(mine.top.score)}` : '';
   return `🏆 이번 주 전체 ${mine.rank}위${top}`;
 }
 
@@ -182,7 +184,13 @@ class Arcade {
           );
         }),
       ),
-      h('small', { class: 'arcade-foot' }, this.scores ? '🏆 점수를 내면 닉네임과 점수가 이번 주 스코어 판에 올라가요 (매주 월요일 0시 KST에 새로 시작). 내 최고 기록은 이 브라우저에만 남아요.' : '기록은 이 브라우저에만 남아요.'),
+      h(
+        'p',
+        { class: 'arcade-foot' },
+        ...(this.scores
+          ? ['🏆 점수를 내면 닉네임과 점수가 이번 주 스코어 판에 올라가요.', h('br'), '스코어 판은 매주 월요일 0시(KST)에 새로 시작하고, 내 최고 기록은 이 브라우저에만 남아요.']
+          : ['기록은 이 브라우저에만 남아요.']),
+      ),
     );
     (this.body.querySelector('.arcade-game') as HTMLElement | null)?.focus();
     void this.showLeaders(view);
@@ -230,7 +238,10 @@ class Arcade {
   /** 한 판이 끝나면: 내 기록에 남기고, 결과를 보여주고, 스코어 판에 올려요 */
   private finishRound(def: GameDef, score: number, panel: HTMLElement) {
     const outcome = recordScore(def.id, score);
-    if (outcome.kind === 'new') sound.chime();
+    if (outcome.kind === 'new') {
+      sound.chime();
+      this.hooks.onNewRecord(def.id, score);
+    }
     const boardLine = h('p', { class: 'ar-board' }, '');
     const again = h('button', { type: 'button', class: 'primary', onclick: () => void this.play(def) }, '다시 하기');
     panel.replaceChildren(

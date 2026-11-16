@@ -1,5 +1,6 @@
 // 실시간 연결(온라인/데모)이 공통으로 지키는 약속
 import type { ActionId, NoiseId, PlaceId, RoomInfo } from '../config';
+import type { GameId } from '../minigames/ids';
 import type { Outfit } from '../look';
 
 export interface PeerState {
@@ -48,7 +49,9 @@ export type NetEvent =
   | { type: 'chat'; id: string; text: string; to?: string }
   | { type: 'act'; id: string; act: ActionId }
   | { type: 'typing'; id: string }
-  | { type: 'coffee'; id: string };
+  | { type: 'coffee'; id: string }
+  /** 탕비실 오락기에서 내 최고 기록을 깼어요. 이름은 받는 쪽이 방 사람 정보에서 찾아요 */
+  | { type: 'record'; id: string; game: GameId; score: number };
 
 export type JoinResult = 'ok' | 'wrong' | 'error';
 

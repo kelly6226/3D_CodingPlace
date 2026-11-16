@@ -1,10 +1,10 @@
 // 탕비실 오락기에 있는 게임들. 목록에 보일 글만 여기 두고, 게임 코드와 시작 화면 설명은 고를 때 받아와요
+import type { GameId } from './ids';
 import { overtimeClock } from './overtimeClock';
 import type { SpriteName } from './sprites';
 import type { GameModule } from './types';
 
-/** 게임을 더하거나 빼면 supabase/schema.sql 9번의 game 목록(check)과 game_score_max도 같이 바꿔요 */
-export type GameId = 'deploy-guard' | 'bug-catch' | 'overtime-run' | 'commit-maze';
+export type { GameId } from './ids';
 
 export interface GameDef {
   id: GameId;
