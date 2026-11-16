@@ -1187,7 +1187,7 @@ async function openArcade() {
   arcade.openArcade({
     pauseWorld: () => world.pause(),
     resumeWorld: () => world.resume(),
-    player: () => ({ id: self.id, name: self.name, color: self.color }),
+    player: () => ({ name: self.name, color: self.color }),
     scoreServer: isOnline ? { url: supabaseUrl!, key: supabaseKey! } : null,
     onNewRecord: shareNewRecord,
   });

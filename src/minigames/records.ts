@@ -1,4 +1,4 @@
-// 게임마다 내 최고 기록. 이 브라우저에만 남고 서버로 보내지 않아요
+// 게임마다 내 최고 기록(이 브라우저에만)과, 스코어 판에서 나를 알아보는 비밀 번호
 import type { GameId } from './catalog';
 
 const KEY = 'mogakco:games:v1';
@@ -41,3 +41,30 @@ export function recordScore(id: GameId, score: number): RecordOutcome {
   }
   return prev === undefined ? { kind: 'first' } : { kind: 'new', prev };
 }
+
+const SCORE_KEY = 'mogakco:games:key';
+const SCORE_KEY_RE = /^[0-9a-f]{32}$/;
+
+function newScoreKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * 스코어 판에서 '내 줄'을 알아보는 비밀 번호 (16바이트 무작위, 이 브라우저에만).
+ * 방에서 쓰는 id는 같은 방 사람들에게 보이니까, 그걸로 남의 줄 이름을 바꾸지 못하게 따로 만들어요.
+ * 서버에는 이 번호의 해시만 남아요 (schema.sql 9번 submit_game_score)
+ */
+export function scoreKey(): string {
+  try {
+    const saved = localStorage.getItem(SCORE_KEY);
+    if (saved && SCORE_KEY_RE.test(saved)) return saved;
+    const fresh = newScoreKey();
+    localStorage.setItem(SCORE_KEY, fresh);
+    return fresh;
+  } catch {
+    // 저장이 막힌 브라우저: 이번 접속 동안만 쓰는 번호 (새로고침하면 판에 새 줄로 올라가요)
+    return (sessionKey ??= newScoreKey());
+  }
+}
+let sessionKey: string | null = null;
