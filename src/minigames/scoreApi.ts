@@ -2,9 +2,8 @@
 // 이어하기(sync/api.ts)처럼 Supabase 클라이언트를 하나 더 만들지 않고 RPC 주소를 바로 불러요.
 import type { GameId } from './catalog';
 
-/** 판에 이름을 올릴 나. id는 이 브라우저의 무작위 번호예요 (방에서 쓰는 것과 같아요) */
+/** 판에 올릴 내 이름표 */
 export interface Player {
-  id: string;
   name: string;
   color: string;
 }
@@ -94,8 +93,8 @@ export class ScoreApi {
   ) {}
 
   /** 이번 판 점수를 올려요. 서버는 이번 주 내 최고 점수만 남기고, 내 순위와 1위를 돌려줘요 */
-  async submit(game: GameId, player: Player, score: number): Promise<SubmitResult> {
-    const raw = await this.rpc('submit_game_score', { p_game: game, p_player: player.id, p_name: player.name, p_color: player.color, p_score: score });
+  async submit(game: GameId, key: string, player: Player, score: number): Promise<SubmitResult> {
+    const raw = await this.rpc('submit_game_score', { p_game: game, p_player: key, p_name: player.name, p_color: player.color, p_score: score });
     const ranked = cleanRank(raw);
     if (!ranked) throw new ScoreError('server', 'bad response');
     return { ...ranked, top: cleanLeader((raw as Record<string, unknown>).top) };
@@ -113,9 +112,9 @@ export class ScoreApi {
     return out;
   }
 
-  /** 이 게임의 이번 주 TOP 10과 내 순위 */
-  async board(game: GameId, playerId: string): Promise<Board> {
-    return cleanBoard(await this.rpc('game_board', { p_game: game, p_player: playerId }));
+  /** 이 게임의 이번 주 TOP 10과 내 순위 (key: records.ts scoreKey) */
+  async board(game: GameId, key: string): Promise<Board> {
+    return cleanBoard(await this.rpc('game_board', { p_game: game, p_player: key }));
   }
 
   private async rpc(fn: string, args: object): Promise<unknown> {

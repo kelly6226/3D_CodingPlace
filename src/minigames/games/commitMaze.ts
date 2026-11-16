@@ -154,6 +154,36 @@ function advance(m: Mover, tiles: number, onArrive: (m: Mover) => Direction | nu
   }
 }
 
+/** 벽은 판 내내 그대로라 처음 한 번만 작은 캔버스에 그려 두고, 매 프레임엔 찍기만 해요 */
+const WALLS_SCALE = 2;
+let wallsCache: HTMLCanvasElement | null = null;
+
+function mazeWalls(): HTMLCanvasElement {
+  if (wallsCache) return wallsCache;
+  const canvas = document.createElement('canvas');
+  canvas.width = STAGE_W * WALLS_SCALE;
+  canvas.height = ROWS * TILE * WALLS_SCALE;
+  const g = canvas.getContext('2d')!;
+  g.scale(WALLS_SCALE, WALLS_SCALE);
+  MAP.forEach((row, r) =>
+    [...row].forEach((ch, c) => {
+      if (ch !== '#') return;
+      const x = c * TILE;
+      const y = r * TILE;
+      g.fillStyle = WALL_COLOR;
+      g.fillRect(x, y, TILE, TILE);
+      // 통로와 맞닿은 쪽에 밝은 선을 그어 벽 모양이 보이게
+      g.fillStyle = WALL_EDGE;
+      if (isOpen(c, r - 1)) g.fillRect(x, y, TILE, WALL_EDGE_PX);
+      if (isOpen(c, r + 1)) g.fillRect(x, y + TILE - WALL_EDGE_PX, TILE, WALL_EDGE_PX);
+      if (isOpen(c - 1, r)) g.fillRect(x, y, WALL_EDGE_PX, TILE);
+      if (isOpen(c + 1, r)) g.fillRect(x + TILE - WALL_EDGE_PX, y, WALL_EDGE_PX, TILE);
+    }),
+  );
+  wallsCache = canvas;
+  return canvas;
+}
+
 function freshCommits(): Map<number, 'commit' | 'coffee'> {
   const items = new Map<number, 'commit' | 'coffee'>();
   MAP.forEach((row, r) =>
@@ -294,21 +324,7 @@ function createCommitMaze({ playerColor }: RoundOptions): GameRound {
   }
 
   function drawMaze(g: CanvasRenderingContext2D) {
-    MAP.forEach((row, r) =>
-      [...row].forEach((ch, c) => {
-        if (ch !== '#') return;
-        const x = c * TILE;
-        const y = MAZE_TOP + r * TILE;
-        g.fillStyle = WALL_COLOR;
-        g.fillRect(x, y, TILE, TILE);
-        // 통로와 맞닿은 쪽에 밝은 선을 그어 벽 모양이 보이게
-        g.fillStyle = WALL_EDGE;
-        if (isOpen(c, r - 1)) g.fillRect(x, y, TILE, WALL_EDGE_PX);
-        if (isOpen(c, r + 1)) g.fillRect(x, y + TILE - WALL_EDGE_PX, TILE, WALL_EDGE_PX);
-        if (isOpen(c - 1, r)) g.fillRect(x, y, WALL_EDGE_PX, TILE);
-        if (isOpen(c + 1, r)) g.fillRect(x + TILE - WALL_EDGE_PX, y, WALL_EDGE_PX, TILE);
-      }),
-    );
+    g.drawImage(mazeWalls(), 0, MAZE_TOP, STAGE_W, ROWS * TILE);
     const commitSize = TILE * 0.22;
     for (const [k, item] of items) {
       const x = ((k % COLS) + 0.5) * TILE;

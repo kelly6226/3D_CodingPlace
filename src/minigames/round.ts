@@ -47,6 +47,10 @@ export class RoundView {
   private lastAt = 0;
   private resizeWatch: ResizeObserver;
   private swipeFrom: { x: number; y: number } | null = null;
+  /** 시작 화면에 폰 조작법을 보여줄지 (판마다 한 번만 확인) */
+  private touchFirst = isTouchFirst();
+  /** 시작 화면 규칙 덩어리의 왼쪽 끝 (처음 그릴 때 한 번 재요) */
+  private rulesLeft: number | null = null;
 
   constructor(
     private round: GameRound,
@@ -153,19 +157,23 @@ export class RoundView {
     this.raf = requestAnimationFrame(this.frame);
   };
 
+  private measureRulesLeft() {
+    this.g.font = `500 ${READY_RULE_SIZE}px ${UI_FONT}`;
+    const textW = Math.max(...this.intro.rules.map((r) => this.g.measureText(r.text).width));
+    return (STAGE_W - (READY_ICON + READY_ICON_GAP + textW)) / 2;
+  }
+
   /** 시작 전: 게임 화면 위에 하는 법을 띄워요 */
   private drawReady() {
     const g = this.g;
     const { title, rules, controls } = this.intro;
-    const touch = isTouchFirst();
+    const touch = this.touchFirst;
     g.fillStyle = 'rgba(5, 7, 14, 0.78)';
     g.fillRect(0, 0, STAGE_W, STAGE_H);
     const top = STAGE_H / 2 - ((rules.length + 4) * READY_LINE_H) / 2;
     drawLabel(g, title, STAGE_W / 2, top, { size: 22, color: C.fg, weight: 800 });
     // 규칙은 그림 칸 + 글을 한 덩어리로 묶어 가운데에 두고, 줄마다 왼쪽을 맞춰요
-    g.font = `500 ${READY_RULE_SIZE}px ${UI_FONT}`;
-    const textW = Math.max(...rules.map((r) => g.measureText(r.text).width));
-    const left = (STAGE_W - (READY_ICON + READY_ICON_GAP + textW)) / 2;
+    const left = (this.rulesLeft ??= this.measureRulesLeft());
     rules.forEach((rule, i) => {
       const y = top + (i + 1.6) * READY_LINE_H;
       if (rule.icon) drawSprite(g, rule.icon, left + READY_ICON / 2, y, READY_ICON);

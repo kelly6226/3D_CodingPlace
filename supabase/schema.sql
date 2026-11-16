@@ -1081,20 +1081,26 @@ grant execute on function public.sync_delete(text) to anon, authenticated;
 
 
 -- ── 9. 탕비실 오락기 스코어 판 (게임별 이번 주 TOP 10) ─────────
--- 브라우저마다 무작위로 만든 번호(방에서 쓰는 id)로 게임·주마다 최고 점수 한 줄만 남겨요.
+-- 브라우저마다 스코어 판용으로 따로 만든 비밀 번호(minigames/records.ts scoreKey)의 해시로 게임·주마다 최고 점수 한 줄만 남겨요.
+-- 방에서 쓰는 id는 같은 방 사람들에게 보여서, 그걸로는 남의 줄 이름을 바꿀 수 있어 쓰지 않아요. 비밀 번호 원문은 저장하지 않아요.
 -- 주는 월요일 0시(KST)에 바뀌고, 4주가 지난 기록은 지워요.
 -- 점수는 브라우저가 보내는 값이라 조작을 완전히 막을 수는 없어요.
 -- 그래서 게임마다 나올 수 있는 점수 위로는 받지 않고, 한 사람이 너무 자주 올리지 못하게 해요.
 create table if not exists public.game_scores (
   game text not null check (game in ('deploy-guard', 'bug-catch', 'overtime-run', 'commit-maze')),
   week date not null,
-  player text not null check (player ~ '^[A-Za-z0-9_-]{1,40}$'),
+  player text not null check (player ~ '^[0-9a-f]{64}$'),
   name text not null check (char_length(name) between 1 and 20 and btrim(name) <> '' and name !~ '[[:cntrl:]]'),
   color text not null check (color ~ '^#[0-9a-fA-F]{6}$'),
   score int not null check (score >= 0),
   updated_at timestamptz not null default now(),
   primary key (game, week, player)
 );
+
+-- 예전(방 id로 저장하던) 기록은 지우고, 해시만 받도록 제약을 바꿔요 (여러 번 실행해도 괜찮아요)
+delete from public.game_scores where player !~ '^[0-9a-f]{64}$';
+alter table public.game_scores drop constraint if exists game_scores_player_check;
+alter table public.game_scores add constraint game_scores_player_check check (player ~ '^[0-9a-f]{64}$');
 
 create index if not exists game_scores_board_idx on public.game_scores (game, week, score desc, updated_at);
 create index if not exists game_scores_player_idx on public.game_scores (player, updated_at desc);
@@ -1138,6 +1144,16 @@ as $$
   select date_trunc('week', now() at time zone 'Asia/Seoul')::date;
 $$;
 
+-- 스코어 판 비밀 번호 → 저장할 해시 (형식이 틀리면 null)
+create or replace function public.game_player_hash(p_key text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case when p_key ~ '^[0-9a-f]{32}$' then encode(sha256(convert_to(p_key, 'UTF8')), 'hex') end;
+$$;
+
 -- 게임마다 받을 수 있는 가장 큰 점수 (실제로 나오기 어려운 값보다 넉넉하게)
 -- 배포 막기: 손 1개 1점 / 버그 잡기: 30초 / 야근 러너: 1초에 5분 → 100분 넘게 버텨야 30000 / 커밋 미로: 단계마다 약 700점
 create or replace function public.game_score_max(p_game text)
@@ -1165,12 +1181,13 @@ declare
   min_gap constant interval := interval '3 seconds';
   v_week date := public.game_week();
   v_name text := btrim(coalesce(p_name, ''));
+  v_player text := public.game_player_hash(p_player);
   v_best int;
 begin
   if public.game_score_max(p_game) is null then
     raise exception 'bad game';
   end if;
-  if p_player is null or p_player !~ '^[A-Za-z0-9_-]{1,40}$' then
+  if v_player is null then
     raise exception 'bad player';
   end if;
   if p_color is null or p_color !~ '^#[0-9a-fA-F]{6}$' then
@@ -1182,7 +1199,7 @@ begin
   if char_length(v_name) not between 1 and 20 or v_name ~ '[[:cntrl:]]' or public.has_bad_word(v_name) then
     raise exception 'bad name';
   end if;
-  if exists (select 1 from public.game_scores where player = p_player and updated_at > now() - min_gap) then
+  if exists (select 1 from public.game_scores where player = v_player and updated_at > now() - min_gap) then
     raise exception 'too many scores, slow down';
   end if;
   if not public.game_call_ok() then
@@ -1190,7 +1207,7 @@ begin
   end if;
 
   insert into public.game_scores as s (game, week, player, name, color, score)
-  values (p_game, v_week, p_player, v_name, p_color, p_score)
+  values (p_game, v_week, v_player, v_name, p_color, p_score)
   on conflict (game, week, player) do update
     set score = greatest(s.score, excluded.score),
         name = excluded.name,
@@ -1218,7 +1235,7 @@ begin
 end;
 $$;
 
--- 이번 주 TOP 10과 내 순위. 다른 사람의 번호(player)는 돌려주지 않아요
+-- 이번 주 TOP 10과 내 순위 (p_player는 내 비밀 번호). 누구의 해시도 돌려주지 않아요
 create or replace function public.game_board(p_game text, p_player text default null)
 returns json
 language sql
@@ -1235,10 +1252,10 @@ as $$
   )
   select json_build_object(
     'top', coalesce((
-      select json_agg(json_build_object('rank', rank, 'name', name, 'color', color, 'score', score, 'mine', player = p_player) order by pos)
+      select json_agg(json_build_object('rank', rank, 'name', name, 'color', color, 'score', score, 'mine', player = public.game_player_hash(p_player)) order by pos)
       from week_scores where pos <= 10
     ), '[]'::json),
-    'me', (select json_build_object('rank', rank, 'score', score) from week_scores where player = p_player)
+    'me', (select json_build_object('rank', rank, 'score', score) from week_scores where player = public.game_player_hash(p_player))
   );
 $$;
 
@@ -1264,6 +1281,7 @@ revoke all on function public.game_week() from public, anon, authenticated;
 revoke all on function public.game_leaders() from public, anon, authenticated;
 grant execute on function public.game_leaders() to anon, authenticated;
 revoke all on function public.game_score_max(text) from public, anon, authenticated;
+revoke all on function public.game_player_hash(text) from public, anon, authenticated;
 revoke all on function public.submit_game_score(text, text, text, text, int) from public, anon, authenticated;
 grant execute on function public.submit_game_score(text, text, text, text, int) to anon, authenticated;
 revoke all on function public.game_board(text, text) from public, anon, authenticated;
