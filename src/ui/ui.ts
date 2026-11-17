@@ -1123,6 +1123,7 @@ export class UI {
       h(
         'li',
         { class: [line.mine && 'mine', line.whisperWith && 'whisper'].filter(Boolean).join(' ') || undefined },
+        timeTag(new Date()),
         h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, who),
         h('span', { class: 'msg' }, line.text),
         pin,
@@ -1143,7 +1144,7 @@ export class UI {
 
   /** 채팅 칸에만 알림 한 줄 (토스트 없이). 배포 경보처럼 화면에 따로 띄우는 알림을 남길 때 */
   addNotice(text: string) {
-    this.appendChatLine(h('li', { class: 'notice' }, h('time', { class: 'when' }, clockOf(new Date())), h('span', { class: 'msg' }, text)));
+    this.appendChatLine(h('li', { class: 'notice' }, timeTag(new Date()), h('span', { class: 'msg' }, text)));
   }
 
   private appendChatLine(li: HTMLElement) {
@@ -2098,4 +2099,9 @@ export function ago(at: number) {
 /** 알림 줄에 붙이는 시각 (KST, 15:43) */
 function clockOf(d: Date): string {
   return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+}
+
+/** 채팅·알림 줄 앞의 시각 (14:31). 받은 시각이에요 (실시간으로 바로 오니까 보낸 시각과 거의 같아요) */
+function timeTag(d: Date): HTMLElement {
+  return h('time', { class: 'when', datetime: d.toISOString() }, clockOf(d));
 }
