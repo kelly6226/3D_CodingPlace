@@ -219,6 +219,7 @@ export class World {
     this.place = def.build(this.scene, this.mobile);
     this.placeId = def.id;
     this.renderer.shadowMap.needsUpdate = true;
+    this.governor.settle();
     this.resetCamera();
     return true;
   }
