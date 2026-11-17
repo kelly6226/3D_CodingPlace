@@ -56,6 +56,8 @@ import {
   type RoomTodayState,
 } from './together';
 import { enableDragScroll } from './dragScroll';
+import { applyChatSize, createChatResizeGrip } from './chatResize';
+import { currentChatLayout, onChatLayoutChange } from './chatLayout';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import { renderSyncSheet, syncSheetTitle, type SyncArrival } from './syncSheet';
 import { canShareLink, isKakaoInApp } from '../sync/env';
@@ -73,6 +75,7 @@ import {
   markArcadeSeen,
   markTogetherSeen,
   setMyHour,
+  getChatSize,
   type Profile,
 } from '../store';
 
@@ -83,6 +86,8 @@ const CHAT_LOG_MAX = 60;
 const CHAT_STICK_PX = 24;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const CHAT_FOCUS_DELAY_MS = 30;
+/** 채팅을 못 보낸 이유를 입력 칸 아래에 보여주는 시간. 그 전에 다시 입력하면 바로 지워요 */
+const CHAT_ERROR_VISIBLE_MS = 4000;
 /** 대화상자가 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const MODAL_FOCUS_DELAY_MS = 30;
 
@@ -190,6 +195,7 @@ export class UI {
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  private chatErrTimer = 0;
   private whisperPill!: HTMLElement;
   private whisperName!: HTMLElement;
   private chatSubmit!: HTMLButtonElement;
@@ -309,7 +315,8 @@ export class UI {
     document.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
       if (!this.sheet) return;
-      if (t.closest('#sheet') || t.closest('.actions') || t.closest('.hud') || t.closest('.modal') || t.closest('.intro-room')) return;
+      // 넓은 화면에선 채팅과 시트가 같이 열려 있어서, 채팅 칸을 눌러도 시트는 그대로 둬요
+      if (t.closest('#sheet') || t.closest('#chat') || t.closest('.actions') || t.closest('.hud') || t.closest('.modal') || t.closest('.intro-room')) return;
       this.closeSheet();
     });
     document.addEventListener('keydown', (e) => {
@@ -324,6 +331,11 @@ export class UI {
       }
     });
     window.setTimeout(() => $('#hint').classList.add('gone'), 9000);
+    // 창을 줄여 채팅 칸이 시트와 같은 자리로 오면 둘 중 채팅을 닫아요
+    onChatLayoutChange(() => {
+      const bothOpen = !!this.sheet && !this.chatPanel.hidden;
+      if (bothOpen && this.chatSharesSheetSpot()) this.closeChat();
+    });
   }
 
   private openArcade() {
@@ -985,7 +997,14 @@ export class UI {
   private buildChat(): HTMLElement {
     this.chatLog = h('ol', { class: 'chat-log' });
     this.chatErr = h('p', { class: 'err', hidden: true });
-    this.chatInput = h('input', { id: 'chat-input', maxlength: CHAT_MAX_LENGTH, placeholder: '한마디 (Enter로 보내기)', autocomplete: 'off', enterkeyhint: 'send' });
+    this.chatInput = h('input', {
+      id: 'chat-input',
+      maxlength: CHAT_MAX_LENGTH,
+      placeholder: '한마디 (Enter로 보내기)',
+      autocomplete: 'off',
+      enterkeyhint: 'send',
+      oninput: () => this.hideChatError(),
+    });
     this.whisperName = h('b', {}, '');
     this.whisperPill = h(
       'div',
@@ -1007,12 +1026,14 @@ export class UI {
       this.chatInput,
       this.chatSubmit,
     );
-    this.chatPanel = h(
-      'section',
-      { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' },
+    // 손잡이가 패널 안에 있어서, 패널을 먼저 만들고 내용을 채워요
+    const panel = h('section', { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' });
+    applyChatSize(panel, getChatSize());
+    panel.append(
       h(
         'header',
         { class: 'chat-head' },
+        createChatResizeGrip(panel, this.chatLog),
         h('p', {}, '말풍선으로 잠깐 보여요. 알림도 여기 남아요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
         this.chatNotifyBtn,
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
@@ -1022,7 +1043,8 @@ export class UI {
       this.whisperPill,
       form,
     );
-    return this.chatPanel;
+    this.chatPanel = panel;
+    return panel;
   }
 
   /** 채팅 칸 🔔 버튼을 브라우저 알림 상태에 맞춰요. 알림을 못 띄우는 브라우저면 숨겨요 */
@@ -1067,8 +1089,8 @@ export class UI {
 
   openChat() {
     if (!this.entered) return;
-    // 시트와 채팅은 화면의 같은 자리를 써서 둘 중 하나만 열어요 (openSheet도 채팅을 닫음)
-    this.closeSheet();
+    // 중간·좁은 화면에선 시트와 채팅이 같은 자리를 써서 둘 중 하나만 열어요 (openSheet도 채팅을 닫음)
+    if (this.chatSharesSheetSpot()) this.closeSheet();
     this.hidePop();
     this.chatPanel.hidden = false;
     this.chatBtn.classList.add('open');
@@ -1076,7 +1098,13 @@ export class UI {
     window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
   }
 
+  /** 넓은 화면에선 채팅이 왼쪽 아래에 붙어서 시트(가운데)와 같이 열 수 있어요 (chatLayout.ts) */
+  private chatSharesSheetSpot() {
+    return currentChatLayout() !== 'docked';
+  }
+
   closeChat() {
+    this.hideChatError();
     this.chatPanel.hidden = true;
     this.chatBtn.classList.remove('open');
     this.chatInput.blur();
@@ -1093,9 +1121,11 @@ export class UI {
     const text = this.chatInput.value.trim();
     if (!text) return;
     const problem = this.h.onChat(text, this.whisperTarget?.id);
-    this.chatErr.hidden = !problem;
-    this.chatErr.textContent = problem ?? '';
-    if (!problem) this.chatInput.value = '';
+    if (problem) this.showChatError(problem);
+    else {
+      this.hideChatError();
+      this.chatInput.value = '';
+    }
     this.chatInput.focus({ preventScroll: true });
   }
 
@@ -1124,7 +1154,8 @@ export class UI {
         'li',
         { class: [line.mine && 'mine', line.whisperWith && 'whisper'].filter(Boolean).join(' ') || undefined },
         timeTag(new Date()),
-        h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, who),
+        // 이름 칸은 폭이 정해져 있어서 긴 이름은 잘려요. 마우스를 올리면 전체가 보여요
+        h('span', { class: 'who', style: `--c:${langById(line.lang).color}`, title: who }, who),
         h('span', { class: 'msg' }, line.text),
         pin,
       ),
@@ -1158,8 +1189,21 @@ export class UI {
   /** 방을 옮기면 이전 방의 대화는 비워요 */
   clearChat() {
     this.chatLog.replaceChildren();
-    this.chatErr.hidden = true;
+    this.hideChatError();
     this.chatBtn.classList.remove('unread');
+  }
+
+  /** 못 보낸 이유를 잠깐 보여줘요. CHAT_ERROR_VISIBLE_MS가 지나거나 다시 입력하면 사라져요 */
+  private showChatError(text: string) {
+    this.chatErr.textContent = text;
+    this.chatErr.hidden = false;
+    window.clearTimeout(this.chatErrTimer);
+    this.chatErrTimer = window.setTimeout(() => this.hideChatError(), CHAT_ERROR_VISIBLE_MS);
+  }
+
+  private hideChatError() {
+    window.clearTimeout(this.chatErrTimer);
+    this.chatErr.hidden = true;
   }
 
   private async pinChat(text: string, btn: HTMLButtonElement) {
@@ -1167,8 +1211,7 @@ export class UI {
     const problem = await this.h.onChatPin(text);
     if (problem) {
       btn.disabled = false;
-      this.chatErr.hidden = false;
-      this.chatErr.textContent = problem;
+      this.showChatError(problem);
       return;
     }
     btn.textContent = '✓';
@@ -1181,8 +1224,8 @@ export class UI {
   }
 
   openSheet(kind: SheetKind) {
-    // 채팅과 같은 자리를 쓰니까 열려 있으면 닫아요 (openChat도 시트를 닫음)
-    this.closeChat();
+    // 중간·좁은 화면에선 채팅과 같은 자리를 쓰니까 열려 있으면 닫아요 (openChat도 시트를 닫음)
+    if (this.chatSharesSheetSpot()) this.closeChat();
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
     if (kind === 'together') {

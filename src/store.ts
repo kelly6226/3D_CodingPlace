@@ -21,6 +21,8 @@ interface Saved {
   sound?: boolean;
   /** 다른 창에 있을 때 채팅을 브라우저 알림으로 받을지 (권한은 브라우저가 따로 기억해요) */
   chatNotify?: boolean;
+  /** 내가 끌어서 맞춘 채팅 칸 크기(px). 화면 크기가 기기마다 달라서 이어하기로 맞추지 않아요 */
+  chatSize?: ChatSize;
   /** 내가 신고한 커밋 (방 slug → 해시들). 신고한 사람에게는 바로 안 보여요 */
   reported?: Record<string, string[]>;
   /** 방마다 내가 고른 배경 소리 (방 slug → 소리). 방 기본값과 같으면 지워요 */
@@ -166,6 +168,24 @@ export function getChatNotify(): boolean {
 
 export function setChatNotify(on: boolean) {
   cache.chatNotify = on;
+  persist();
+}
+
+/** 채팅 칸 크기(px). width는 패널 너비(null이면 CSS 기본 너비), logHeight는 대화 목록 높이 */
+export interface ChatSize {
+  width: number | null;
+  logHeight: number;
+}
+
+/** 끌어서 맞춘 적 없으면 null (CSS 기본 크기를 써요) */
+export function getChatSize(): ChatSize | null {
+  return cache.chatSize ?? null;
+}
+
+/** null이면 기본 크기로 돌아가요 */
+export function setChatSize(size: ChatSize | null) {
+  if (size) cache.chatSize = size;
+  else delete cache.chatSize;
   persist();
 }
 
