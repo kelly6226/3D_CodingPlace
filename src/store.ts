@@ -1,7 +1,7 @@
 // 브라우저에 남는 개인 기록 (프로필, 커피, 소리 설정)
 // 이어하기 코드로 연결하면 일부(프로필, 내 모각코 시간, 배경 소리, 날짜별 시간)는 sync/deviceSync.ts가 서버와 맞춰요
-import { DEFAULT_NAMES, HOODIE_COLORS, HAIR_COLORS, SKIN_TONES, LANGS, isNoiseId, type NoiseId } from './config';
-import { DEFAULT_OUTFIT, normalizeOutfit, type Outfit } from './look';
+import { DEFAULT_NAMES, LANGS, isNoiseId, type NoiseId } from './config';
+import { DEFAULT_OUTFIT, normalizeOutfit, randomLook, randomOutfit, sameOutfit, type Outfit } from './look';
 
 const KEY = 'mogakco:v1';
 
@@ -46,6 +46,8 @@ interface Saved {
   tracesHinted?: boolean;
   /** 오늘(KST) 들어가 본 방들. 방마다 하루 한 번만 '다녀감'으로 세려고 기억해요 */
   visited?: { date: string; rooms: string[] };
+  /** 기본 옷 그대로인 프로필에 옷을 한 번 골라 입혔는지 (varyDefaultOutfitOnce) */
+  outfitVaried?: boolean;
   /** 다른 기기에서 이어하기 (sync/deviceSync.ts). 연결하지 않았으면 없어요 */
   sync?: SyncLink;
   /** '다른 기기에서 이어하기' 창을 열어 본 적 있는지 (처음엔 👤 버튼에 점을 찍어 알려요) */
@@ -119,16 +121,23 @@ export function kstDate(d = new Date()): string {
 export function getProfile(): Profile {
   // 꾸미기 기능이 생기기 전에 저장한 프로필에는 outfit이 없어서 기본 옷을 채워요
   if (cache.profile) return { ...cache.profile, outfit: normalizeOutfit(cache.profile.outfit) };
-  return {
-    id: randomId(),
-    name: pick(DEFAULT_NAMES),
-    color: pick(HOODIE_COLORS),
-    lang: pick(LANGS).id,
-    hair: pick(HAIR_COLORS),
-    skin: pick(SKIN_TONES),
-    glasses: Math.random() < 0.5,
-    outfit: { ...DEFAULT_OUTFIT },
-  };
+  // 처음 온 사람은 후드티·머리·피부·안경·옷을 모두 무작위로 정해요 (다들 같은 기본 옷이면 방에서 서로 똑같아 보여요)
+  return { id: randomId(), name: pick(DEFAULT_NAMES), lang: pick(LANGS).id, ...randomLook() };
+}
+
+/**
+ * 옷장이 생기기 전에 만들었거나 옷을 고르지 않은 채 저장된 프로필은 다들 기본 옷이라 서로 똑같아 보여요.
+ * 그런 프로필은 딱 한 번 옷(모자·머리 모양·등·목·포인트 색·바지·신발)을 무작위로 입혀요. 후드티·머리색·피부색·안경은 그대로예요.
+ * 입혔으면 true (알려주는 건 부르는 쪽이 해요)
+ */
+export function varyDefaultOutfitOnce(): boolean {
+  if (cache.outfitVaried) return false;
+  cache.outfitVaried = true;
+  const p = cache.profile;
+  const untouched = !!p && sameOutfit(normalizeOutfit(p.outfit), DEFAULT_OUTFIT);
+  if (untouched) cache.profile = { ...p, outfit: randomOutfit() };
+  persist();
+  return untouched;
 }
 
 export function hasSavedProfile(): boolean {

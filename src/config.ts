@@ -191,16 +191,23 @@ export const HOODIE_COLORS = [
   '#c9873a', // 머스타드
   '#5b7fa6', // 스카이
   '#7a5a8c', // 보라
+  '#e07a5f', // 코랄
+  '#2f8f83', // 틸
+  '#e89ab6', // 핑크
+  '#a99ad6', // 라벤더
+  '#2f5d3a', // 포레스트
+  '#e9c46a', // 레몬
 ];
+
+/** 닉네임 최대 글자 수 (입장 화면, 프로필, 게임만 따로 연 페이지가 같이 씀) */
+export const NICKNAME_MAX = 12;
 
 /** #rrggbb 색 (저장된 값·실시간으로 받은 값을 검사할 때 같이 씀) */
 export const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
-export const HAIR_COLORS = ['#1d1a18', '#2b2220', '#4a3426', '#6b4a2e', '#262a33', '#3a2e2a'];
+/** 자연색 6개 뒤에 염색한 색 (금발, 은발, 핑크, 파랑, 빨강) */
+export const HAIR_COLORS = ['#1d1a18', '#2b2220', '#4a3426', '#6b4a2e', '#262a33', '#3a2e2a', '#d8b26e', '#c9c9cf', '#e58fb5', '#4a6fd6', '#a83b32'];
 export const SKIN_TONES = ['#f3d2b8', '#eac3a3', '#d9a988', '#c68f6c', '#f6dcc6'];
-
-/** 닉네임 최대 글자 수 (입장 화면, 프로필, 게임만 따로 연 페이지가 같이 씀) */
-export const NICKNAME_MAX = 12;
 
 // 접속할 때마다 이 중에서 무작위로 하나씩 받아요. 넉넉히 많아야 사람이 몰려도 닉네임이 덜 겹쳐요
 export const DEFAULT_NAMES = [

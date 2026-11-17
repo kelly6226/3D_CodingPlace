@@ -17,6 +17,11 @@ export const HATS: LookOption[] = [
   { id: 'crown', emoji: '👑', label: '왕관' },
   { id: 'duck', emoji: '🦆', label: '러버덕' },
   { id: 'halo', emoji: '😇', label: '천사 고리' },
+  { id: 'beret', emoji: '🎨', label: '베레모' },
+  { id: 'bunny', emoji: '🐰', label: '토끼 귀' },
+  { id: 'party', emoji: '🥳', label: '고깔모자' },
+  { id: 'sprout', emoji: '🌱', label: '새싹' },
+  { id: 'headband', emoji: '💪', label: '필승 머리띠' },
 ];
 
 export const HAIR_STYLES: LookOption[] = [
@@ -27,6 +32,9 @@ export const HAIR_STYLES: LookOption[] = [
   { id: 'long', emoji: '💁', label: '긴 머리' },
   { id: 'spiky', emoji: '🦔', label: '뾰족' },
   { id: 'afro', emoji: '☁️', label: '아프로' },
+  { id: 'bob', emoji: '💇', label: '단발' },
+  { id: 'mohawk', emoji: '🤘', label: '모히칸' },
+  { id: 'braid', emoji: '🪢', label: '땋은 머리' },
 ];
 
 export const BACKS: LookOption[] = [
@@ -35,6 +43,9 @@ export const BACKS: LookOption[] = [
   { id: 'cape', emoji: '🦸', label: '망토' },
   { id: 'wings', emoji: '🪽', label: '날개' },
   { id: 'shell', emoji: '🐢', label: '거북 등딱지' },
+  { id: 'jetpack', emoji: '🚀', label: '제트팩' },
+  { id: 'guitar', emoji: '🎸', label: '기타' },
+  { id: 'dinotail', emoji: '🦖', label: '공룡 꼬리' },
 ];
 
 export const NECKS: LookOption[] = [
@@ -43,6 +54,9 @@ export const NECKS: LookOption[] = [
   { id: 'lanyard', emoji: '🪪', label: '사원증' },
   { id: 'bowtie', emoji: '🤵', label: '나비넥타이' },
   { id: 'headphones', emoji: '🎧', label: '목 헤드폰' },
+  { id: 'tie', emoji: '👔', label: '넥타이' },
+  { id: 'medal', emoji: '🏅', label: '메달' },
+  { id: 'camera', emoji: '📷', label: '카메라' },
 ];
 
 /** 모자·등·목 장식에 같이 쓰는 포인트 색 */
