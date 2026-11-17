@@ -82,12 +82,10 @@ const g = {
 
 const m = {
   gold: new THREE.MeshStandardMaterial({ color: '#f4c542', roughness: 0.35, metalness: 0.6 }),
-  duck: new THREE.MeshStandardMaterial({ color: '#ffd23f', roughness: 0.5 }),
   beak: new THREE.MeshStandardMaterial({ color: '#ff8c1a', roughness: 0.6 }),
   white: new THREE.MeshStandardMaterial({ color: '#f3efe6', roughness: 0.7 }),
   dark: new THREE.MeshStandardMaterial({ color: '#25262c', roughness: 0.55 }),
   pink: new THREE.MeshStandardMaterial({ color: '#ff9bb3', roughness: 0.7 }),
-  halo: new THREE.MeshBasicMaterial({ color: '#ffe27a' }),
   plate: new THREE.MeshStandardMaterial({ color: '#000000', roughness: 0.9, transparent: true, opacity: 0.22 }),
   leaf: new THREE.MeshStandardMaterial({ color: '#5cc96b', roughness: 0.6 }),
   metal: new THREE.MeshStandardMaterial({ color: '#9aa1ad', roughness: 0.35, metalness: 0.7 }),
@@ -108,9 +106,11 @@ export const HALO_Y = 0.62;
 const HEAD_TILT = -0.32;
 
 type Builder = (accent: THREE.Material) => THREE.Group;
+/** 모자는 모두 포인트 색을 써요. glow는 같은 색이지만 빛을 받지 않아 스스로 빛나 보이는 재질 (천사 고리) */
+type HatBuilder = (accent: THREE.Material, glow: THREE.Material) => THREE.Group;
 
 // ── 모자 (머리 좌표: 머리 중심이 (0, 0.22, 0), 반지름 0.24) ──────────────
-const hats: Record<string, { covers: boolean; build: Builder }> = {
+const hats: Record<string, { covers: boolean; build: HatBuilder }> = {
   beanie: {
     covers: true,
     build: (accent) => {
@@ -177,29 +177,29 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
   },
   crown: {
     covers: true,
-    build: () => {
+    build: (accent) => {
       const t = new THREE.Group();
       t.position.set(0, 0.46, -0.02);
       t.rotation.x = HEAD_TILT * 0.5;
-      t.add(mesh(g.crownBase, m.gold, 0, 0, 0));
+      t.add(mesh(g.crownBase, accent, 0, 0, 0));
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * PI * 2;
-        t.add(mesh(g.crownSpike, m.gold, Math.sin(a) * 0.17, 0.095, Math.cos(a) * 0.17));
+        t.add(mesh(g.crownSpike, accent, Math.sin(a) * 0.17, 0.095, Math.cos(a) * 0.17));
       }
-      t.add(mesh(g.gem, m.pink, 0, 0.0, 0.205));
+      t.add(mesh(g.gem, m.white, 0, 0.0, 0.205));
       return t;
     },
   },
   duck: {
     covers: true,
-    build: () => {
+    build: (accent) => {
       const t = new THREE.Group();
       t.position.set(0, 0.5, -0.02);
-      const body = mesh(g.duckBody, m.duck, 0, 0.06, 0);
+      const body = mesh(g.duckBody, accent, 0, 0.06, 0);
       body.scale.set(1, 0.8, 1.25);
-      const head = mesh(g.duckHead, m.duck, 0, 0.17, 0.1);
+      const head = mesh(g.duckHead, accent, 0, 0.17, 0.1);
       const beak = mesh(g.duckBeak, m.beak, 0, 0.16, 0.18);
-      const tail = mesh(g.duckTail, m.duck, 0, 0.11, -0.15);
+      const tail = mesh(g.duckTail, accent, 0, 0.11, -0.15);
       tail.rotation.x = -PI / 2 - 0.5;
       t.add(body, head, beak, tail, mesh(g.duckEye, m.dark, -0.035, 0.195, 0.165), mesh(g.duckEye, m.dark, 0.035, 0.195, 0.165));
       return t;
@@ -207,9 +207,9 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
   },
   halo: {
     covers: false,
-    build: () => {
+    build: (_accent, glow) => {
       const t = new THREE.Group();
-      const ring = mesh(g.halo, m.halo, 0, HALO_Y, -0.01);
+      const ring = mesh(g.halo, glow, 0, HALO_Y, -0.01);
       ring.rotation.x = PI / 2 + 0.35;
       ring.name = 'halo';
       t.add(ring);
@@ -256,12 +256,12 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
   },
   sprout: {
     covers: false,
-    build: () => {
+    build: (accent) => {
       const t = new THREE.Group();
       t.position.set(0, 0.48, 0.02);
       t.add(mesh(g.sproutStem, m.leaf, 0, 0.045, 0));
       for (const s of [-1, 1]) {
-        const leaf = mesh(g.sproutLeaf, m.leaf, s * 0.04, 0.095, 0);
+        const leaf = mesh(g.sproutLeaf, accent, s * 0.04, 0.095, 0);
         leaf.scale.set(1, 0.45, 0.7);
         leaf.rotation.z = s * 0.5;
         t.add(leaf);
@@ -286,8 +286,8 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
 /** 모자를 쓰면 위로 솟는 머리 모양(똥머리, 뾰족, 아프로)은 숨겨야 해서 알려줘요 */
 export const hatCoversHair = (id: string) => hats[id]?.covers ?? false;
 
-export function buildHat(id: string, accent: THREE.Material): THREE.Group | null {
-  return hats[id]?.build(accent) ?? null;
+export function buildHat(id: string, accent: THREE.Material, glow: THREE.Material): THREE.Group | null {
+  return hats[id]?.build(accent, glow) ?? null;
 }
 
 // ── 머리 모양 (기본 단정 머리 위에 더해지는 부분. 머리 좌표) ─────────────
