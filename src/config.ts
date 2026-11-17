@@ -25,6 +25,12 @@ export const PRIVATE_ROOMS_ENABLED = false;
 export const MINIGAMES_ENABLED = true;
 
 /**
+ * 오락기만 따로 여는 페이지 주소. /games는 목록, /games/<게임 id>는 그 게임.
+ * 바꾸면 vercel.json rewrites와 vite.config.ts(gamesPageRoutes, sitemap)도 같이 바꿔요
+ */
+export const GAMES_PAGE_PATH = '/games';
+
+/**
  * 다른 기기에서 이어하기(이어하기 코드). 서버(Supabase)가 없는 데모 모드에서는 늘 꺼져요.
  * 토스 앱 안에서는 로그인 규정(토스 로그인만 허용)에 걸리는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
  */
@@ -192,6 +198,9 @@ export const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 export const HAIR_COLORS = ['#1d1a18', '#2b2220', '#4a3426', '#6b4a2e', '#262a33', '#3a2e2a'];
 export const SKIN_TONES = ['#f3d2b8', '#eac3a3', '#d9a988', '#c68f6c', '#f6dcc6'];
+
+/** 닉네임 최대 글자 수 (입장 화면, 프로필, 게임만 따로 연 페이지가 같이 씀) */
+export const NICKNAME_MAX = 12;
 
 // 접속할 때마다 이 중에서 무작위로 하나씩 받아요. 넉넉히 많아야 사람이 몰려도 닉네임이 덜 겹쳐요
 export const DEFAULT_NAMES = [
