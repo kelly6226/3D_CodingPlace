@@ -19,7 +19,10 @@ import {
   roomPasswordProblem,
   roomUrl,
   statusById,
+  stressActionById,
+  stressActionOf,
   type ActionId,
+  type StressActionDef,
   type NoiseId,
   type PlaceId,
   type RoomInfo,
@@ -45,6 +48,7 @@ import { Tips } from './ui/tips';
 import { AwayChatAlerts, chatNotifyState, turnOnChatNotify, type ChatNotifyState } from './ui/awayAlerts';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
+import type { Avatar } from './world/avatar';
 import { watchContextLoss } from './world/contextWatch';
 import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
 import type { InteractData } from './world/places/kit';
@@ -775,16 +779,53 @@ function changeLook(look: Look) {
   net.updateSelf(look);
 }
 
+const STILL_ACTING_TOAST = '아직 하던 동작이 안 끝났어요';
+
 /** 춤추기, 노트북 던지기 같은 큰 동작. 하던 동작이 끝나야 다음 동작을 할 수 있어요 */
 function act(id: ActionId) {
   const me = meAvatar();
   if (me.acting) {
-    ui.toast('아직 하던 동작이 안 끝났어요');
+    ui.toast(STILL_ACTING_TOAST);
     return;
   }
-  me.perform(id);
+  performAction(me, id);
   sound.pop();
   net.send({ type: 'act', id: self.id, act: id });
+}
+
+/**
+ * 아바타 하나가 큰 동작을 해요 (내 것이든 다른 사람 것이든).
+ * 스트레스 해소 동작은 물건 쪽으로 돌아서서 하고, 주먹이 닿을 때마다 물건이 흔들리고 소리가 나요
+ */
+function performAction(a: Avatar, id: ActionId) {
+  const stress = stressActionById(id);
+  if (!stress) {
+    a.perform(id);
+    return;
+  }
+  a.face(SPOTS[stress.object].yaw);
+  a.perform(id, () => hitStressObject(stress));
+}
+
+/** 동작이 물건에 닿은 순간: 물건을 흔들고 소리를 내요 */
+function hitStressObject(def: StressActionDef) {
+  world.room.poke(def.object);
+  if (def.object === 'sandbag') sound.thud();
+  else sound.clatter();
+}
+
+/** 스트레스 해소 코너의 물건을 눌렀을 때: 물건 앞으로 걸어가서 치는 동작을 해요 */
+function goStress(def: StressActionDef) {
+  if (meAvatar().acting) {
+    ui.toast(STILL_ACTING_TOAST);
+    return;
+  }
+  const spot = SPOTS[def.object];
+  const slug = room.slug;
+  moveTo(spot.x, spot.z, () => {
+    if (room.slug !== slug) return;
+    act(def.id);
+  });
 }
 
 function emote(id: string, to?: string) {
@@ -1062,7 +1103,14 @@ function onEvent(e: NetEvent) {
     case 'act': {
       const a = world.avatars.get(e.id);
       if (!a || a.isSelf) return;
-      a.perform(e.act);
+      const stress = stressActionById(e.act);
+      if (stress) {
+        // 물건 앞에 가서 해요. 이동 소식이 먼저 와서 아직 걸어가는 중이면 도착한 뒤에 해요
+        const spot = SPOTS[stress.object];
+        a.goTo(spot.x, spot.z, null, () => performAction(a, e.act));
+      } else {
+        performAction(a, e.act);
+      }
       break;
     }
     case 'chat': {
@@ -1143,6 +1191,11 @@ function interact(d: InteractData) {
     case 'note':
       if (d.lines?.length) ui.toast(fillNote(pick(d.lines)), 'info', 4200);
       break;
+    case 'stress': {
+      const def = stressActionOf(d.key);
+      if (def) goStress(def);
+      break;
+    }
   }
 }
 

@@ -4,8 +4,8 @@ import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { actionById, langById, statusById, type ActionDef, type ActionId } from '../config';
 import { sameOutfit, type Outfit } from '../look';
 import type { PeerState } from '../net/types';
-import { FlippedTable, ThrownLaptop, makeLaptopMesh, makeStars, type Prop } from './actionProps';
-import { FLIP_RELEASE_S, THROW_RELEASE_S, applyActionPose, emptyPose, faintStarsAt } from './actions';
+import { FlippedTable, FlyingKeycaps, ThrownLaptop, makeLaptopMesh, makeStars, type Prop } from './actionProps';
+import { FLIP_RELEASE_S, THROW_RELEASE_S, applyActionPose, emptyPose, faintStarsAt, hitTimesOf } from './actions';
 import { seatById, type Seat } from './layout';
 import { bakeStatic, type Baked } from './bake';
 import { HALO_Y, buildBack, buildHair, buildHat, buildNeck, hatCoversHair } from './outfit';
@@ -23,6 +23,9 @@ const FLIP_TABLE_REACH = 0.7;
 const FLIP_TABLE_WAIST_Y = 0.55;
 /** 앉아서 뒤집을 때 진짜 책상 윗면과 겹쳐 깜빡이지 않게 띄우는 높이 */
 const FLIP_TABLE_LIFT = 0.06;
+/** 키보드 더미를 내리치는 자리: 아바타 앞으로 이만큼, 이 높이 (stress.ts 키보드 더미 윗면쯤) */
+const SMASH_REACH = 0.62;
+const SMASH_Y = 0.42;
 
 const geo = {
   leg: new THREE.CapsuleGeometry(0.075, 0.17, 4, 10),
@@ -112,7 +115,15 @@ export class Avatar {
   private wings: THREE.Object3D[] = [];
 
   // 큰 동작 (춤, 던지기, 뒤집기, 기절)
-  private act: { def: ActionDef; start: number; released: boolean } | null = null;
+  private act: {
+    def: ActionDef;
+    start: number;
+    released: boolean;
+    /** 물건에 닿는 시각들(초)과 지금까지 닿은 횟수 (샌드백 치기, 키보드 부수기) */
+    hitTimes: number[];
+    hits: number;
+    onHit?: () => void;
+  } | null = null;
   private props: Prop[] = [];
   private stars: THREE.Group | null = null;
   private heldLaptop: THREE.Group | null = null;
@@ -338,12 +349,15 @@ export class Avatar {
     this.wings = ['wingL', 'wingR'].flatMap((n) => this.backSlot.getObjectByName(n) ?? []);
   }
 
-  /** 큰 동작을 시작함. 머리 위에 말풍선(이모지+한마디)도 같이 띄우고, 하는 동안은 걷지 않고 제자리에 있어요 */
-  perform(id: ActionId) {
+  /**
+   * 큰 동작을 시작함. 머리 위에 말풍선(이모지+한마디)도 같이 띄우고, 하는 동안은 걷지 않고 제자리에 있어요.
+   * onHit은 동작이 물건에 닿을 때마다 불려요 (아바타 시간 기준이라 화면이 느려도 주먹과 맞아요)
+   */
+  perform(id: ActionId, onHit?: () => void) {
     const def = actionById(id);
     if (!def) return;
     this.endAct();
-    this.act = { def, start: this.t, released: false };
+    this.act = { def, start: this.t, released: false, hitTimes: hitTimesOf(id), hits: 0, onHit };
     this.emote(def.emoji, def.line);
     // 서 있는 채로 노트북을 던질 때는 손에 노트북을 듦
     if (id === 'throw' && !this.laptop) {
@@ -392,7 +406,18 @@ export class Avatar {
       act.released = true;
       this.flipTable(act.def.seconds - elapsed);
     }
+    while (act.hits < act.hitTimes.length && elapsed >= act.hitTimes[act.hits]) {
+      act.hits++;
+      if (act.def.id === 'smash') this.scatterKeycaps();
+      act.onHit?.();
+    }
     if (this.stars) this.stars.visible = faintStarsAt(elapsed, act.def.seconds);
+  }
+
+  private scatterKeycaps() {
+    const p = this.root.position;
+    const at = new THREE.Vector3(p.x + Math.sin(this.yaw) * SMASH_REACH, SMASH_Y, p.z + Math.cos(this.yaw) * SMASH_REACH);
+    this.addProp(new FlyingKeycaps(at));
   }
 
   private addProp(p: Prop) {

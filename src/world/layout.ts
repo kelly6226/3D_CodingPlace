@@ -38,6 +38,11 @@ export interface Spot {
   yaw?: number;
 }
 
+/** 서서 무언가를 바라보는 곳 (보는 방향이 꼭 있어요) */
+export interface FacingSpot extends Spot {
+  yaw: number;
+}
+
 export interface RoomBounds {
   x0: number;
   x1: number;
@@ -60,6 +65,9 @@ export interface PlaceLayout {
     pet: Spot;
     /** 자리가 다 찼을 때 서 있을 곳 */
     idle: Spot;
+    /** 스트레스 해소 코너: 샌드백·키보드 더미 앞에 서서 치는 곳 (places/stress.ts stressSpot) */
+    sandbag: FacingSpot;
+    keyboards: FacingSpot;
   };
 }
 
@@ -72,6 +80,8 @@ export let SPOTS: PlaceLayout['spots'] = {
   deploy: { x: 0, z: 0 },
   pet: { x: 0, z: 0 },
   idle: { x: 0, z: 0 },
+  sandbag: { x: 0, z: 0, yaw: 0 },
+  keyboards: { x: 0, z: 0, yaw: 0 },
 };
 
 export function useLayout(l: PlaceLayout) {

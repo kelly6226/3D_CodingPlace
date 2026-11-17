@@ -23,6 +23,7 @@ import {
   wallCutaway,
   std,
 } from './kit';
+import { buildStressCorner, stressObstacles, stressSpots, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -50,6 +51,12 @@ const seats: Seat[] = [
   seat('beanbag', 'beanbag', '빈백', 3.0, 2.2, FACE.W, { dist: 0.3, ly: 0.45, ax: 2.25, az: 2.2 }),
 ];
 
+// 스트레스 해소 코너: 좌식 테이블과 빈백 사이 빈 바닥 (좁은 원룸이라 둘을 붙여 놨어요)
+const STRESS: StressCorner = {
+  sandbag: { x: 1.6, z: 2.6, yaw: FACE.E },
+  keyboards: { x: 2.1, z: 1.55, yaw: FACE.E },
+};
+
 const obstacles: Box[] = [
   DESK,
   BED,
@@ -59,6 +66,7 @@ const obstacles: Box[] = [
   boxAt(-2.9, 1.5, 1.05, 0.5), // 빨래 건조대
   boxAt(-3.5, 2.5, 0.8, 0.7), // 택배 상자
   boxAt(-1.25, -2.7, 0.3, 0.3), // 컵라면 탑
+  ...stressObstacles(STRESS),
   ...seatObstacles(seats),
 ];
 
@@ -72,6 +80,7 @@ const layout: PlaceLayout = {
     deploy: { x: 0.95, z: -1.95, yaw: FACE.N },
     pet: { x: -2.2, z: -1.1 },
     idle: { x: 1.8, z: -0.4 },
+    ...stressSpots(STRESS),
   },
 };
 
@@ -412,6 +421,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
 
   const alarm = alarmKit(b, ROOM, [M.red]);
   const walls = wallCutaway({ left: leftWall, right: rightWall, back: backWall }, ROOM);
+  const stress = buildStressCorner(b, STRESS);
   b.finish([leftWall, rightWall, backWall]);
 
   return {
@@ -421,6 +431,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
     seatHits: b.seatHits,
     gitlog,
     update(dt: number, cam: THREE.Camera) {
+      stress.update(dt);
       walls(cam);
       alarm.update(dt);
       duckAnim.update(dt);
@@ -430,6 +441,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
     poke: (key: string) => {
       if (key === 'duck') duckAnim.poke();
       if (key === 'cat') catAnim.poke();
+      stress.poke(key);
     },
     get alarming() {
       return alarm.on;

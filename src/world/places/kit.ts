@@ -8,12 +8,12 @@ export type V3 = [number, number, number];
 
 /** 클릭했을 때 할 일. world.ts가 읽어서 main.ts로 넘겨요 */
 export interface InteractData {
-  interact: 'use' | 'deploy' | 'tv' | 'pet' | 'note';
+  interact: 'use' | 'deploy' | 'tv' | 'pet' | 'note' | 'stress';
   /** note/pet: 토스트로 띄울 문구 중 하나 */
   lines?: string[];
   /** pet: 소리 */
   sound?: 'quack' | 'meow';
-  /** pet: 어느 동물을 움직일지 */
+  /** pet: 어느 동물을 움직일지, stress: 어느 물건인지 (StressObjectId) */
   key?: string;
 }
 

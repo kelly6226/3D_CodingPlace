@@ -378,6 +378,17 @@ class Sound {
     this.burst(1200, 0.06, 0.12);
   }
 
+  /** 샌드백을 칠 때 '퍽' */
+  thud() {
+    this.burst(160, 0.14, 0.45, 'lowpass');
+    this.burst(900, 0.04, 0.08);
+  }
+
+  /** 키보드 더미를 내리칠 때 키캡이 우수수 */
+  clatter() {
+    for (let i = 0; i < 6; i++) window.setTimeout(() => this.key(0.12 + Math.random() * 0.08), i * (25 + Math.random() * 35));
+  }
+
   /** 다른 창에 있을 때 채팅이 왔다는 짧은 '띵동' (chime보다 짧고 작게) */
   ping() {
     const ctx = this.ctx;
