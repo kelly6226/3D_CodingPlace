@@ -1751,7 +1751,8 @@ button.place-name {
   bottom: calc(96px + var(--safe-b));
   translate: -50% 0;
   z-index: 20;
-  width: min(380px, calc(100vw - 24px));
+  /* --chat-w·--chat-log-h는 손잡이로 끌어서 맞춘 크기 (src/ui/chatResize.ts). 없으면 기본 크기 */
+  width: min(var(--chat-w, 520px), calc(100vw - 24px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1766,6 +1767,41 @@ button.place-name {
 }
 .chat[hidden] {
   display: none;
+}
+/* 크기를 바꾸는 동안 글자가 선택되거나 등장 애니메이션이 다시 돌지 않게 */
+.chat.resizing {
+  user-select: none;
+  animation: none;
+}
+/* 왼쪽 위 크기 조절 손잡이: 모서리 모양으로 '여기를 끌어요'를 보여줘요 */
+.chat-grip {
+  flex: none;
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.chat-grip::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid var(--muted);
+  border-left: 2px solid var(--muted);
+  border-top-left-radius: 3px;
+  opacity: 0.7;
+}
+.chat-grip:hover::before,
+.chat-grip:focus-visible::before,
+.chat.resizing .chat-grip::before {
+  border-color: var(--amber);
+  opacity: 1;
 }
 .chat-head {
   display: flex;
@@ -1806,29 +1842,37 @@ button.place-name {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: min(30vh, 220px);
+  height: var(--chat-log-h, min(40vh, 320px));
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+  /* 시각 | 이름 | 글 | 📌 네 칸. 줄마다 subgrid로 같은 칸을 써서 이름이 왼쪽에 한 줄로 맞고 글은 그 오른쪽에서 시작해요.
+     이름 칸은 지금 목록에서 가장 긴 이름만큼, 단 --who-max까지만 넓어져요 */
+  --who-max: 10em;
+  display: grid;
+  grid-template-columns: auto fit-content(var(--who-max)) minmax(0, 1fr) auto;
+  align-content: start;
+  column-gap: 8px;
+  row-gap: 5px;
   font-size: 13px;
 }
 .chat-log:empty::before {
   content: '아직 대화가 없어요. 한마디 건네볼까요?';
+  grid-column: 1 / -1;
   font-size: 12.5px;
   color: var(--muted);
 }
 .chat-log li {
-  display: flex;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: baseline;
-  gap: 8px;
 }
 .chat-log .who {
-  flex: none;
-  max-width: 38%;
+  grid-column: 2;
+  min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1845,9 +1889,13 @@ button.place-name {
   margin-right: 5px;
 }
 .chat-log .msg {
-  flex: 1;
+  grid-column: 3;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+/* 알림 줄은 이름이 없어서 이름 칸부터 써요 */
+.chat-log li.notice .msg {
+  grid-column: 2 / -1;
 }
 .chat-log .mine .msg {
   color: var(--amber);
@@ -1868,7 +1916,7 @@ button.place-name {
 }
 /* 대화·알림 줄 앞의 시각 */
 .chat-log .when {
-  flex: none;
+  grid-column: 1;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 10.5px;
@@ -1876,7 +1924,7 @@ button.place-name {
   opacity: 0.7;
 }
 .chat-log .pin {
-  flex: none;
+  grid-column: 4;
   padding: 0 4px;
   border: 0;
   background: transparent;
@@ -1981,6 +2029,41 @@ button.place-name {
     translate: none;
     width: auto;
     animation-name: rise-m;
+  }
+  /* 좁은 화면은 채팅 칸이 좌우를 꽉 채워서 높이만 바꿔요 */
+  .chat-grip {
+    cursor: ns-resize;
+  }
+  .chat-log {
+    --who-max: 7em;
+  }
+}
+/* 넓은 화면: 채팅을 왼쪽 아래에 붙여서 3D 화면 가운데를 가리지 않고, 시트(가운데)와 같이 열 수 있어요.
+   기준 폭은 src/ui/chatLayout.ts DOCKED_CHAT_QUERY와 같아서 둘을 같이 고쳐야 해요 */
+@media (min-width: 1180px) {
+  .chat {
+    left: max(16px, var(--safe-l));
+    bottom: calc(16px + var(--safe-b));
+    translate: none;
+    /* 가운데 하단 바(폭 약 500px)·시트(440px)와 겹치지 않게, 화면 절반에서 하단 바 절반과 여백을 뺀 폭까지 */
+    width: min(var(--chat-w, 420px), calc(50vw - 280px));
+    /* 왼쪽 위 장소 카드와 겹치지 않게 위쪽을 비워 둬요 */
+    max-height: calc(100% - 140px - var(--safe-b));
+    animation-name: rise-docked;
+  }
+  /* 왼쪽 아래가 고정이라 손잡이는 오른쪽 위에 둬요. 그래야 끄는 동안 손잡이가 포인터를 따라와요 */
+  .chat-grip {
+    order: 1;
+    cursor: nesw-resize;
+  }
+  .chat-grip::before {
+    transform: scaleX(-1);
+  }
+  @keyframes rise-docked {
+    from {
+      opacity: 0;
+      translate: 0 10px;
+    }
   }
 }
 
