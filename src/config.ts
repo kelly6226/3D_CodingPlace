@@ -103,7 +103,9 @@ export interface ViewState {
   following: boolean;
 }
 
-export type ActionId = 'dance' | 'throw' | 'flip' | 'faint';
+/** 스트레스 해소 코너에서만 하는 동작 (STRESS_ACTIONS) */
+export type StressActionId = 'punch' | 'smash';
+export type ActionId = 'dance' | 'throw' | 'flip' | 'faint' | StressActionId;
 
 export interface ActionDef {
   id: ActionId;
@@ -123,7 +125,30 @@ export const ACTIONS: ActionDef[] = [
   { id: 'faint', emoji: '😵', label: '번아웃 기절', line: '번아웃…', seconds: 5 },
 ];
 
-export const actionById = (id: unknown): ActionDef | undefined => ACTIONS.find((a) => a.id === id);
+/** 스트레스 해소 코너의 물건 (장소마다 하나씩, src/world/places/stress.ts) */
+export type StressObjectId = 'sandbag' | 'keyboards';
+
+export interface StressActionDef extends ActionDef {
+  id: StressActionId;
+  /** 이 동작을 하러 가는 물건 */
+  object: StressObjectId;
+}
+
+/**
+ * 스트레스 해소 코너의 물건을 눌렀을 때 하는 큰 동작. 물건 앞에 가서 해야 해서 동작 시트에는 안 나와요.
+ * 다른 사람에게는 다른 큰 동작처럼 'act'로 전해져요.
+ * 토스 미니앱 민감 콘텐츠 기준 때문에 사람은 때리지 않고 물건만 치고, 대사도 거칠게 쓰지 않아요
+ */
+export const STRESS_ACTIONS: StressActionDef[] = [
+  { id: 'punch', emoji: '🥊', label: '샌드백 치기', line: '레거시 코드 너 때문이야!', seconds: 2.6, object: 'sandbag' },
+  { id: 'smash', emoji: '⌨️', label: '키보드 부수기', line: '키보드가 문제였어', seconds: 2.4, object: 'keyboards' },
+];
+
+export const stressActionById = (id: unknown): StressActionDef | undefined => STRESS_ACTIONS.find((a) => a.id === id);
+/** 물건을 눌렀을 때 할 동작. 물건 이름이 3D 쪽 userData에서 문자열로 와서 모르는 값이면 undefined */
+export const stressActionOf = (object: unknown): StressActionDef | undefined => STRESS_ACTIONS.find((a) => a.object === object);
+
+export const actionById = (id: unknown): ActionDef | undefined => ACTIONS.find((a) => a.id === id) ?? stressActionById(id);
 
 /**
  * 받는 쪽은 같은 사람의 동작을 이 간격보다 빨리 받으면 버려요.

@@ -1,7 +1,7 @@
 // ☕ 판교 새벽 카페: 통창 너머 판교의 등대, 긴 테이블, 커피 카운터, 금요일 배포 버튼
 import * as THREE from 'three';
 import { DUCK_LINES, RACK_LINES } from '../../config';
-import { seatObstacles, type Box, type PlaceLayout, type Seat } from '../layout';
+import { FACE, seatObstacles, type Box, type PlaceLayout, type Seat } from '../layout';
 import { buildSkyline } from '../skyline';
 import * as T from '../textures';
 import {
@@ -26,6 +26,7 @@ import {
   stoolModel,
   type V3,
 } from './kit';
+import { buildStressCorner, stressObstacles, stressSpots, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -88,6 +89,12 @@ const SPOT = {
   whiteboard: { x: 5.65, z: -1.6, yaw: -0.2 },
 };
 
+// 스트레스 해소 코너: 긴 테이블 앞 빈 바닥. 앞면을 +x로 둬서 치는 모습이 비스듬히 보여요
+const STRESS: StressCorner = {
+  sandbag: { x: 1.5, z: 2.3, yaw: FACE.E },
+  keyboards: { x: 1.5, z: 3.4, yaw: FACE.E },
+};
+
 const obstacles: Box[] = [
   { x0: -5.6, x1: 5.6, z0: -4.75, z1: -4.2 }, // 바 카운터
   { x0: TABLE.x0, x1: TABLE.x1, z0: TABLE.z0, z1: TABLE.z1 },
@@ -106,6 +113,7 @@ const obstacles: Box[] = [
     [0.7, 4.55],
   ].map(([x, z]) => ({ x0: x - 0.3, x1: x + 0.3, z0: z - 0.3, z1: z + 0.3 })),
   { x0: -6.55, x1: -6.05, z0: 1.45, z1: 1.95 }, // 스탠드 조명
+  ...stressObstacles(STRESS),
   ...seatObstacles(seats),
 ];
 
@@ -119,6 +127,7 @@ const layout: PlaceLayout = {
     deploy: SPOT.deploy,
     pet: { x: -0.9, z: 3.1 },
     idle: { x: 4.6, z: 0.8 },
+    ...stressSpots(STRESS),
   },
 };
 
@@ -436,6 +445,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
   const walls = wallCutaway({ left: leftWall, right: rightWall, back: backWall }, ROOM);
 
   b.keep.add(outside).add(rack);
+  const stress = buildStressCorner(b, STRESS);
   b.finish([leftWall, rightWall, backWall]);
 
   let clockT = 0;
@@ -446,6 +456,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
     seatHits: b.seatHits,
     gitlog,
     update(dt: number, cam: THREE.Camera) {
+      stress.update(dt);
       walls(cam);
       // 뒷벽 뒤로 돌아가도 창밖 빌딩 몸체 안에 파묻히지 않게
       skyline.pullOutOfBuildings(cam.position, ROOM_CENTER);
@@ -466,7 +477,10 @@ function build(scene: THREE.Scene, mobile: boolean) {
       }
     },
     alarm: (sec: number) => alarm.start(sec),
-    poke: (key: string) => key === 'duck' && duckAnim.poke(),
+    poke: (key: string) => {
+      if (key === 'duck') duckAnim.poke();
+      stress.poke(key);
+    },
     get alarming() {
       return alarm.on;
     },

@@ -1,4 +1,4 @@
-// 큰 동작에서 날아가고 뒤집히는 소품 (던진 노트북, 뒤집힌 책상, 기절했을 때 도는 별)
+// 큰 동작에서 날아가고 뒤집히는 소품 (던진 노트북, 뒤집힌 책상, 기절했을 때 도는 별, 튀는 키캡)
 import * as THREE from 'three';
 
 const PI = Math.PI;
@@ -22,6 +22,7 @@ const geo = {
   top: new THREE.BoxGeometry(0.7, 0.04, 0.4),
   leg: new THREE.BoxGeometry(0.04, 0.36, 0.04),
   star: new THREE.OctahedronGeometry(0.035, 0),
+  keycap: new THREE.BoxGeometry(0.045, 0.03, 0.045),
 };
 
 const mat = {
@@ -30,6 +31,7 @@ const mat = {
   wood: new THREE.MeshStandardMaterial({ color: '#a47a4b', roughness: 0.8 }),
   woodDark: new THREE.MeshStandardMaterial({ color: '#7d5a36', roughness: 0.85 }),
   star: new THREE.MeshBasicMaterial({ color: '#ffe27a' }),
+  keycaps: ['#f4efe4', '#2b2f3a', '#f2b45a', '#58a6ff'].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.5 })),
 };
 
 /** 끝난 소품이 사라질 때 천천히 작아지게 하는 값 (0~1) */
@@ -142,6 +144,50 @@ export class FlippedTable implements Prop {
     const rest = this.t - this.flipS;
     if (rest > 0) this.group.scale.setScalar(Math.max(0.001, shrinkAt(rest)));
     return rest < REST_S + SHRINK_S;
+  }
+}
+
+/** 키보드를 내리칠 때 튀어 오르는 키캡 개수 */
+const KEYCAP_COUNT = 8;
+
+/** 키보드를 내리친 자리에서 사방으로 튀었다가 바닥에 떨어지는 키캡들 */
+export class FlyingKeycaps implements Prop {
+  readonly group = new THREE.Group();
+  private t = 0;
+  private caps: { mesh: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; landed: boolean }[] = [];
+
+  constructor(origin: THREE.Vector3) {
+    this.group.position.copy(origin);
+    for (let i = 0; i < KEYCAP_COUNT; i++) {
+      const mesh = new THREE.Mesh(geo.keycap, mat.keycaps[i % mat.keycaps.length]);
+      const a = (i / KEYCAP_COUNT) * PI * 2 + Math.random() * 0.6;
+      const speed = 0.6 + Math.random() * 0.8;
+      const v = new THREE.Vector3(Math.cos(a) * speed, 2.2 + Math.random() * 1.2, Math.sin(a) * speed);
+      const spin = new THREE.Vector3(Math.random() * 14, Math.random() * 14, Math.random() * 14);
+      this.caps.push({ mesh, v, spin, landed: false });
+      this.group.add(mesh);
+    }
+  }
+
+  update(dt: number) {
+    this.t += dt;
+    // 바닥 높이를 group 안 좌표로 (group은 내리친 자리에 있어요)
+    const floorY = FLOOR_Y - this.group.position.y;
+    for (const c of this.caps) {
+      if (c.landed) continue;
+      c.v.y -= GRAVITY * dt;
+      c.mesh.position.addScaledVector(c.v, dt);
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.y += c.spin.y * dt;
+      c.mesh.rotation.z += c.spin.z * dt;
+      if (c.mesh.position.y <= floorY) {
+        c.mesh.position.y = floorY;
+        c.mesh.rotation.set(0, c.mesh.rotation.y, 0);
+        c.landed = true;
+      }
+    }
+    this.group.scale.setScalar(Math.max(0.001, shrinkAt(this.t)));
+    return this.t < REST_S + SHRINK_S;
   }
 }
 
