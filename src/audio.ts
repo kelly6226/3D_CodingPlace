@@ -377,6 +377,26 @@ class Sound {
   pop() {
     this.burst(1200, 0.06, 0.12);
   }
+
+  /** 다른 창에 있을 때 채팅이 왔다는 짧은 '띵동' (chime보다 짧고 작게) */
+  ping() {
+    const ctx = this.ctx;
+    if (!ctx || !this.enabled) return;
+    const t = ctx.currentTime;
+    [1046.5, 1318.5].forEach((freq, i) => {
+      const at = t + i * 0.09;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(0.08, at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
+      o.connect(g).connect(this.master);
+      o.start(at);
+      o.stop(at + 0.5);
+    });
+  }
 }
 
 export const sound = new Sound();

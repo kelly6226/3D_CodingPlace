@@ -42,6 +42,7 @@ import { SeatTimeReporter } from './together/seatTime';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
 import { hasRoomRecord, hourLabel, roomTodaySentence, seatTraceLine } from './ui/together';
 import { Tips } from './ui/tips';
+import { AwayChatAlerts, chatNotifyState, turnOnChatNotify, type ChatNotifyState } from './ui/awayAlerts';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
 import { watchContextLoss } from './world/contextWatch';
@@ -64,6 +65,10 @@ const profile = store.getProfile();
 ui.showIntro(profile, store.hasSavedProfile());
 ui.setSound(store.getSound());
 sound.enabled = store.getSound();
+
+/** 다른 창에 있을 때 온 채팅을 탭 제목·알림음·(켠 사람만) 브라우저 알림으로 알려요 */
+const awayAlerts = new AwayChatAlerts({ ping: () => sound.ping(), notifyOn: () => chatNotifyState(store.getChatNotify()) === 'on' });
+ui.setChatNotify(chatNotifyState(store.getChatNotify()));
 
 const params = new URLSearchParams(location.search);
 const server = serverConfig(params);
@@ -381,7 +386,7 @@ async function loadRoomCommits() {
   const list = await Promise.race([net.loadCommits(slug), wait(5000).then(() => [] as Commit[])]);
   if (slug !== room.slug) return; // 그 사이 방을 옮겼으면 버림
   showCommits(list);
-  document.title = pageTitle(room);
+  awayAlerts.setBaseTitle(pageTitle(room));
 }
 
 /** 방명록을 TV와 시트에 그려요. 내가 신고한 커밋은 빼요 */
@@ -798,6 +803,23 @@ let lastChat = 0;
  * 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요.
  * to를 주면 그 사람에게만 보이는 귓속말이 돼요 (로그인이 없어서 이 방문 동안만 가요. 암호화는 안 돼요)
  */
+const CHAT_NOTIFY_TOAST: Record<ChatNotifyState, { text: string; kind: 'good' | 'bad' | 'info' }> = {
+  on: { text: '🔔 다른 창에 있을 때 채팅이 오면 알려드릴게요', kind: 'good' },
+  off: { text: '🔕 채팅 알림을 껐어요. 탭 제목 숫자와 알림음은 그대로예요', kind: 'info' },
+  blocked: { text: '브라우저에서 이 사이트 알림이 막혀 있어요. 주소창 왼쪽 사이트 설정에서 알림을 허용해 주세요', kind: 'bad' },
+  unsupported: { text: '이 브라우저에서는 채팅 알림을 띄울 수 없어요. 탭 제목 숫자와 알림음으로 알려드릴게요', kind: 'info' },
+};
+
+/** 채팅 칸 🔔: 켜져 있으면 끄고, 꺼져 있으면 권한을 물어 켜요 */
+async function toggleChatNotify() {
+  const wasOn = chatNotifyState(store.getChatNotify()) === 'on';
+  const next: ChatNotifyState = wasOn ? 'off' : await turnOnChatNotify();
+  store.setChatNotify(next === 'on');
+  ui.setChatNotify(next);
+  const toast = CHAT_NOTIFY_TOAST[next];
+  ui.toast(toast.text, toast.kind, 5000);
+}
+
 function chat(text: string, to?: string): string | null {
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
@@ -1049,6 +1071,7 @@ function onEvent(e: NetEvent) {
       if (e.to && e.to !== self.id) return; // 나한테 온 귓속말이 아니면 못 본 척해요
       a.say(e.text);
       ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false, whisperWith: e.to ? a.state.name : undefined });
+      awayAlerts.alertIfAway({ name: a.state.name, text: e.text, whisper: !!e.to });
       break;
     }
     case 'deploy':
@@ -1346,6 +1369,7 @@ ui.bind({
   onCommit: commit,
   onChat: chat,
   onChatPin: (text) => commit(CHAT_PIN_COMMIT_TYPE, text),
+  onChatNotifyToggle: () => void toggleChatNotify(),
   onSound: (on) => {
     store.setSound(on);
     sound.setEnabled(on);

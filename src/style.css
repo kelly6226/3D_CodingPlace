@@ -1778,11 +1778,29 @@ button.place-name {
   font-size: 12px;
   color: var(--muted);
 }
+.chat-head p {
+  flex: 1;
+}
 .chat-head .x {
   position: static;
   flex: none;
   width: 28px;
   height: 28px;
+}
+/* 다른 창에 있을 때 브라우저 알림 켜기·끄기 */
+.chat-notify {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 14px;
+}
+.chat-notify[aria-pressed='true'] {
+  border-color: rgba(242, 180, 90, 0.6);
 }
 .chat-log {
   list-style: none;
