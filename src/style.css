@@ -1861,13 +1861,15 @@ button.place-name {
   color: var(--amber);
   font-style: italic;
 }
-/* 알림 줄: 대화보다 작고 흐리게, 앞에 시각 */
+/* 알림 줄: 대화보다 작고 흐리게 */
 .chat-log li.notice {
   font-size: 12px;
   color: var(--muted);
 }
-.chat-log li.notice .when {
+/* 대화·알림 줄 앞의 시각 */
+.chat-log .when {
   flex: none;
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
