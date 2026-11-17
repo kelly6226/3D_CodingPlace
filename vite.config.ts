@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 
 /**
@@ -21,28 +20,10 @@ function siteMeta(): Plugin {
       const robots = ['User-agent: *', 'Allow: /', site ? `Sitemap: ${site}/sitemap.xml` : ''].filter(Boolean).join('\n') + '\n';
       this.emitFile({ type: 'asset', fileName: 'robots.txt', source: robots });
       if (site) {
-        const urls = ['/', '/games', '/privacy.html'].map((p) => `  <url><loc>${site}${p}</loc></url>`).join('\n');
+        const urls = ['/', '/privacy.html'].map((p) => `  <url><loc>${site}${p}</loc></url>`).join('\n');
         this.emitFile({ type: 'asset', fileName: 'sitemap.xml', source: `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n` });
       }
     },
-  };
-}
-
-/**
- * 게임만 따로 여는 페이지(/games, /games/<게임 id>)를 로컬(npm run dev, npm run preview)에서도 games.html로 열어요.
- * 배포에서는 vercel.json rewrites가 같은 일을 해요. 주소를 바꾸면 config.ts GAMES_PAGE_PATH도 같이 바꿔요
- */
-const GAMES_ROUTE_RE = /^\/games(\/[\w-]*)?\/?(\?.*)?$/;
-
-function gamesPageRoutes(): Plugin {
-  const rewrite = (req: { url?: string }, _res: unknown, next: () => void) => {
-    if (req.url && GAMES_ROUTE_RE.test(req.url)) req.url = '/games.html';
-    next();
-  };
-  return {
-    name: 'games-page-routes',
-    configureServer: (server) => void server.middlewares.use(rewrite),
-    configurePreviewServer: (server) => void server.middlewares.use(rewrite),
   };
 }
 
@@ -61,16 +42,11 @@ function injectAnalyticsScriptOnBuild(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [siteMeta(), gamesPageRoutes(), injectAnalyticsScriptOnBuild()],
+  plugins: [siteMeta(), injectAnalyticsScriptOnBuild()],
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 900,
     rollupOptions: {
-      // 방(index.html)과 게임만 따로 연 페이지(games.html). 게임 페이지는 three.js를 받지 않아요
-      input: {
-        main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        games: fileURLToPath(new URL('./games.html', import.meta.url)),
-      },
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/three')) return 'three';

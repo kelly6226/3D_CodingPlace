@@ -29,7 +29,7 @@ import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
 import { serverConfig } from './net/server';
-import type { GameId } from './minigames/ids';
+import { gameFromPath, type GameId } from './minigames/ids';
 import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
@@ -67,6 +67,9 @@ sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
 const server = serverConfig(params);
+/** /games, /games/<게임 id>로 들어왔으면 입장한 뒤 오락기를 바로 열어요. 오락기를 끈 곳(토스 앱)에서는 그냥 방이에요 */
+const arcadeFromUrl = MINIGAMES_ENABLED ? gameFromPath(location.pathname) : undefined;
+if (arcadeFromUrl) void showIntroArcadeNote(arcadeFromUrl.game);
 
 /** 다른 기기에서 이어하기. 서버가 없으면(데모 모드) null */
 const deviceSync = server && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(server.url, server.key)) : null;
@@ -74,6 +77,9 @@ const deviceSync = server && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(se
 const syncCodeFromLink = deviceSync ? takeSyncCodeFromUrl() : null;
 
 /** 주소에서 방 찾기: /r/<방>, 예전 형식 ?room=pangyo-2 도 받아줌 */
+/** 방 주소. 기본 방은 / 그대로 */
+const roomPath = (slug: string) => (slug === DEFAULT_ROOM ? '/' : `/r/${slug}`);
+
 function roomFromUrl(): { slug: string | null; instance: number } {
   const m = location.pathname.match(/^\/r\/([a-z0-9-]{3,32})\/?$/);
   if (m) return { slug: m[1], instance: Number(new URLSearchParams(location.search).get('n')) || 1 };
@@ -454,6 +460,10 @@ async function enter(p: store.Profile) {
   if (outfitVaried) {
     window.setTimeout(() => ui.toast(OUTFIT_VARIED_NOTICE, 'info', OUTFIT_VARIED_NOTICE_MS), NUDGE_DELAY_MS);
   }
+  if (arcadeFromUrl) {
+    openArcadeFromUrl(arcadeFromUrl.game, firstVisit);
+    return;
+  }
   if (firstVisit) {
     await wait(TIPS_DELAY_MS);
     showTips();
@@ -577,14 +587,14 @@ async function pickRoom(slug: string, push = true) {
     applyNoise(r);
     ui.setCurrentRoom(r, false);
     ui.setRoom(1);
-    history.replaceState(null, '', r.slug === DEFAULT_ROOM ? '/' : `/r/${r.slug}`);
+    history.replaceState(null, '', roomPath(r.slug));
     reloadRoomToday();
     await loadRoomCommits();
     return;
   }
   if (!(await unlockRoom(r))) {
     // 뒤로가기로 주소만 먼저 바뀐 경우, 지금 방 주소로 되돌려요
-    if (!push) history.replaceState(null, '', room.slug === DEFAULT_ROOM ? '/' : `/r/${room.slug}`);
+    if (!push) history.replaceState(null, '', roomPath(room.slug));
     return;
   }
   await switchRoom(r, push);
@@ -1187,17 +1197,39 @@ function onFrame(dt: number) {
 }
 
 // ── 탕비실 오락기 ─────────────────────────────────
-/** 🎮를 처음 누를 때 게임 코드를 받아와요 (처음 들어올 때 받는 양은 그대로) */
-async function openArcade() {
+/** 🎮를 처음 누를 때 게임 코드를 받아와요 (처음 들어올 때 받는 양은 그대로). game을 주면 그 게임부터 */
+async function openArcade(game: GameId | null = null, onClosed?: () => void) {
   if (!world || !self) return;
   const arcade = await import('./minigames/arcade');
-  arcade.openArcade({
-    pauseWorld: () => world.pause(),
-    resumeWorld: () => world.resume(),
-    player: () => ({ name: self.name, color: self.color }),
-    scoreServer: server,
-    onNewRecord: shareNewRecord,
+  arcade.openArcade(
+    {
+      pauseWorld: () => world.pause(),
+      resumeWorld: () => world.resume(),
+      player: () => ({ name: self.name, color: self.color }),
+      scoreServer: server,
+      onNewRecord: shareNewRecord,
+      onClosed,
+    },
+    game,
+  );
+}
+
+/**
+ * 게임 주소로 들어왔을 때: 방에 들어가자마자 오락기를 열어요.
+ * 닫으면 주소를 방 주소로 돌려서 새로고침해도 방으로 오게 하고, 처음 온 사람 안내는 그때 보여줘요
+ */
+function openArcadeFromUrl(game: GameId | null, firstVisit: boolean) {
+  void openArcade(game, () => {
+    history.replaceState(null, '', roomPath(room.slug));
+    if (firstVisit) window.setTimeout(showTips, TIPS_DELAY_MS);
   });
+}
+
+/** 입장 화면에 '들어가면 바로 ○○ 한 판'을 띄워요 (게임 이름은 오락기 목록에서) */
+async function showIntroArcadeNote(game: GameId | null) {
+  const { GAMES } = await import('./minigames/catalog');
+  const def = GAMES.find((g) => g.id === game);
+  ui.setIntroNote(def ? `🎮 들어가면 바로 ${def.title} 한 판!` : '🎮 들어가면 탕비실 오락기가 바로 열려요');
 }
 
 /** 내 최고 기록을 깨면 내 머리 위에 띄우고, 방 사람들에게도 한 번 알려요 (실시간 메시지 1개) */
