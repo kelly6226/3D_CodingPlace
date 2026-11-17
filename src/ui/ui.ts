@@ -36,6 +36,7 @@ import type { Commit, NewRoom, PeerState, RoomToday } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
 import { studyTodayAt } from '../studyClock';
 import { BREAK_MINUTES, FOCUS_MINUTES, type SessionState } from '../together/session';
+import type { ChatNotifyState } from './awayAlerts';
 import { $, h } from './dom';
 import {
   busyIntroText,
@@ -121,6 +122,8 @@ export interface UIHandlers {
   onChat(text: string, to?: string): string | null;
   /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
   onChatPin(text: string): Promise<string | null>;
+  /** 채팅 칸의 🔔: 다른 창에 있을 때 브라우저 알림 켜기·끄기 */
+  onChatNotifyToggle(): void;
   onSound(on: boolean): void;
   /** 이 방에서 나만 들을 배경 소리 고르기 */
   onNoise(id: NoiseId): void;
@@ -183,6 +186,7 @@ export class UI {
   private roomsView: 'list' | 'create' = 'list';
   private chatBtn: HTMLButtonElement;
   private chatPanel!: HTMLElement;
+  private chatNotifyBtn!: HTMLButtonElement;
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
@@ -990,6 +994,7 @@ export class UI {
       h('button', { type: 'button', class: 'whisper-x', onclick: () => this.clearWhisper(), 'aria-label': '귓속말 그만하기' }, '✕'),
     );
     this.chatSubmit = h('button', { class: 'primary', type: 'submit' }, '보내기');
+    this.chatNotifyBtn = h('button', { class: 'chat-notify', type: 'button', onclick: () => this.h.onChatNotifyToggle() }, '🔕');
     const form = h(
       'form',
       {
@@ -1009,6 +1014,7 @@ export class UI {
         'header',
         { class: 'chat-head' },
         h('p', {}, '말풍선으로 잠깐 보여요. 알림도 여기 남아요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
+        this.chatNotifyBtn,
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
       this.chatLog,
@@ -1017,6 +1023,22 @@ export class UI {
       form,
     );
     return this.chatPanel;
+  }
+
+  /** 채팅 칸 🔔 버튼을 브라우저 알림 상태에 맞춰요. 알림을 못 띄우는 브라우저면 숨겨요 */
+  setChatNotify(state: ChatNotifyState) {
+    const btn = this.chatNotifyBtn;
+    const label: Record<ChatNotifyState, string> = {
+      on: '다른 창에 있을 때 채팅 알림 켜짐 (누르면 꺼요)',
+      off: '다른 창에 있을 때 채팅 알림 받기',
+      blocked: '브라우저에서 이 사이트 알림이 막혀 있어요',
+      unsupported: '',
+    };
+    btn.hidden = state === 'unsupported';
+    btn.textContent = state === 'on' ? '🔔' : '🔕';
+    btn.title = label[state];
+    btn.setAttribute('aria-label', label[state]);
+    btn.setAttribute('aria-pressed', String(state === 'on'));
   }
 
   /** 특정 사람에게만 보이는 귓속말 모드로 전환 (방을 나가거나 새로고침하면 상대를 다시 못 찾아요) */

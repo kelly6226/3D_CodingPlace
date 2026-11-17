@@ -19,6 +19,8 @@ export interface Profile {
 interface Saved {
   profile?: Profile;
   sound?: boolean;
+  /** 다른 창에 있을 때 채팅을 브라우저 알림으로 받을지 (권한은 브라우저가 따로 기억해요) */
+  chatNotify?: boolean;
   /** 내가 신고한 커밋 (방 slug → 해시들). 신고한 사람에게는 바로 안 보여요 */
   reported?: Record<string, string[]>;
   /** 방마다 내가 고른 배경 소리 (방 slug → 소리). 방 기본값과 같으면 지워요 */
@@ -155,6 +157,15 @@ export function getSound(): boolean {
 
 export function setSound(on: boolean) {
   cache.sound = on;
+  persist();
+}
+
+export function getChatNotify(): boolean {
+  return cache.chatNotify ?? false;
+}
+
+export function setChatNotify(on: boolean) {
+  cache.chatNotify = on;
   persist();
 }
 
