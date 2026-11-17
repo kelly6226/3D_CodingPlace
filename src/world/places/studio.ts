@@ -23,7 +23,7 @@ import {
   wallCutaway,
   std,
 } from './kit';
-import { buildStressCorner, stressObstacles, stressSpots, type StressCorner } from './stress';
+import { buildStressCorner, stressObstacles, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -51,10 +51,10 @@ const seats: Seat[] = [
   seat('beanbag', 'beanbag', '빈백', 3.0, 2.2, FACE.W, { dist: 0.3, ly: 0.45, ax: 2.25, az: 2.2 }),
 ];
 
-// 스트레스 해소 코너: 좌식 테이블과 빈백 사이 빈 바닥 (좁은 원룸이라 둘을 붙여 놨어요)
+// 스트레스 해소 코너: 좌식 테이블과 빈백 사이 빈 바닥. 월요일 쿠션과 택배 뽁뽁이 (좁은 원룸이라 둘을 붙여 놨어요)
 const STRESS: StressCorner = {
-  sandbag: { x: 1.6, z: 2.6, yaw: FACE.E },
-  keyboards: { x: 2.1, z: 1.55, yaw: FACE.E },
+  punch: { theme: 'mondayCushion', x: 1.6, z: 2.6, yaw: FACE.E },
+  smash: { theme: 'bubbleWrap', x: 2.1, z: 1.55, yaw: FACE.E },
 };
 
 const obstacles: Box[] = [
@@ -80,8 +80,8 @@ const layout: PlaceLayout = {
     deploy: { x: 0.95, z: -1.95, yaw: FACE.N },
     pet: { x: -2.2, z: -1.1 },
     idle: { x: 1.8, z: -0.4 },
-    ...stressSpots(STRESS),
   },
+  stress: STRESS,
 };
 
 const CAT_LINES = [
