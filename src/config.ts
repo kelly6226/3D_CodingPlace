@@ -125,28 +125,20 @@ export const ACTIONS: ActionDef[] = [
   { id: 'faint', emoji: '😵', label: '번아웃 기절', line: '번아웃…', seconds: 5 },
 ];
 
-/** 스트레스 해소 코너의 물건 (장소마다 하나씩, src/world/places/stress.ts) */
-export type StressObjectId = 'sandbag' | 'keyboards';
-
-export interface StressActionDef extends ActionDef {
-  id: StressActionId;
-  /** 이 동작을 하러 가는 물건 */
-  object: StressObjectId;
-}
-
 /**
- * 스트레스 해소 코너의 물건을 눌렀을 때 하는 큰 동작. 물건 앞에 가서 해야 해서 동작 시트에는 안 나와요.
- * 다른 사람에게는 다른 큰 동작처럼 'act'로 전해져요.
+ * 스트레스 해소 코너에서 하는 큰 동작 (치기, 내리치기). 물건 앞에 가서 해야 해서 동작 시트에는 안 나와요.
+ * 무엇을 치는지(물건 모양, 말풍선, 소리)는 장소마다 달라서 src/world/places/stress.ts 테마가 정해요.
+ * 여기 emoji·line은 테마를 못 찾을 때 쓰는 기본값이에요.
+ * 다른 사람에게는 다른 큰 동작처럼 'act'로 전해지고, 받은 쪽도 같은 장소라 같은 테마를 보여줘요.
  * 토스 미니앱 민감 콘텐츠 기준 때문에 사람은 때리지 않고 물건만 치고, 대사도 거칠게 쓰지 않아요
  */
-export const STRESS_ACTIONS: StressActionDef[] = [
-  { id: 'punch', emoji: '🥊', label: '샌드백 치기', line: '레거시 코드 너 때문이야!', seconds: 2.6, object: 'sandbag' },
-  { id: 'smash', emoji: '⌨️', label: '키보드 부수기', line: '키보드가 문제였어', seconds: 2.4, object: 'keyboards' },
+export const STRESS_ACTIONS: ActionDef[] = [
+  { id: 'punch', emoji: '🥊', label: '치기', line: '퍽!', seconds: 2.6 },
+  { id: 'smash', emoji: '💥', label: '내리치기', line: '쾅!', seconds: 2.4 },
 ];
 
-export const stressActionById = (id: unknown): StressActionDef | undefined => STRESS_ACTIONS.find((a) => a.id === id);
-/** 물건을 눌렀을 때 할 동작. 물건 이름이 3D 쪽 userData에서 문자열로 와서 모르는 값이면 undefined */
-export const stressActionOf = (object: unknown): StressActionDef | undefined => STRESS_ACTIONS.find((a) => a.object === object);
+export const stressActionById = (id: unknown): (ActionDef & { id: StressActionId }) | undefined =>
+  STRESS_ACTIONS.find((a) => a.id === id) as (ActionDef & { id: StressActionId }) | undefined;
 
 export const actionById = (id: unknown): ActionDef | undefined => ACTIONS.find((a) => a.id === id) ?? stressActionById(id);
 

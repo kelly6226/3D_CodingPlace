@@ -26,7 +26,7 @@ import {
   std,
   type V3,
 } from './kit';
-import { buildStressCorner, stressObstacles, stressSpots, type StressCorner } from './stress';
+import { buildStressCorner, stressObstacles, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -63,10 +63,10 @@ const seats: Seat[] = [
 
 const laptopBoxes = seats.filter((s) => s.kind === 'floor').map((s) => ({ x: s.lx, z: s.lz, rot: s.yaw }));
 
-// 스트레스 해소 코너: 자판기 앞쪽 빈 바닥 (빨간 소화약제 탱크와 헷갈리지 않게 떨어뜨려 놨어요)
+// 스트레스 해소 코너: 자판기 앞쪽 빈 바닥. 레거시 서버 샌드백과 온콜 호출기 더미
 const STRESS: StressCorner = {
-  sandbag: { x: -2.8, z: 2.3, yaw: FACE.E },
-  keyboards: { x: -2.8, z: 3.4, yaw: FACE.E },
+  punch: { theme: 'legacyServer', x: -2.8, z: 2.3, yaw: FACE.E },
+  smash: { theme: 'pagers', x: -2.8, z: 3.4, yaw: FACE.E },
 };
 
 const obstacles: Box[] = [
@@ -96,8 +96,8 @@ const layout: PlaceLayout = {
     deploy: { x: EPO.x, z: EPO.z + 0.7, yaw: FACE.N },
     pet: { x: -4.3, z: 1.15 },
     idle: { x: 3.2, z: 2.8 },
-    ...stressSpots(STRESS),
   },
+  stress: STRESS,
 };
 
 const RACK_NOTES = [

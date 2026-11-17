@@ -20,9 +20,8 @@ import {
   roomUrl,
   statusById,
   stressActionById,
-  stressActionOf,
   type ActionId,
-  type StressActionDef,
+  type StressActionId,
   type NoiseId,
   type PlaceId,
   type RoomInfo,
@@ -50,7 +49,8 @@ import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
 import type { Avatar } from './world/avatar';
 import { watchContextLoss } from './world/contextWatch';
-import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
+import { SEATS, SPAWN, SPOTS, STRESS, seatById, type SeatKind } from './world/layout';
+import { stressSpot, stressThemeOf, type StressSound } from './world/places/stress';
 import type { InteractData } from './world/places/kit';
 import { startRenderHud } from './world/renderHud';
 import type { World } from './world/world';
@@ -795,7 +795,8 @@ function act(id: ActionId) {
 
 /**
  * 아바타 하나가 큰 동작을 해요 (내 것이든 다른 사람 것이든).
- * 스트레스 해소 동작은 물건 쪽으로 돌아서서 하고, 주먹이 닿을 때마다 물건이 흔들리고 소리가 나요
+ * 스트레스 해소 동작은 지금 장소의 물건 쪽으로 돌아서서 하고, 말풍선·튀는 조각은 장소 테마를 따라요.
+ * 동작이 물건에 닿을 때마다 물건이 흔들리고 소리가 나요
  */
 function performAction(a: Avatar, id: ActionId) {
   const stress = stressActionById(id);
@@ -803,28 +804,38 @@ function performAction(a: Avatar, id: ActionId) {
     a.perform(id);
     return;
   }
-  a.face(SPOTS[stress.object].yaw);
-  a.perform(id, () => hitStressObject(stress));
+  const theme = stressThemeOf(STRESS, stress.id);
+  a.face(stressSpot(STRESS, stress.id).yaw);
+  a.perform(id, {
+    bubble: theme.bubble,
+    debris: theme.debris,
+    onHit: () => {
+      world.room.poke(stress.id);
+      STRESS_SOUND[theme.sound]();
+    },
+  });
 }
 
-/** 동작이 물건에 닿은 순간: 물건을 흔들고 소리를 내요 */
-function hitStressObject(def: StressActionDef) {
-  world.room.poke(def.object);
-  if (def.object === 'sandbag') sound.thud();
-  else sound.clatter();
-}
+const STRESS_SOUND: Record<StressSound, () => void> = {
+  thud: () => sound.thud(),
+  soft: () => sound.soft(),
+  clatter: () => sound.clatter(),
+  beep: () => sound.beep(),
+  pops: () => sound.pops(),
+  crunch: () => sound.crunch(),
+};
 
-/** 스트레스 해소 코너의 물건을 눌렀을 때: 물건 앞으로 걸어가서 치는 동작을 해요 */
-function goStress(def: StressActionDef) {
+/** 스트레스 해소 코너의 물건을 눌렀을 때: 물건 앞으로 걸어가서 치기·내리치기를 해요 */
+function goStress(id: StressActionId) {
   if (meAvatar().acting) {
     ui.toast(STILL_ACTING_TOAST);
     return;
   }
-  const spot = SPOTS[def.object];
+  const spot = stressSpot(STRESS, id);
   const slug = room.slug;
   moveTo(spot.x, spot.z, () => {
     if (room.slug !== slug) return;
-    act(def.id);
+    act(id);
   });
 }
 
@@ -1106,7 +1117,7 @@ function onEvent(e: NetEvent) {
       const stress = stressActionById(e.act);
       if (stress) {
         // 물건 앞에 가서 해요. 이동 소식이 먼저 와서 아직 걸어가는 중이면 도착한 뒤에 해요
-        const spot = SPOTS[stress.object];
+        const spot = stressSpot(STRESS, stress.id);
         a.goTo(spot.x, spot.z, null, () => performAction(a, e.act));
       } else {
         performAction(a, e.act);
@@ -1192,8 +1203,8 @@ function interact(d: InteractData) {
       if (d.lines?.length) ui.toast(fillNote(pick(d.lines)), 'info', 4200);
       break;
     case 'stress': {
-      const def = stressActionOf(d.key);
-      if (def) goStress(def);
+      const def = stressActionById(d.key);
+      if (def) goStress(def.id);
       break;
     }
   }

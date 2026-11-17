@@ -26,7 +26,7 @@ import {
   std,
   type V3,
 } from './kit';
-import { buildStressCorner, stressObstacles, stressSpots, type StressCorner } from './stress';
+import { buildStressCorner, stressObstacles, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -57,10 +57,10 @@ TEAMS.forEach((t, ti) => {
 // 멘토 자리
 seats.push(seat('mentor', 'chair', '멘토 데스크', 7.4, -1.6, FACE.W, { dist: 0.65, ax: 7.4, az: -0.45 }));
 
-// 스트레스 해소 코너: 왼쪽 벽, 피자 테이블과 침낭 사이
+// 스트레스 해소 코너: 왼쪽 벽, 피자 테이블과 침낭 사이. 데모 직전 버그 인형과 빈 에너지 드링크 캔
 const STRESS: StressCorner = {
-  sandbag: { x: -7.2, z: 2.0, yaw: FACE.E },
-  keyboards: { x: -7.2, z: 3.2, yaw: FACE.E },
+  punch: { theme: 'bugPlush', x: -7.2, z: 2.0, yaw: FACE.E },
+  smash: { theme: 'cans', x: -7.2, z: 3.2, yaw: FACE.E },
 };
 
 const obstacles: Box[] = [
@@ -85,8 +85,8 @@ const layout: PlaceLayout = {
     deploy: { x: PODIUM.x, z: PODIUM.z + 0.65, yaw: FACE.N },
     pet: { x: 6.0, z: -1.9 },
     idle: { x: 0, z: 3.6 },
-    ...stressSpots(STRESS),
   },
+  stress: STRESS,
 };
 
 // ── 만들기 ─────────────────────────────────────────

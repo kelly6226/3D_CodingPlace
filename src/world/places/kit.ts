@@ -13,7 +13,7 @@ export interface InteractData {
   lines?: string[];
   /** pet: 소리 */
   sound?: 'quack' | 'meow';
-  /** pet: 어느 동물을 움직일지, stress: 어느 물건인지 (StressObjectId) */
+  /** pet: 어느 동물을 움직일지, stress: 그 물건으로 할 동작 (punch·smash) */
   key?: string;
 }
 

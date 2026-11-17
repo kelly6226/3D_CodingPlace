@@ -26,7 +26,7 @@ import {
   stoolModel,
   type V3,
 } from './kit';
-import { buildStressCorner, stressObstacles, stressSpots, type StressCorner } from './stress';
+import { buildStressCorner, stressObstacles, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -89,10 +89,11 @@ const SPOT = {
   whiteboard: { x: 5.65, z: -1.6, yaw: -0.2 },
 };
 
-// 스트레스 해소 코너: 긴 테이블 앞 빈 바닥. 앞면을 +x로 둬서 치는 모습이 비스듬히 보여요
+// 스트레스 해소 코너: 긴 테이블 앞 빈 바닥. 회의 스트레스는 원두 자루에, 코딩 스트레스는 키보드에
+// 앞면을 +x로 둬서 치는 모습이 비스듬히 보여요
 const STRESS: StressCorner = {
-  sandbag: { x: 1.5, z: 2.3, yaw: FACE.E },
-  keyboards: { x: 1.5, z: 3.4, yaw: FACE.E },
+  punch: { theme: 'beanSack', x: 1.5, z: 2.3, yaw: FACE.E },
+  smash: { theme: 'keyboards', x: 1.5, z: 3.4, yaw: FACE.E },
 };
 
 const obstacles: Box[] = [
@@ -127,8 +128,8 @@ const layout: PlaceLayout = {
     deploy: SPOT.deploy,
     pet: { x: -0.9, z: 3.1 },
     idle: { x: 4.6, z: 0.8 },
-    ...stressSpots(STRESS),
   },
+  stress: STRESS,
 };
 
 // ── 만들기 ─────────────────────────────────────────
