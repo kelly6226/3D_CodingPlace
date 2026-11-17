@@ -97,8 +97,6 @@ export class Avatar {
   private pantsMat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
   private shoeMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
   private accentMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
-  /** 포인트 색 그대로 빛나 보이는 재질 (천사 고리) */
-  private accentGlowMat = new THREE.MeshBasicMaterial();
   // 꾸미기 장식이 놓이는 자리 (모양은 world/outfit.ts)
   private hatSlot = new THREE.Group();
   private hairSlot = new THREE.Group();
@@ -318,12 +316,11 @@ export class Avatar {
     this.pantsMat.color.set(o.pants);
     this.shoeMat.color.set(o.shoes);
     this.accentMat.color.set(o.accent);
-    this.accentGlowMat.color.set(o.accent);
     const dress = (slot: THREE.Group, item: THREE.Group | null) => {
       slot.clear();
       if (item) slot.add(item);
     };
-    dress(this.hatSlot, buildHat(o.hat, this.accentMat, this.accentGlowMat));
+    dress(this.hatSlot, buildHat(o.hat, this.accentMat));
     dress(this.hairSlot, buildHair(o.hairStyle, this.hairMat, this.accentMat, hatCoversHair(o.hat)));
     dress(this.backSlot, buildBack(o.back, this.accentMat));
     dress(this.neckSlot, buildNeck(o.neck, this.accentMat));
@@ -671,7 +668,6 @@ export class Avatar {
     this.pantsMat.dispose();
     this.shoeMat.dispose();
     this.accentMat.dispose();
-    this.accentGlowMat.dispose();
   }
 
   // ── 매 프레임 ───────────────────────────────────
