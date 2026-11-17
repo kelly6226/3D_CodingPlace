@@ -96,7 +96,11 @@ export class Avatar {
   // 바지·신발·포인트 색은 사람마다 달라서 아바타마다 하나씩 가져요
   private pantsMat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
   private shoeMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
-  private accentMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  // 머리끈·모자·등·목 장식 색 (칸마다 따로)
+  private tieMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  private hatMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  private backMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  private neckMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
   // 꾸미기 장식이 놓이는 자리 (모양은 world/outfit.ts)
   private hatSlot = new THREE.Group();
   private hairSlot = new THREE.Group();
@@ -315,15 +319,18 @@ export class Avatar {
   private applyOutfit(o: Outfit) {
     this.pantsMat.color.set(o.pants);
     this.shoeMat.color.set(o.shoes);
-    this.accentMat.color.set(o.accent);
+    this.tieMat.color.set(o.tieColor);
+    this.hatMat.color.set(o.hatColor);
+    this.backMat.color.set(o.backColor);
+    this.neckMat.color.set(o.neckColor);
     const dress = (slot: THREE.Group, item: THREE.Group | null) => {
       slot.clear();
       if (item) slot.add(item);
     };
-    dress(this.hatSlot, buildHat(o.hat, this.accentMat));
-    dress(this.hairSlot, buildHair(o.hairStyle, this.hairMat, this.accentMat, hatCoversHair(o.hat)));
-    dress(this.backSlot, buildBack(o.back, this.accentMat));
-    dress(this.neckSlot, buildNeck(o.neck, this.accentMat));
+    dress(this.hatSlot, buildHat(o.hat, this.hatMat));
+    dress(this.hairSlot, buildHair(o.hairStyle, this.hairMat, this.tieMat, hatCoversHair(o.hat)));
+    dress(this.backSlot, buildBack(o.back, this.backMat));
+    dress(this.neckSlot, buildNeck(o.neck, this.neckMat));
     // 매 프레임 움직이는 장식은 이름으로 찾아 둠
     this.propeller = this.hatSlot.getObjectByName('spin') ?? null;
     this.halo = this.hatSlot.getObjectByName('halo') ?? null;
@@ -667,7 +674,7 @@ export class Avatar {
     this.hairMat.dispose();
     this.pantsMat.dispose();
     this.shoeMat.dispose();
-    this.accentMat.dispose();
+    for (const m of [this.tieMat, this.hatMat, this.backMat, this.neckMat]) m.dispose();
   }
 
   // ── 매 프레임 ───────────────────────────────────

@@ -6,61 +6,63 @@ export interface LookOption {
   id: string;
   emoji: string;
   label: string;
+  /** 칸 색(머리끈·모자·등·목 색)이 들어가는지. 옷장은 이게 있을 때만 색 칸을 보여줘요 (모양은 world/outfit.ts) */
+  takesColor?: true;
 }
 
 export const HATS: LookOption[] = [
   { id: 'none', emoji: '🚫', label: '없음' },
-  { id: 'beanie', emoji: '🧶', label: '비니' },
-  { id: 'cap', emoji: '🧢', label: '볼캡' },
-  { id: 'catears', emoji: '🐱', label: '고양이 귀' },
-  { id: 'propeller', emoji: '🚁', label: '프로펠러' },
+  { id: 'beanie', emoji: '🧶', label: '비니', takesColor: true },
+  { id: 'cap', emoji: '🧢', label: '볼캡', takesColor: true },
+  { id: 'catears', emoji: '🐱', label: '고양이 귀', takesColor: true },
+  { id: 'propeller', emoji: '🚁', label: '프로펠러', takesColor: true },
   { id: 'crown', emoji: '👑', label: '왕관' },
   { id: 'duck', emoji: '🦆', label: '러버덕' },
   { id: 'halo', emoji: '😇', label: '천사 고리' },
-  { id: 'beret', emoji: '🎨', label: '베레모' },
-  { id: 'bunny', emoji: '🐰', label: '토끼 귀' },
-  { id: 'party', emoji: '🥳', label: '고깔모자' },
+  { id: 'beret', emoji: '🎨', label: '베레모', takesColor: true },
+  { id: 'bunny', emoji: '🐰', label: '토끼 귀', takesColor: true },
+  { id: 'party', emoji: '🥳', label: '고깔모자', takesColor: true },
   { id: 'sprout', emoji: '🌱', label: '새싹' },
-  { id: 'headband', emoji: '💪', label: '필승 머리띠' },
+  { id: 'headband', emoji: '💪', label: '필승 머리띠', takesColor: true },
 ];
 
 export const HAIR_STYLES: LookOption[] = [
   { id: 'short', emoji: '✂️', label: '단정' },
-  { id: 'bun', emoji: '🍡', label: '똥머리' },
-  { id: 'ponytail', emoji: '🐎', label: '포니테일' },
-  { id: 'twin', emoji: '🎀', label: '양갈래' },
+  { id: 'bun', emoji: '🍡', label: '똥머리', takesColor: true },
+  { id: 'ponytail', emoji: '🐎', label: '포니테일', takesColor: true },
+  { id: 'twin', emoji: '🎀', label: '양갈래', takesColor: true },
   { id: 'long', emoji: '💁', label: '긴 머리' },
   { id: 'spiky', emoji: '🦔', label: '뾰족' },
   { id: 'afro', emoji: '☁️', label: '아프로' },
   { id: 'bob', emoji: '💇', label: '단발' },
   { id: 'mohawk', emoji: '🤘', label: '모히칸' },
-  { id: 'braid', emoji: '🪢', label: '땋은 머리' },
+  { id: 'braid', emoji: '🪢', label: '땋은 머리', takesColor: true },
 ];
 
 export const BACKS: LookOption[] = [
   { id: 'none', emoji: '🚫', label: '없음' },
-  { id: 'backpack', emoji: '🎒', label: '백팩' },
-  { id: 'cape', emoji: '🦸', label: '망토' },
-  { id: 'wings', emoji: '🪽', label: '날개' },
-  { id: 'shell', emoji: '🐢', label: '거북 등딱지' },
-  { id: 'jetpack', emoji: '🚀', label: '제트팩' },
-  { id: 'guitar', emoji: '🎸', label: '기타' },
-  { id: 'dinotail', emoji: '🦖', label: '공룡 꼬리' },
+  { id: 'backpack', emoji: '🎒', label: '백팩', takesColor: true },
+  { id: 'cape', emoji: '🦸', label: '망토', takesColor: true },
+  { id: 'wings', emoji: '🪽', label: '날개', takesColor: true },
+  { id: 'shell', emoji: '🐢', label: '거북 등딱지', takesColor: true },
+  { id: 'jetpack', emoji: '🚀', label: '제트팩', takesColor: true },
+  { id: 'guitar', emoji: '🎸', label: '기타', takesColor: true },
+  { id: 'dinotail', emoji: '🦖', label: '공룡 꼬리', takesColor: true },
 ];
 
 export const NECKS: LookOption[] = [
   { id: 'none', emoji: '🚫', label: '없음' },
-  { id: 'scarf', emoji: '🧣', label: '목도리' },
-  { id: 'lanyard', emoji: '🪪', label: '사원증' },
-  { id: 'bowtie', emoji: '🤵', label: '나비넥타이' },
-  { id: 'headphones', emoji: '🎧', label: '목 헤드폰' },
-  { id: 'tie', emoji: '👔', label: '넥타이' },
-  { id: 'medal', emoji: '🏅', label: '메달' },
-  { id: 'camera', emoji: '📷', label: '카메라' },
+  { id: 'scarf', emoji: '🧣', label: '목도리', takesColor: true },
+  { id: 'lanyard', emoji: '🪪', label: '사원증', takesColor: true },
+  { id: 'bowtie', emoji: '🤵', label: '나비넥타이', takesColor: true },
+  { id: 'headphones', emoji: '🎧', label: '목 헤드폰', takesColor: true },
+  { id: 'tie', emoji: '👔', label: '넥타이', takesColor: true },
+  { id: 'medal', emoji: '🏅', label: '메달', takesColor: true },
+  { id: 'camera', emoji: '📷', label: '카메라', takesColor: true },
 ];
 
-/** 모자·등·목 장식에 같이 쓰는 포인트 색 */
-export const ACCENT_COLORS = ['#e5484d', '#f2b45a', '#4cc38a', '#4a9eff', '#a78bfa', '#ff8fb1', '#f3efe6', '#2a2d35'];
+/** 머리끈·모자·등·목 장식 색 (칸마다 따로 골라요) */
+export const ITEM_COLORS = ['#e5484d', '#f2b45a', '#4cc38a', '#4a9eff', '#a78bfa', '#ff8fb1', '#f3efe6', '#2a2d35'];
 export const PANTS_COLORS = ['#2b2f3a', '#3b4a6b', '#5a4a3a', '#8a8f98', '#d9d3c7', '#6b7a52', '#7a3b3b', '#1b1b20'];
 export const SHOE_COLORS = ['#efeae0', '#2f2f35', '#e5484d', '#4a9eff', '#f2b45a', '#4cc38a', '#ff8fb1'];
 
@@ -70,7 +72,11 @@ export interface Outfit {
   hairStyle: string;
   back: string;
   neck: string;
-  accent: string;
+  /** 머리끈 (똥머리·포니테일·양갈래·땋은 머리) */
+  tieColor: string;
+  hatColor: string;
+  backColor: string;
+  neckColor: string;
   pants: string;
   shoes: string;
 }
@@ -81,7 +87,10 @@ export const DEFAULT_OUTFIT: Outfit = {
   hairStyle: 'short',
   back: 'none',
   neck: 'none',
-  accent: ACCENT_COLORS[0],
+  tieColor: ITEM_COLORS[0],
+  hatColor: ITEM_COLORS[0],
+  backColor: ITEM_COLORS[0],
+  neckColor: ITEM_COLORS[0],
   pants: PANTS_COLORS[0],
   shoes: SHOE_COLORS[0],
 };
@@ -105,12 +114,17 @@ const hexOr = (v: unknown, fallback: string) => (typeof v === 'string' && HEX_RE
 export function normalizeOutfit(raw: unknown): Outfit {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_OUTFIT;
+  // 칸별 색이 생기기 전에는 포인트 색(accent) 하나를 다 같이 썼어요. 그 값이 있으면 칸마다 이어받아요
+  const legacyAccent = hexOr(o.accent, ITEM_COLORS[0]);
   return {
     hat: idOr(HATS, o.hat, d.hat),
     hairStyle: idOr(HAIR_STYLES, o.hairStyle, d.hairStyle),
     back: idOr(BACKS, o.back, d.back),
     neck: idOr(NECKS, o.neck, d.neck),
-    accent: hexOr(o.accent, d.accent),
+    tieColor: hexOr(o.tieColor, legacyAccent),
+    hatColor: hexOr(o.hatColor, legacyAccent),
+    backColor: hexOr(o.backColor, legacyAccent),
+    neckColor: hexOr(o.neckColor, legacyAccent),
     pants: hexOr(o.pants, d.pants),
     shoes: hexOr(o.shoes, d.shoes),
   };
@@ -122,7 +136,10 @@ export function sameOutfit(a: Outfit, b: Outfit): boolean {
     a.hairStyle === b.hairStyle &&
     a.back === b.back &&
     a.neck === b.neck &&
-    a.accent === b.accent &&
+    a.tieColor === b.tieColor &&
+    a.hatColor === b.hatColor &&
+    a.backColor === b.backColor &&
+    a.neckColor === b.neckColor &&
     a.pants === b.pants &&
     a.shoes === b.shoes
   );
@@ -136,7 +153,10 @@ export function randomOutfit(): Outfit {
     hairStyle: pick(HAIR_STYLES).id,
     back: pick(BACKS).id,
     neck: pick(NECKS).id,
-    accent: pick(ACCENT_COLORS),
+    tieColor: pick(ITEM_COLORS),
+    hatColor: pick(ITEM_COLORS),
+    backColor: pick(ITEM_COLORS),
+    neckColor: pick(ITEM_COLORS),
     pants: pick(PANTS_COLORS),
     shoes: pick(SHOE_COLORS),
   };
