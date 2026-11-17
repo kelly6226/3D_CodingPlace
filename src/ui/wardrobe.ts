@@ -1,11 +1,11 @@
 // 옷장 시트: 내 캐릭터를 꾸미고, 고르는 즉시 방 안의 내 아바타와 미리보기에 반영해요
 import { ACTIONS, HAIR_COLORS, HOODIE_COLORS, SKIN_TONES, type ActionId } from '../config';
 import {
-  ACCENT_COLORS,
   BACKS,
   DEFAULT_OUTFIT,
   HAIR_STYLES,
   HATS,
+  ITEM_COLORS,
   NECKS,
   PANTS_COLORS,
   SHOE_COLORS,
@@ -150,31 +150,31 @@ export class Wardrobe {
   private paintPane() {
     const { outfit: o, hair, color, skin, glasses } = this.look;
     // 고르면 this.look을 고치고 화면을 다시 그리니까, 고치는 함수는 그때의 look을 받아서 써요
-    const setAccent = (c: string) => this.change((l) => (l.outfit.accent = c));
     switch (this.tab) {
       case 'hair':
         this.pane.replaceChildren(
           this.options('머리 모양', HAIR_STYLES, o.hairStyle, (id) => this.change((l) => (l.outfit.hairStyle = id))),
           this.swatches('머리색', HAIR_COLORS, hair, (c) => this.change((l) => (l.hair = c))),
+          this.itemColor('머리끈 색', HAIR_STYLES, o.hairStyle, o.tieColor, (c) => this.change((l) => (l.outfit.tieColor = c))),
           this.options('안경', GLASSES, glasses ? 'on' : 'off', (id) => this.change((l) => (l.glasses = id === 'on'))),
         );
         break;
       case 'hat':
         this.pane.replaceChildren(
           this.options('모자·머리 장식', HATS, o.hat, (id) => this.change((l) => (l.outfit.hat = id))),
-          this.swatches('포인트 색', ACCENT_COLORS, o.accent, setAccent),
+          this.itemColor('모자 색', HATS, o.hat, o.hatColor, (c) => this.change((l) => (l.outfit.hatColor = c))),
         );
         break;
       case 'back':
         this.pane.replaceChildren(
           this.options('등', BACKS, o.back, (id) => this.change((l) => (l.outfit.back = id))),
-          this.swatches('포인트 색', ACCENT_COLORS, o.accent, setAccent),
+          this.itemColor('등 장식 색', BACKS, o.back, o.backColor, (c) => this.change((l) => (l.outfit.backColor = c))),
         );
         break;
       case 'neck':
         this.pane.replaceChildren(
           this.options('목', NECKS, o.neck, (id) => this.change((l) => (l.outfit.neck = id))),
-          this.swatches('포인트 색', ACCENT_COLORS, o.accent, setAccent),
+          this.itemColor('목 장식 색', NECKS, o.neck, o.neckColor, (c) => this.change((l) => (l.outfit.neckColor = c))),
         );
         break;
       case 'color':
@@ -206,6 +206,12 @@ export class Wardrobe {
         ),
       ),
     );
+  }
+
+  /** 고른 장식에 색이 들어갈 때만 그 칸의 색 고르기를 보여줘요 (없음, 색이 정해진 왕관 등은 안 보여요) */
+  private itemColor(title: string, list: LookOption[], chosen: string, current: string, pick: (color: string) => void) {
+    const takesColor = list.find((opt) => opt.id === chosen)?.takesColor === true;
+    return takesColor ? this.swatches(title, ITEM_COLORS, current, pick) : '';
   }
 
   private swatches(title: string, colors: readonly string[], current: string, pick: (color: string) => void) {
