@@ -2995,6 +2995,10 @@ button.place-name {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* 스크롤 칸이라 바깥으로 그린 포커스 테두리가 위아래로 잘려 카드에서 떨어져 보여요. 안쪽에 그려요 */
+.arcade-body :focus-visible {
+  outline-offset: -2px;
+}
 .arcade-list {
   display: flex;
   flex-direction: column;
