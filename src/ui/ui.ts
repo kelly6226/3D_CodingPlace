@@ -10,6 +10,7 @@ import {
   FEEDBACK_URL,
   LANGS,
   MINIGAMES_ENABLED,
+  NICKNAME_MAX,
   NOISE_GROUPS,
   NOISES,
   PLACES,
@@ -341,7 +342,7 @@ export class UI {
   // ── 입장 화면 ───────────────────────────────────
   showIntro(profile: Profile, returning: boolean) {
     const p = { ...profile };
-    const nick = h('input', { id: 'nick', maxlength: 12, value: p.name, autocomplete: 'off', spellcheck: 'false' });
+    const nick = h('input', { id: 'nick', maxlength: NICKNAME_MAX, value: p.name, autocomplete: 'off', spellcheck: 'false' });
     const lang = h('select', { id: 'lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
     // 처음부터 옷장으로 꾸미고 들어가요. 고르는 값은 p에만 쌓고, 입장할 때 저장해요
     const dress = h('div', { class: 'intro-dress' });
@@ -371,7 +372,7 @@ export class UI {
           const unlocked = await this.h.onUnlockRoom();
           btn.disabled = false;
           if (!unlocked) return;
-          p.name = nick.value.trim().slice(0, 12) || p.name;
+          p.name = nick.value.trim().slice(0, NICKNAME_MAX) || p.name;
           p.lang = lang.value;
           this.introWardrobe?.close();
           $('#intro').classList.add('out');
@@ -1387,7 +1388,7 @@ export class UI {
       case 'profile': {
         const s = this.self;
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
-        const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
+        const nick = h('input', { id: 'p-nick', maxlength: NICKNAME_MAX, value: p.name, autocomplete: 'off' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
         const history = getStudyHistory();
         const today = kstDate();
@@ -1423,7 +1424,7 @@ export class UI {
               onsubmit: (e: Event) => {
                 e.preventDefault();
                 if (this.rejectBadNick(nick)) return;
-                p.name = nick.value.trim().slice(0, 12) || p.name;
+                p.name = nick.value.trim().slice(0, NICKNAME_MAX) || p.name;
                 p.lang = lang.value;
                 this.h.onProfileSave(p);
                 this.closeSheet();

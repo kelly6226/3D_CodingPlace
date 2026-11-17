@@ -28,6 +28,7 @@ import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
+import { serverConfig } from './net/server';
 import type { GameId } from './minigames/ids';
 import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
@@ -63,12 +64,10 @@ ui.setSound(store.getSound());
 sound.enabled = store.getSound();
 
 const params = new URLSearchParams(location.search);
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
-const isOnline = !!supabaseUrl && !!supabaseKey && params.get('demo') !== '1';
+const server = serverConfig(params);
 
 /** 다른 기기에서 이어하기. 서버가 없으면(데모 모드) null */
-const deviceSync = isOnline && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(supabaseUrl!, supabaseKey!)) : null;
+const deviceSync = server && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(server.url, server.key)) : null;
 /** 이어하기 링크(#sync=…)로 들어왔으면 그 코드. 주소에서는 바로 지워요 */
 const syncCodeFromLink = deviceSync ? takeSyncCodeFromUrl() : null;
 
@@ -122,9 +121,9 @@ async function boot() {
   places = await placesP;
   ui.setProgress(0.35);
 
-  if (isOnline) {
+  if (server) {
     const { OnlineNet } = await import('./net/online');
-    net = new OnlineNet(supabaseUrl!, supabaseKey!, profile.id);
+    net = new OnlineNet(server.url, server.key, profile.id);
   } else {
     net = new DemoNet();
   }
@@ -1188,7 +1187,7 @@ async function openArcade() {
     pauseWorld: () => world.pause(),
     resumeWorld: () => world.resume(),
     player: () => ({ name: self.name, color: self.color }),
-    scoreServer: isOnline ? { url: supabaseUrl!, key: supabaseKey! } : null,
+    scoreServer: server,
     onNewRecord: shareNewRecord,
   });
 }
