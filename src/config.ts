@@ -25,12 +25,6 @@ export const PRIVATE_ROOMS_ENABLED = false;
 export const MINIGAMES_ENABLED = true;
 
 /**
- * 오락기만 따로 여는 페이지 주소. /games는 목록, /games/<게임 id>는 그 게임.
- * 바꾸면 vercel.json rewrites와 vite.config.ts(gamesPageRoutes, sitemap)도 같이 바꿔요
- */
-export const GAMES_PAGE_PATH = '/games';
-
-/**
  * 다른 기기에서 이어하기(이어하기 코드). 서버(Supabase)가 없는 데모 모드에서는 늘 꺼져요.
  * 토스 앱 안에서는 로그인 규정(토스 로그인만 허용)에 걸리는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
  */

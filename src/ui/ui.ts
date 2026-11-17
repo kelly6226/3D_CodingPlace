@@ -196,6 +196,8 @@ export class UI {
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
   /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
   private introWardrobe: Wardrobe | null = null;
+  /** 입장 화면 소개 아래 한 줄 (입장 화면을 다시 그려도 남게 들고 있어요) */
+  private introNote = '';
   /** 시점이 처음에서 벗어났거나 내 캐릭터를 따라가는 중이면 true (시점 버튼이 어느 쪽으로 가는지) */
   private viewAway = false;
   /** 지금 정각 세션 (main.ts가 매초 알려줘요) */
@@ -385,6 +387,7 @@ export class UI {
       h('div', { class: 'intro-kicker', id: 'intro-kicker' }, placeMeta(this.room?.place).tagline),
       h('h1', {}, '온라인 모각코'),
       h('p', { class: 'intro-lead' }, '모여서 각자 코딩해요. 빈자리에 앉아 할 일을 하면 돼요.', h('br'), '말은 안 해도 괜찮아요.'),
+      h('p', { class: 'intro-note', id: 'intro-note', hidden: !this.introNote }, this.introNote),
       h('div', { class: 'intro-places', id: 'intro-places' }),
       h('div', { class: 'intro-room', id: 'intro-room' }),
       h(
@@ -589,6 +592,15 @@ export class UI {
   setProgress(p: number) {
     this.progress = p;
     if (this.introBar) this.introBar.style.width = `${Math.round(p * 100)}%`;
+  }
+
+  /** 입장 화면 소개 아래 한 줄 안내 (게임 주소로 들어왔을 때 '들어가면 바로 ○○ 한 판!') */
+  setIntroNote(text: string) {
+    this.introNote = text;
+    const el = document.getElementById('intro-note');
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = !text;
   }
 
   /** 입장하기 전에 프로필이 바뀌면(다른 기기에서 이어받았을 때) 입장 화면을 새 프로필로 다시 그려요 */

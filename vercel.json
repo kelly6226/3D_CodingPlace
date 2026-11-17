@@ -5,8 +5,8 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/r/:slug", "destination": "/index.html" },
-    { "source": "/games", "destination": "/games.html" },
-    { "source": "/games/:game", "destination": "/games.html" }
+    { "source": "/games", "destination": "/index.html" },
+    { "source": "/games/:game", "destination": "/index.html" }
   ],
   "headers": [
     {

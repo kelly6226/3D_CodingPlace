@@ -1,5 +1,5 @@
 // 🎮 탕비실 오락기 화면: 게임 목록, 한 판, 이번 주 순위.
-// 방 안에서 여는 창(arcade.ts)과 게임만 따로 연 페이지(games/main.ts)가 같이 써요.
+// 창을 열고 닫는 일(3D 멈추기, 뒤 화면 막기, 키 받기)은 arcade.ts가 해요.
 // 내 최고 기록은 이 브라우저에, 게임별 이번 주 스코어 판은 서버(schema.sql 9번)에 남아요.
 import { sound } from '../audio';
 import { clockText, sessionAt } from '../together/session';
@@ -24,14 +24,10 @@ export interface ArcadeViewOptions {
   player(): Player;
   /** 실시간 서버. 데모 모드면 null이라 스코어 판 없이 내 기록만 보여요 */
   scoreServer: { url: string; key: string } | null;
-  /** 제목 오른쪽 버튼들 (방에서는 따로 열기·닫기, 따로 연 페이지에서는 모각코로 가기) */
+  /** 제목 오른쪽 버튼들 (링크 복사, 닫기) */
   headActions: readonly HTMLElement[];
-  /** 목록 맨 위에 둘 것 (따로 연 페이지의 닉네임 칸). 목록을 그릴 때마다 불러요 */
-  listTop?: () => Node | null;
   /** 내 최고 기록을 깼을 때 */
-  onNewRecord?(game: GameId, score: number): void;
-  /** 화면이 바뀔 때 (따로 연 페이지는 주소와 탭 제목을 맞춰요) */
-  onScreen?(screen: ArcadeScreen): void;
+  onNewRecord(game: GameId, score: number): void;
 }
 
 function sessionLine(now: number): string {
@@ -129,9 +125,7 @@ export class ArcadeView {
 
   showList() {
     const view = this.nextView({ kind: 'list' });
-    const top = this.opts.listTop?.();
     this.body.replaceChildren(
-      ...(top ? [top] : []),
       h(
         'ul',
         { class: 'arcade-list' },
@@ -221,7 +215,6 @@ export class ArcadeView {
   private nextView(screen: ArcadeScreen): number {
     this.current = screen;
     this.stopRound();
-    this.opts.onScreen?.(screen);
     return ++this.viewId;
   }
 
@@ -258,7 +251,7 @@ export class ArcadeView {
     const outcome = recordScore(def.id, score);
     if (outcome.kind === 'new') {
       sound.chime();
-      this.opts.onNewRecord?.(def.id, score);
+      this.opts.onNewRecord(def.id, score);
     }
     const boardLine = h('p', { class: 'ar-board' }, '');
     const again = h('button', { type: 'button', class: 'primary', onclick: () => void this.play(def) }, '다시 하기');
