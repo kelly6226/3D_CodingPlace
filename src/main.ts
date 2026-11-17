@@ -58,6 +58,8 @@ const app = document.getElementById('app')!;
 const stage = document.getElementById('stage')!;
 const ui = new UI(app);
 
+/** 기본 옷 그대로였던 프로필에 이번에 옷을 골라 입혔는지 (입장한 뒤 알려줘요) */
+const outfitVaried = store.varyDefaultOutfitOnce();
 const profile = store.getProfile();
 ui.showIntro(profile, store.hasSavedProfile());
 ui.setSound(store.getSound());
@@ -385,6 +387,9 @@ function showCommits(list: Commit[]) {
 }
 
 // ── 2. 입장 ──────────────────────────────────────
+const OUTFIT_VARIED_NOTICE = '👕 다들 같은 기본 옷이라 한 벌 골라 입혀 뒀어요. 옷장에서 언제든 바꿀 수 있어요';
+const OUTFIT_VARIED_NOTICE_MS = 6000;
+
 async function enter(p: store.Profile) {
   // saveProfile 전에 봐야 해요. 저장하고 나면 항상 '저장된 프로필 있음'이 돼요
   const firstVisit = !store.hasSavedProfile();
@@ -445,6 +450,9 @@ async function enter(p: store.Profile) {
   autoSeat(!firstVisit);
   if (store.getMyHour() === sessionAt(Date.now()).hour) {
     window.setTimeout(() => ui.toast('정해 둔 시간에 맞춰 왔어요', 'good'), NUDGE_DELAY_MS);
+  }
+  if (outfitVaried) {
+    window.setTimeout(() => ui.toast(OUTFIT_VARIED_NOTICE, 'info', OUTFIT_VARIED_NOTICE_MS), NUDGE_DELAY_MS);
   }
   if (firstVisit) {
     await wait(TIPS_DELAY_MS);
