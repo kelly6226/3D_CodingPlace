@@ -1215,8 +1215,9 @@ begin
         updated_at = now()
   returning s.score into v_best;
 
-  -- 가끔(약 2%) 지난 기록과 지난 호출 수를 정리해요
+  -- 가끔(약 2%) 지난 기록과 지난 호출 수를 정리해요. 지우기 전에 명예의 전당(10번)에 옮겨 적어요
   if random() < 0.02 then
+    perform public.game_hall_archive();
     delete from public.game_scores where week < v_week - 28;
     delete from public.game_calls where minute < now() - interval '10 minutes';
   end if;
@@ -1286,3 +1287,156 @@ revoke all on function public.submit_game_score(text, text, text, text, int) fro
 grant execute on function public.submit_game_score(text, text, text, text, int) to anon, authenticated;
 revoke all on function public.game_board(text, text) from public, anon, authenticated;
 grant execute on function public.game_board(text, text) to anon, authenticated;
+
+
+-- ── 10. 명예의 전당 (게임별·주별 1~3위, 계속 보관) ─────────
+-- 스코어 판(9번)은 4주가 지나면 지워져서, 지난주들의 1~3위를 여기에 옮겨 적어 계속 남겨요.
+-- 옮겨 적는 때: 명예의 전당을 읽을 때와 스코어 판을 정리하기 전. 주가 끝난 뒤 처음 읽는 사람이 옮겨 적어요 (예약 작업 없이).
+-- player는 스코어 판과 같은 해시라, 같은 사람이 몇 번 우승했는지 셀 수 있어요. 해시는 밖으로 돌려주지 않아요.
+-- 동점이면 그 점수를 먼저 낸 사람이 앞이에요 (스코어 판 순서와 같아요). 주마다 게임마다 3줄까지예요.
+create table if not exists public.game_hall (
+  game text not null check (public.game_score_max(game) is not null),
+  week date not null,
+  -- 순위. 동점이면 같은 순위예요 (공동 1위)
+  rank int not null check (rank between 1 and 3),
+  -- 그 주 판에서의 자리 (동점이면 먼저 낸 사람이 앞). 보여주는 순서예요
+  pos int not null check (pos between 1 and 3),
+  player text not null check (player ~ '^[0-9a-f]{64}$'),
+  name text not null check (char_length(name) between 1 and 20 and btrim(name) <> '' and name !~ '[[:cntrl:]]'),
+  color text not null check (color ~ '^#[0-9a-fA-F]{6}$'),
+  score int not null check (score > 0),
+  primary key (game, week, player),
+  unique (game, week, pos)
+);
+
+create index if not exists game_hall_week_idx on public.game_hall (game, week desc, pos);
+
+alter table public.game_hall enable row level security;
+revoke all on public.game_hall from anon, authenticated;
+
+-- 끝난 주 중 아직 안 옮긴 (게임, 주)의 1~3위를 옮겨 적어요. 이미 옮긴 주는 건드리지 않아요 (여러 번 불러도 같아요)
+create or replace function public.game_hall_archive()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.game_hall (game, week, rank, pos, player, name, color, score)
+  select game, week, rank, pos, player, name, color, score
+  from (
+    select s.game, s.week, s.player, s.name, s.color, s.score,
+           rank() over (partition by s.game, s.week order by s.score desc) as rank,
+           row_number() over (partition by s.game, s.week order by s.score desc, s.updated_at) as pos
+    from public.game_scores s
+    where s.week < public.game_week()
+      and s.score > 0
+      and not exists (select 1 from public.game_hall h where h.game = s.game and h.week = s.week)
+  ) ranked
+  where pos <= 3
+  on conflict do nothing;
+end;
+$$;
+
+-- 명예의 전당 줄마다: 그 게임에서 그 주까지 우승(1위)한 횟수, 1위면 그 주까지 몇 주 연속 1위인지
+create or replace function public.game_hall_rows(p_game text)
+returns table (week date, rank int, pos int, player text, name text, color text, score int, wins bigint, streak bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with firsts as (
+    -- 1위였던 주마다, 같은 사람의 이어진 주를 한 묶음으로 (주 - 순번*7일이 같으면 이어진 주)
+    select week, player,
+           week - (row_number() over (partition by player order by week))::int * 7 as run
+    from public.game_hall
+    where game = p_game and rank = 1
+  ),
+  streaks as (
+    select week, player, row_number() over (partition by player, run order by week) as streak
+    from firsts
+  )
+  select h.week, h.rank, h.pos, h.player, h.name, h.color, h.score,
+         (select count(*) from public.game_hall w where w.game = p_game and w.player = h.player and w.rank = 1 and w.week <= h.week) as wins,
+         coalesce(st.streak, 0) as streak
+  from public.game_hall h
+  left join streaks st on st.week = h.week and st.player = h.player and h.rank = 1
+  where h.game = p_game;
+$$;
+
+-- 이 게임의 명예의 전당: 최근 12주의 1~3위와 역대 최다 우승. p_player는 내 스코어 판 번호 (내 줄 표시용)
+create or replace function public.game_hall(p_game text, p_player text default null)
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  shown_weeks constant int := 12;
+  v_me text := public.game_player_hash(p_player);
+begin
+  if public.game_score_max(p_game) is null then
+    raise exception 'bad game';
+  end if;
+  perform public.game_hall_archive();
+  return json_build_object(
+    'weeks', coalesce((
+      select json_agg(json_build_object('week', w.week, 'rows', w.rows) order by w.week desc)
+      from (
+        select r.week,
+               json_agg(json_build_object('rank', r.rank, 'name', r.name, 'color', r.color, 'score', r.score,
+                                          'wins', r.wins, 'streak', r.streak, 'mine', r.player = v_me)
+                        order by r.pos) as rows
+        from public.game_hall_rows(p_game) r
+        where r.week in (select distinct week from public.game_hall where game = p_game order by week desc limit shown_weeks)
+        group by r.week
+      ) w
+    ), '[]'::json),
+    -- 역대 최다 우승: 횟수가 같으면 먼저 그 횟수에 닿은 사람. 이름은 가장 최근 우승 때 이름
+    'most', (
+      select json_build_object('name', name, 'color', color, 'wins', wins, 'mine', player = v_me)
+      from (
+        select distinct on (player) player, name, color, wins, week
+        from public.game_hall_rows(p_game)
+        where rank = 1
+        order by player, week desc
+      ) best
+      -- best.week는 마지막 우승 주 = 지금 횟수에 닿은 주
+      order by wins desc, week
+      limit 1
+    )
+  );
+end;
+$$;
+
+-- 게임마다 지난주 1위 (오락기 목록에 보여줘요). { "게임": { name, score, wins } }
+create or replace function public.game_last_champions()
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+begin
+  perform public.game_hall_archive();
+  return (
+    select coalesce(json_object_agg(game, json_build_object('name', name, 'score', score, 'wins', wins)), '{}'::json)
+    from (
+      select distinct on (g.game) g.game, r.name, r.score, r.wins
+      from (select distinct game from public.game_hall where week = public.game_week() - 7) g
+      cross join lateral public.game_hall_rows(g.game) r
+      where r.week = public.game_week() - 7 and r.rank = 1
+      order by g.game, r.pos
+    ) champs
+  );
+end;
+$$;
+
+revoke all on function public.game_hall_archive() from public, anon, authenticated;
+revoke all on function public.game_hall_rows(text) from public, anon, authenticated;
+revoke all on function public.game_hall(text, text) from public, anon, authenticated;
+grant execute on function public.game_hall(text, text) to anon, authenticated;
+revoke all on function public.game_last_champions() from public, anon, authenticated;
+grant execute on function public.game_last_champions() to anon, authenticated;
