@@ -3,6 +3,7 @@ import {
   CHAT_MAX_LENGTH,
   CHAT_SEND_GAP_MS,
   CONTEXT_LOSS_TOAST_MS,
+  DEFAULT_NAMES,
   DEFAULT_ROOM,
   DEVICE_SYNC_ENABLED,
   MINIGAMES_ENABLED,
@@ -792,12 +793,18 @@ function applyProfile(p: store.Profile) {
 
 const nameTakenReason = (name: string) => `이 방에 '${name}' 닉네임을 쓰는 사람이 있어요. 다른 닉네임을 적어주세요.`;
 
+/** 같은 닉네임 창에 채워 줄 이름: 기본 닉네임 중 지금 방에 없는 것 하나 (except는 빼요). 다 쓰이고 있으면 빈칸 */
+function suggestFreeName(except: string): string {
+  const free = DEFAULT_NAMES.filter((n) => !isSameNickname(n, except) && !net.isNameTaken(n));
+  return free.length ? pick(free) : '';
+}
+
 let askingNickname = false;
 /** 방에 같은 닉네임이 있어서 못 들어갔을 때: 새 닉네임을 받아서 다시 들어가요 */
 async function askNewNickname() {
   if (askingNickname) return;
   askingNickname = true;
-  await ui.askNewNickname(self.name, (name) => {
+  await ui.askNewNickname(self.name, suggestFreeName, (name) => {
     if (net.isNameTaken(name)) return nameTakenReason(name);
     applyProfile({ ...profileOf(self), name });
     net.retryJoin();
