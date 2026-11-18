@@ -56,7 +56,21 @@ export interface StatusDef {
   id: string;
   emoji: string;
   label: string;
+  /** 쉬는 중: 아바타가 타자를 안 치고, '지금 코딩 중인 사람' 수에서 빠져요 */
+  rest?: boolean;
 }
+
+/**
+ * 🚬 🍺 상태. 웹에서만 켜요.
+ * 토스 앱은 앱인토스 민감 콘텐츠 기준(음주·흡연)에 걸려 진입 안내 화면이 붙거나 틴즈 노출에서 빠질 수 있어서 꺼요 (toss-appinToss 브랜치, 2026-11-18).
+ * 꺼진 쪽은 이 상태를 목록에서 몰라서, 웹 사람이 이 상태여도 '코딩 중'으로 보여요 (net/validate.ts)
+ */
+export const SMOKE_DRINK_STATUSES_ENABLED = true;
+
+const SMOKE_DRINK_STATUSES: StatusDef[] = [
+  { id: 'smoke', emoji: '🚬', label: '담배 타임', rest: true },
+  { id: 'beer', emoji: '🍺', label: '맥주 한잔 중', rest: true },
+];
 
 export const STATUSES: StatusDef[] = [
   { id: 'coding', emoji: '💻', label: '코딩 중' },
@@ -69,12 +83,15 @@ export const STATUSES: StatusDef[] = [
   { id: 'deploy', emoji: '📦', label: '배포 기다리는 중' },
   { id: 'pray', emoji: '🙏', label: '빌드 기도 중' },
   { id: 'overtime', emoji: '😵', label: '야근 중' },
-  { id: 'meal', emoji: '🍜', label: '밥 먹는 중' },
-  { id: 'away', emoji: '💤', label: '자리 비움' },
+  { id: 'meal', emoji: '🍜', label: '밥 먹는 중', rest: true },
+  ...(SMOKE_DRINK_STATUSES_ENABLED ? SMOKE_DRINK_STATUSES : []),
+  { id: 'away', emoji: '💤', label: '자리 비움', rest: true },
 ];
 
 export const statusById = (id: string): StatusDef =>
   STATUSES.find((s) => s.id === id) ?? STATUSES[0];
+
+export const isRestStatus = (id: string): boolean => statusById(id).rest === true;
 
 export interface EmoteDef {
   id: string;

@@ -15,6 +15,7 @@ import {
   emoteById,
   isNoiseId,
   isPlaceId,
+  isRestStatus,
   pageTitle,
   placeMeta,
   roomPasswordProblem,
@@ -1306,7 +1307,7 @@ function onFrame(dt: number) {
   // 멀리서 들리는 다른 사람들 타자 소리
   keysT -= dt;
   if (keysT <= 0) {
-    const coders = [...world.avatars.values()].filter((a) => !a.isSelf && a.seated && a.state.status !== 'away' && a.state.status !== 'meal').length;
+    const coders = [...world.avatars.values()].filter((a) => !a.isSelf && a.seated && !isRestStatus(a.state.status)).length;
     if (coders > 0) sound.distantKeys(2 + Math.floor(Math.random() * Math.min(8, coders * 2)));
     keysT = 1.2 + Math.random() * (6 / Math.max(1, coders));
   }
