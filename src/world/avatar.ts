@@ -1,7 +1,7 @@
 // 귀여운 개발자 아바타 (후드티 + 노트북)
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { actionById, langById, statusById, type ActionDef, type ActionId } from '../config';
+import { actionById, isRestStatus, langById, statusById, type ActionDef, type ActionId } from '../config';
 import { sameOutfit, type Outfit } from '../look';
 import type { PeerState } from '../net/types';
 import { FlippedTable, FlyingDebris, ThrownLaptop, makeLaptopMesh, makeStars, type DebrisKind, type Prop } from './actionProps';
@@ -799,7 +799,7 @@ export class Avatar {
     const seated = this.mode === 'seated' || this.mode === 'seating';
     const standingDesk = this.seat?.kind === 'stand';
     const walking = this.mode === 'walking' && !this.act;
-    const away = s.status === 'away' || s.status === 'meal';
+    const away = isRestStatus(s.status);
     const stretching = !walking && !away && seated && Math.sin(t * 0.23) > 0.985;
 
     // 기본 타자 세기: 앉아 있으면 조금씩 계속 침
