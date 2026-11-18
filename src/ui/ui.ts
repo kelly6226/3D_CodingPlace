@@ -137,7 +137,8 @@ export interface UIHandlers {
   onArcade(): void;
   /** 시점 버튼: 내 캐릭터 따라 보기 / 방 전체 보기 */
   onView(cmd: ViewCommand): void;
-  onProfileSave(p: Profile): void;
+  /** ⚙️ 프로필 저장. 바꾼 닉네임을 방에서 누가 쓰고 있으면 이유를 돌려줌 */
+  onProfileSave(p: Profile): string | null;
   onWave(id: string): void;
   /** ⚙️의 '처음 안내 다시 보기' */
   onReplayTips(): void;
@@ -1467,6 +1468,7 @@ export class UI {
         const s = this.self;
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
         const nick = h('input', { id: 'p-nick', maxlength: NICKNAME_MAX, value: p.name, autocomplete: 'off' });
+        const nickErr = h('p', { class: 'err', hidden: true, role: 'alert' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
         const history = getStudyHistory();
         const today = kstDate();
@@ -1504,12 +1506,19 @@ export class UI {
                 if (this.rejectBadNick(nick)) return;
                 p.name = nick.value.trim().slice(0, NICKNAME_MAX) || p.name;
                 p.lang = lang.value;
-                this.h.onProfileSave(p);
+                const problem = this.h.onProfileSave(p);
+                if (problem) {
+                  nickErr.textContent = problem;
+                  nickErr.hidden = false;
+                  nick.focus();
+                  return;
+                }
                 this.closeSheet();
               },
             },
             h('label', { for: 'p-nick' }, '닉네임'),
             nick,
+            nickErr,
             h('label', { for: 'p-lang' }, '주력 언어'),
             lang,
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
@@ -2052,6 +2061,62 @@ export class UI {
       };
       m.hidden = false;
       window.setTimeout(() => input.focus(), MODAL_FOCUS_DELAY_MS);
+    });
+  }
+
+  /**
+   * 방에 같은 닉네임이 있어서 들어가지 못했을 때 새 닉네임을 받아요. 들어가야 닫혀요 (취소하면 방에 나 없이 남게 돼서).
+   * enter가 이유(글)를 돌려주면 그 자리에서 다시 입력받고, null을 돌려주면 들어간 거예요.
+   */
+  askNewNickname(current: string, enter: (name: string) => string | null): Promise<void> {
+    return new Promise((resolve) => {
+      const m = $('#modal');
+      const input = h('input', { maxlength: NICKNAME_MAX, value: current, autocomplete: 'off', spellcheck: 'false', 'aria-label': '새 닉네임' });
+      const err = h('p', { class: 'err', hidden: true, role: 'alert' });
+      const showProblem = (problem: string) => {
+        err.hidden = false;
+        err.textContent = problem;
+        input.select();
+      };
+      const form = h(
+        'form',
+        {
+          class: 'modal-card nick-ask',
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-label': '같은 닉네임이 있어요',
+          onsubmit: (e: Event) => {
+            e.preventDefault();
+            const name = input.value.trim().slice(0, NICKNAME_MAX);
+            if (!name) {
+              input.focus();
+              return;
+            }
+            if (hasBadWord(name)) {
+              showProblem(`${BLOCKED_WORDS_REASON} 다른 닉네임으로 적어주세요.`);
+              return;
+            }
+            const problem = enter(name);
+            if (problem) {
+              showProblem(problem);
+              return;
+            }
+            m.hidden = true;
+            m.innerHTML = '';
+            resolve();
+          },
+        },
+        h('h2', {}, '🪪 같은 닉네임이 있어요'),
+        h('p', {}, `이 방에 '${current}' 닉네임을 쓰는 사람이 있어요. 다른 닉네임으로 들어와 주세요. 그전까지 방 사람들에게 나는 안 보여요.`),
+        input,
+        err,
+        h('div', { class: 'modal-actions' }, h('button', { class: 'primary', type: 'submit' }, '이 닉네임으로 들어가기')),
+      );
+      m.innerHTML = '';
+      m.append(form);
+      m.onclick = null;
+      m.hidden = false;
+      window.setTimeout(() => input.select(), MODAL_FOCUS_DELAY_MS);
     });
   }
 

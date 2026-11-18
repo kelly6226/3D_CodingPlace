@@ -30,6 +30,7 @@ import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
+import { isSameNickname } from './net/nickname';
 import { serverConfig } from './net/server';
 import { gameFromPath, type GameId } from './minigames/ids';
 import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
@@ -450,6 +451,7 @@ async function enter(p: store.Profile) {
         ui.clearChat();
         ui.notify(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
+      onNameTaken: () => void askNewNickname(),
     },
     room,
     startInstance,
@@ -777,6 +779,32 @@ function changeLook(look: Look) {
   meAvatar().apply(self);
   ui.setSelf(self);
   net.updateSelf(look);
+}
+
+/** ⚙️ 프로필 저장과 같은 닉네임 창이 같이 써요: 저장하고, 내 아바타와 화면에 반영하고, 방 사람들에게 알림 */
+function applyProfile(p: store.Profile) {
+  store.saveProfile(p);
+  Object.assign(self, p);
+  meAvatar().apply(self);
+  ui.setSelf(self);
+  net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
+}
+
+const nameTakenReason = (name: string) => `이 방에 '${name}' 닉네임을 쓰는 사람이 있어요. 다른 닉네임을 적어주세요.`;
+
+let askingNickname = false;
+/** 방에 같은 닉네임이 있어서 못 들어갔을 때: 새 닉네임을 받아서 다시 들어가요 */
+async function askNewNickname() {
+  if (askingNickname) return;
+  askingNickname = true;
+  await ui.askNewNickname(self.name, (name) => {
+    if (net.isNameTaken(name)) return nameTakenReason(name);
+    applyProfile({ ...profileOf(self), name });
+    net.retryJoin();
+    return null;
+  });
+  askingNickname = false;
+  ui.toast(`'${self.name}' 닉네임으로 들어왔어요`, 'good');
 }
 
 const STILL_ACTING_TOAST = '아직 하던 동작이 안 끝났어요';
@@ -1458,12 +1486,11 @@ ui.bind({
     return unlocked;
   },
   onProfileSave: (p) => {
-    store.saveProfile(p);
-    Object.assign(self, p);
-    meAvatar().apply(self);
-    ui.setSelf(self);
-    net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
+    const renamed = !isSameNickname(p.name, self.name);
+    if (renamed && net.isNameTaken(p.name)) return nameTakenReason(p.name);
+    applyProfile(p);
     ui.toast('프로필을 바꿨어요');
+    return null;
   },
   onReportCommit: (c) => void reportCommit(c),
   onSyncCreate: createSyncCode,
