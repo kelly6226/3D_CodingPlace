@@ -1,7 +1,7 @@
 // 귀여운 개발자 아바타 (후드티 + 노트북)
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { actionById, isRestStatus, langById, statusById, type ActionDef, type ActionId } from '../config';
+import { FOCUS_STATUS_ID, actionById, isRestStatus, langById, statusById, type ActionDef, type ActionId } from '../config';
 import { sameOutfit, type Outfit } from '../look';
 import type { PeerState } from '../net/types';
 import { FlippedTable, FlyingDebris, ThrownLaptop, makeLaptopMesh, makeStars, type DebrisKind, type Prop } from './actionProps';
@@ -472,6 +472,13 @@ export class Avatar {
     const dot = document.createElement('i');
     dot.style.background = lang.color;
     name.append(dot, document.createTextNode(`${st.emoji} ${s.name}`));
+    // 집중 중인 사람은 말을 걸어도 답을 못 해요. 말풍선 자리가 이름표 높이에 맞춰져 있어서 줄을 늘리지 않고 같은 줄에 붙여요
+    if (s.status === FOCUS_STATUS_ID) {
+      const lock = document.createElement('span');
+      lock.className = 'av-focus';
+      lock.textContent = '채팅 못 해요';
+      name.append(lock);
+    }
     this.tagEl.append(name);
     this.tagEl.title = `${s.name} · ${st.label} · ${lang.label}`;
   }

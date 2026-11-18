@@ -6,6 +6,7 @@ import {
   DEFAULT_NAMES,
   DEFAULT_ROOM,
   DEVICE_SYNC_ENABLED,
+  FOCUS_STATUS_ID,
   MINIGAMES_ENABLED,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
@@ -764,6 +765,19 @@ function setStatus(id: string) {
   net.updateSelf({ status: id });
 }
 
+/** 집중 모드를 끄면 켜기 전 상태로 돌아가요. 집중 중에 다른 상태를 고르면 그걸로 집중이 풀려요 */
+let statusBeforeFocus = 'coding';
+function toggleFocus() {
+  if (self.status === FOCUS_STATUS_ID) {
+    setStatus(statusBeforeFocus);
+    ui.toast('집중 모드를 껐어요. 다시 채팅할 수 있어요.');
+    return;
+  }
+  statusBeforeFocus = self.status;
+  setStatus(FOCUS_STATUS_ID);
+  ui.toast('🎧 집중 모드예요. 채팅 입력이 잠기고, 다른 사람에게 ‘채팅 못 해요’로 보여요.');
+}
+
 /** 저장하는 프로필 모양만 골라냄. self에는 자리·위치 같은 실시간 값도 있어서 통째로 저장하지 않아요 */
 /** 옷장 미리보기에 쓰는 아바타 바탕. 입장 화면에서도 쓰니까 self에 기대지 않아요 */
 function previewBase(look: Look): PeerState {
@@ -909,6 +923,7 @@ async function toggleChatNotify() {
 }
 
 function chat(text: string, to?: string): string | null {
+  if (self.status === FOCUS_STATUS_ID) return '집중 모드라 채팅을 보낼 수 없어요. 집중을 풀고 보내 주세요.';
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
   if (hasBadWord(text)) return `${BLOCKED_WORDS_REASON} 다른 말로 적어주세요.`;
@@ -1456,6 +1471,7 @@ function isFridayKST() {
 ui.bind({
   onEnter: (p) => void enter(p),
   onStatus: setStatus,
+  onFocusToggle: toggleFocus,
   onEmote: (id) => emote(id),
   onAct: act,
   onLook: changeLook,
