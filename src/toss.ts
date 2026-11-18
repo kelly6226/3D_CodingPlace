@@ -17,8 +17,13 @@ function createRoomLink(slug: string): Promise<string> {
   return Share.createLink({ path: `intoss://${TOSS_APP_NAME}?room=${slug}` });
 }
 
+/** 토스 공유 시트로 글을 보내요. 사용자가 실제로 보냈는지는 알 수 없어요. 실패하면 throw */
+export function shareText(message: string): Promise<void> {
+  return Share.sendMessage({ message });
+}
+
 /** 방 링크를 만들어 토스 공유 시트를 열어요. 실패하면 throw */
 export async function shareRoom(slug: string, roomName: string): Promise<void> {
   const link = await createRoomLink(slug);
-  await Share.sendMessage({ message: `"${roomName}" 방에서 같이 모각코 해요 👉\n${link}` });
+  await shareText(`"${roomName}" 방에서 같이 모각코 해요 👉\n${link}`);
 }

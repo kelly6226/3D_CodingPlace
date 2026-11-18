@@ -1,6 +1,7 @@
 // 이어하기 코드: 로그인 대신 "같은 사람"을 알아보는 무작위 값
 // Crockford Base32(헷갈리는 I, L, O, U를 뺀 32글자)로 20글자 = 100비트라 찍어서 맞힐 수 없어요.
 // 형식은 supabase/schema.sql 8번의 sync_code_hash와 같아야 해요.
+import { SYNC_LINK_ORIGIN } from '../config';
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LENGTH = 20;
@@ -37,9 +38,9 @@ export function formatSyncCode(code: string): string {
 // 주소의 # 뒤에 담아요. # 뒤는 서버로 가지 않아서 접속 기록이나 Referer에 남지 않아요
 const LINK_KEY = 'sync';
 
-/** 다른 기기에서 열면 이 코드로 이어하기를 물어보는 링크 */
+/** 다른 기기에서 열면 이 코드로 이어하기를 물어보는 링크 (토스 앱에서 만들어도 웹 사이트 주소예요) */
 export function syncLink(code: string): string {
-  return `${location.origin}/#${LINK_KEY}=${formatSyncCode(code)}`;
+  return `${SYNC_LINK_ORIGIN}/#${LINK_KEY}=${formatSyncCode(code)}`;
 }
 
 /**
