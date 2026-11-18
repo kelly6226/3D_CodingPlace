@@ -1001,6 +1001,13 @@ button.log-main:hover,
   line-height: 1.65;
   color: var(--muted);
 }
+.intro-note {
+  margin: -8px 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--amber);
+  word-break: keep-all;
+}
 .intro-form {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
@@ -1734,7 +1741,8 @@ button.place-name {
   bottom: calc(96px + var(--safe-b));
   translate: -50% 0;
   z-index: 20;
-  width: min(380px, calc(100vw - 24px));
+  /* --chat-w·--chat-log-h는 손잡이로 끌어서 맞춘 크기 (src/ui/chatResize.ts). 없으면 기본 크기 */
+  width: min(var(--chat-w, 520px), calc(100vw - 24px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1750,6 +1758,41 @@ button.place-name {
 .chat[hidden] {
   display: none;
 }
+/* 크기를 바꾸는 동안 글자가 선택되거나 등장 애니메이션이 다시 돌지 않게 */
+.chat.resizing {
+  user-select: none;
+  animation: none;
+}
+/* 왼쪽 위 크기 조절 손잡이: 모서리 모양으로 '여기를 끌어요'를 보여줘요 */
+.chat-grip {
+  flex: none;
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.chat-grip::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid var(--muted);
+  border-left: 2px solid var(--muted);
+  border-top-left-radius: 3px;
+  opacity: 0.7;
+}
+.chat-grip:hover::before,
+.chat-grip:focus-visible::before,
+.chat.resizing .chat-grip::before {
+  border-color: var(--amber);
+  opacity: 1;
+}
 .chat-head {
   display: flex;
   align-items: center;
@@ -1761,39 +1804,65 @@ button.place-name {
   font-size: 12px;
   color: var(--muted);
 }
+.chat-head p {
+  flex: 1;
+}
 .chat-head .x {
   position: static;
   flex: none;
   width: 28px;
   height: 28px;
 }
+/* 다른 창에 있을 때 브라우저 알림 켜기·끄기 */
+.chat-notify {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 14px;
+}
+.chat-notify[aria-pressed='true'] {
+  border-color: rgba(242, 180, 90, 0.6);
+}
 .chat-log {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: min(30vh, 220px);
+  height: var(--chat-log-h, min(40vh, 320px));
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+  /* 시각 | 이름 | 글 | 📌 네 칸. 줄마다 subgrid로 같은 칸을 써서 이름이 왼쪽에 한 줄로 맞고 글은 그 오른쪽에서 시작해요.
+     이름 칸은 지금 목록에서 가장 긴 이름만큼, 단 --who-max까지만 넓어져요 */
+  --who-max: 10em;
+  display: grid;
+  grid-template-columns: auto fit-content(var(--who-max)) minmax(0, 1fr) auto;
+  align-content: start;
+  column-gap: 8px;
+  row-gap: 5px;
   font-size: 13px;
 }
 .chat-log:empty::before {
   content: '아직 대화가 없어요. 한마디 건네볼까요?';
+  grid-column: 1 / -1;
   font-size: 12.5px;
   color: var(--muted);
 }
 .chat-log li {
-  display: flex;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: baseline;
-  gap: 8px;
 }
 .chat-log .who {
-  flex: none;
-  max-width: 38%;
+  grid-column: 2;
+  min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1810,9 +1879,13 @@ button.place-name {
   margin-right: 5px;
 }
 .chat-log .msg {
-  flex: 1;
+  grid-column: 3;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+/* 알림 줄은 이름이 없어서 이름 칸부터 써요 */
+.chat-log li.notice .msg {
+  grid-column: 2 / -1;
 }
 .chat-log .mine .msg {
   color: var(--amber);
@@ -1826,8 +1899,22 @@ button.place-name {
   color: var(--amber);
   font-style: italic;
 }
+/* 알림 줄: 대화보다 작고 흐리게 */
+.chat-log li.notice {
+  font-size: 12px;
+  color: var(--muted);
+}
+/* 대화·알림 줄 앞의 시각 */
+.chat-log .when {
+  grid-column: 1;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
 .chat-log .pin {
-  flex: none;
+  grid-column: 4;
   padding: 0 4px;
   border: 0;
   background: transparent;
@@ -1932,6 +2019,41 @@ button.place-name {
     translate: none;
     width: auto;
     animation-name: rise-m;
+  }
+  /* 좁은 화면은 채팅 칸이 좌우를 꽉 채워서 높이만 바꿔요 */
+  .chat-grip {
+    cursor: ns-resize;
+  }
+  .chat-log {
+    --who-max: 7em;
+  }
+}
+/* 넓은 화면: 채팅을 왼쪽 아래에 붙여서 3D 화면 가운데를 가리지 않고, 시트(가운데)와 같이 열 수 있어요.
+   기준 폭은 src/ui/chatLayout.ts DOCKED_CHAT_QUERY와 같아서 둘을 같이 고쳐야 해요 */
+@media (min-width: 1180px) {
+  .chat {
+    left: max(16px, var(--safe-l));
+    bottom: calc(16px + var(--safe-b));
+    translate: none;
+    /* 가운데 하단 바(폭 약 500px)·시트(440px)와 겹치지 않게, 화면 절반에서 하단 바 절반과 여백을 뺀 폭까지 */
+    width: min(var(--chat-w, 420px), calc(50vw - 280px));
+    /* 왼쪽 위 장소 카드와 겹치지 않게 위쪽을 비워 둬요 */
+    max-height: calc(100% - 140px - var(--safe-b));
+    animation-name: rise-docked;
+  }
+  /* 왼쪽 아래가 고정이라 손잡이는 오른쪽 위에 둬요. 그래야 끄는 동안 손잡이가 포인터를 따라와요 */
+  .chat-grip {
+    order: 1;
+    cursor: nesw-resize;
+  }
+  .chat-grip::before {
+    transform: scaleX(-1);
+  }
+  @keyframes rise-docked {
+    from {
+      opacity: 0;
+      translate: 0 10px;
+    }
   }
 }
 
@@ -2174,7 +2296,8 @@ button.place-name {
   font-size: 12px;
   line-height: 1.5;
 }
-.pw-ask input {
+.pw-ask input,
+.nick-ask input {
   width: 100%;
   min-height: 44px;
   margin-top: 14px;
@@ -2186,10 +2309,12 @@ button.place-name {
   font-size: 15px;
   outline: 0;
 }
-.pw-ask input:focus {
+.pw-ask input:focus,
+.nick-ask input:focus {
   border-color: var(--amber);
 }
-.pw-ask .err {
+.pw-ask .err,
+.nick-ask .err {
   margin: 8px 0 0;
 }
 
@@ -2962,4 +3087,584 @@ button.place-name {
 }
 .sheet-sync .sync-arrival-go + .sheet-note + .ghost.wide {
   margin-top: 12px;
+}
+
+/* ── 탕비실 오락기 (미니게임) ─────────────────────── */
+/* 쉬는 시간엔 🎮 버튼이 전구색으로 반짝여요 */
+#arcade-btn.break {
+  border-color: rgba(242, 180, 90, 0.6);
+  animation: arcade-glow 2.4s ease-in-out infinite;
+}
+@keyframes arcade-glow {
+  50% {
+    box-shadow: 0 0 0 4px rgba(242, 180, 90, 0.18);
+  }
+}
+.arcade {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  padding: calc(12px + var(--safe-t)) max(12px, var(--safe-r)) calc(12px + var(--safe-b)) max(12px, var(--safe-l));
+  background: rgba(5, 7, 14, 0.82);
+  backdrop-filter: blur(6px);
+}
+.arcade-card {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.arcade-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.arcade-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.arcade-session {
+  margin: 4px 0 0;
+  text-wrap: balance;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+}
+.arcade-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* 스크롤 칸이라 바깥으로 그린 포커스 테두리가 위아래로 잘려 카드에서 떨어져 보여요. 안쪽에 그려요 */
+.arcade-body :focus-visible {
+  outline-offset: -2px;
+}
+.arcade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* 게임 그림 (도트를 캔버스로 그려요) */
+.ag-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  image-rendering: pixelated;
+}
+.ag-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ag-how {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: pretty;
+}
+.arcade-loading {
+  margin: 24px 0;
+  text-align: center;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: balance;
+}
+.arcade-play-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.arcade-play-head canvas {
+  flex: none;
+  image-rendering: pixelated;
+}
+.arcade-back {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.arcade-stage {
+  position: relative;
+  /* 3:4 화면이 카드 높이를 넘지 않게: 높이(화면 - 머리말·여백)에 맞춘 너비와 카드 너비 중 작은 쪽 */
+  width: min(100%, calc((100dvh - 190px - var(--safe-t) - var(--safe-b)) * 0.75));
+  margin: 0 auto;
+}
+.arcade-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  /* 연타해도 화면이 확대되거나 밀리지 않게 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.arcade-result {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px;
+  border-radius: 12px;
+  /* 뒤의 게임 안내 글씨가 비쳐 결과와 겹쳐 읽히지 않게 */
+  background: rgba(5, 7, 14, 0.92);
+  backdrop-filter: blur(3px);
+  text-align: center;
+}
+.arcade-result p {
+  margin: 0;
+}
+.ar-title {
+  font-size: 14px;
+  color: var(--muted);
+}
+.ar-score {
+  margin-top: 6px !important;
+  font-size: 26px;
+  font-weight: 800;
+  word-break: keep-all;
+}
+.ar-record {
+  margin-top: 6px !important;
+  font-size: 13px;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: balance;
+}
+.ar-record.new {
+  color: var(--amber);
+  font-weight: 800;
+}
+/* 내 최고 기록을 깼을 때: 점수가 통통 튀어요 */
+.arcade-result.celebrate .ar-score {
+  color: var(--amber);
+  animation: arcade-pop 0.6s ease-out;
+}
+@keyframes arcade-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.ar-board {
+  margin-top: 8px !important;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg);
+  word-break: keep-all;
+  /* 순위와 1위 기록을 두 줄로 (arcade.ts가 줄바꿈을 넣어요) */
+  white-space: pre-line;
+  text-wrap: balance;
+}
+/* 게임 하나 = 카드 하나. 위쪽(그림·제목)을 누르면 시작, 아래 줄은 이번 주 1위와 순위 버튼 */
+.arcade-item {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.arcade-item:has(.arcade-game:hover) {
+  border-color: rgba(242, 180, 90, 0.45);
+}
+/* 키보드로 고를 때는 버튼 반쪽이 아니라 카드 전체에 테두리 (스크롤 칸이라 안쪽에 그려요) */
+.arcade-item:has(.arcade-game:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--amber);
+}
+.arcade-body .arcade-game:focus-visible {
+  outline: none;
+}
+.arcade-game {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  text-align: left;
+}
+.ag-title {
+  font-size: 15px;
+}
+.ag-best {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.ag-best.empty {
+  font-weight: 500;
+  color: var(--muted);
+}
+.ag-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-top: 1px solid var(--line);
+}
+.ag-leader {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ag-leader b {
+  color: var(--fg);
+}
+.ag-rank {
+  flex: none;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.ag-rank:hover {
+  border-color: rgba(242, 180, 90, 0.5);
+}
+.arcade-foot {
+  margin: 14px 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: pretty;
+}
+/* 목록 맨 위 '지난주 우승': 탕비실 벽에 붙은 트로피 진열판 */
+.arcade-champs {
+  margin-bottom: 10px;
+  padding: 10px 12px 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(242, 180, 90, 0.3);
+  background: rgba(242, 180, 90, 0.06);
+}
+.champs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--amber);
+}
+.champs-head canvas,
+.hall-most canvas,
+.champ canvas {
+  flex: none;
+  image-rendering: pixelated;
+}
+.champs-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.champ {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+}
+.champ-game {
+  flex: none;
+  color: var(--muted);
+}
+.champ-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.champ:hover .champ-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.champ-wins {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amber);
+}
+/* 순위 화면: 이번 주 / 명예의 전당 */
+.board-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.board-tabs [role='tab'] {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.board-tabs [aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fg);
+}
+.arcade-board-sub {
+  margin: 0 2px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: pretty;
+}
+/* 순위표: 오락실 최고 기록 화면처럼 순위 숫자, 이름, 점선, 점수 */
+.hs-table {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.hs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+.hs-row.mine {
+  background: rgba(242, 180, 90, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(242, 180, 90, 0.45);
+}
+.hs-rank {
+  flex: none;
+  width: 22px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+/* 금·은·동 (미니게임 도트 그림과 같은 팔레트) */
+.hs-row.r1 .hs-rank {
+  color: var(--amber);
+}
+.hs-row.r2 .hs-rank {
+  color: #c9c5bd;
+}
+.hs-row.r3 .hs-rank {
+  color: #d49a6a;
+}
+.hs-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hs-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.hs-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.hs-row.r1 .hs-name,
+.hs-row.r2 .hs-name,
+.hs-row.r3 .hs-name {
+  font-weight: 800;
+}
+/* 이름과 점수를 잇는 점선 (남는 폭만큼 늘어나요) */
+.hs-lead {
+  flex: 1 1 12px;
+  min-width: 12px;
+  align-self: flex-end;
+  margin-bottom: 6px;
+  border-bottom: 2px dotted rgba(255, 255, 255, 0.16);
+}
+.hs-score {
+  flex: none;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.hs-row.r1 .hs-score {
+  color: var(--amber);
+}
+.hs-me {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--amber);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--amber-ink);
+}
+.hs-badge {
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.board-me {
+  margin: 0 2px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.hall-most {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 180, 90, 0.3);
+  background: rgba(242, 180, 90, 0.06);
+  font-size: 14px;
+}
+.hm-label {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.hm-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-wins {
+  flex: none;
+  margin-left: auto;
+  font-weight: 800;
+  color: var(--amber);
+}
+/* 명예의 전당이 비어 있을 때 */
+.hall-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0 4px;
+  text-align: center;
+}
+.hall-empty > canvas {
+  image-rendering: pixelated;
+}
+.he-title {
+  margin: 10px 0 4px;
+  font-size: 15px;
+  font-weight: 800;
+}
+.he-text {
+  max-width: 30em;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: balance;
+}
+.he-left {
+  margin: 10px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(242, 180, 90, 0.4);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+}
+.he-preview {
+  align-self: stretch;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  text-align: left;
+}
+.he-preview h3 {
+  margin: 0 4px 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.he-none {
+  margin: 8px 4px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.hall-week h3 {
+  margin: 14px 4px 2px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.bd-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+/* 화면에는 안 보이고 스크린 리더만 읽는 글자 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.arcade-result .primary {
+  font-family: var(--font);
+}
+.arcade-head-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
 }

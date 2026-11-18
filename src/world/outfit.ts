@@ -1,5 +1,6 @@
 // 아바타에 씌우는 모자·머리 모양·등/목 장식의 3D 모델
 // 목록과 이름은 src/look.ts에 있고, 여기엔 모양만 있어요. 도형은 모든 아바타가 같이 써서 버리지 않아요.
+// color(칸 색) 재질을 쓰는 장식은 look.ts 목록에 takesColor를 붙여야 옷장에 색 칸이 떠요.
 import * as THREE from 'three';
 
 const PI = Math.PI;
@@ -26,6 +27,15 @@ const g = {
   duckEye: new THREE.SphereGeometry(0.012, 6, 6),
   duckTail: new THREE.ConeGeometry(0.04, 0.07, 6),
   halo: new THREE.TorusGeometry(0.16, 0.015, 8, 28),
+  beret: new THREE.SphereGeometry(0.27, 22, 12),
+  beretStem: new THREE.CylinderGeometry(0.012, 0.016, 0.04, 6),
+  bunnyEar: new THREE.CapsuleGeometry(0.045, 0.2, 4, 10),
+  bunnyEarIn: new THREE.CapsuleGeometry(0.025, 0.15, 4, 8),
+  partyCone: new THREE.ConeGeometry(0.13, 0.3, 20),
+  sproutStem: new THREE.CylinderGeometry(0.008, 0.01, 0.09, 6),
+  sproutLeaf: new THREE.SphereGeometry(0.045, 10, 8),
+  headband: new THREE.TorusGeometry(0.262, 0.028, 8, 30),
+  headbandDot: new THREE.CylinderGeometry(0.04, 0.04, 0.012, 16),
   // 머리 모양
   bun: new THREE.SphereGeometry(0.1, 14, 10),
   tie: new THREE.TorusGeometry(0.06, 0.012, 6, 14),
@@ -34,6 +44,9 @@ const g = {
   longBack: new THREE.CapsuleGeometry(0.17, 0.3, 4, 12),
   spike: new THREE.ConeGeometry(0.06, 0.17, 6),
   afro: new THREE.SphereGeometry(0.3, 24, 16, 0, PI * 2, 0, PI * 0.78),
+  bobSide: new THREE.CapsuleGeometry(0.075, 0.14, 4, 10),
+  mohawk: new THREE.BoxGeometry(0.05, 0.13, 0.38),
+  braidKnot: new THREE.SphereGeometry(0.052, 10, 8),
   // 등
   pack: new THREE.BoxGeometry(0.27, 0.33, 0.1),
   packPocket: new THREE.BoxGeometry(0.2, 0.13, 0.045),
@@ -42,6 +55,15 @@ const g = {
   wing: new THREE.SphereGeometry(1, 12, 8),
   shell: new THREE.SphereGeometry(0.25, 18, 12),
   shellPlate: new THREE.SphereGeometry(0.07, 10, 8),
+  tank: new THREE.CapsuleGeometry(0.068, 0.2, 4, 12),
+  nozzle: new THREE.CylinderGeometry(0.04, 0.055, 0.05, 12),
+  flame: new THREE.ConeGeometry(0.045, 0.13, 10),
+  guitarBody: new THREE.SphereGeometry(0.13, 16, 12),
+  guitarNeck: new THREE.BoxGeometry(0.045, 0.36, 0.025),
+  guitarHead: new THREE.BoxGeometry(0.06, 0.08, 0.03),
+  guitarHole: new THREE.CylinderGeometry(0.035, 0.035, 0.01, 14),
+  dinoTail: new THREE.ConeGeometry(0.11, 0.42, 14),
+  tailSpike: new THREE.ConeGeometry(0.028, 0.06, 4),
   // 목
   scarf: new THREE.TorusGeometry(0.165, 0.048, 10, 22),
   scarfTail: new THREE.BoxGeometry(0.075, 0.2, 0.026),
@@ -52,6 +74,11 @@ const g = {
   bowWing: new THREE.ConeGeometry(0.05, 0.085, 3),
   neckBand: new THREE.TorusGeometry(0.17, 0.016, 8, 24),
   neckCup: new THREE.CylinderGeometry(0.065, 0.065, 0.05, 14),
+  tieKnot: new THREE.BoxGeometry(0.05, 0.045, 0.03),
+  tieBlade: new THREE.CylinderGeometry(0.035, 0.022, 0.22, 4),
+  medal: new THREE.CylinderGeometry(0.052, 0.052, 0.014, 18),
+  cameraBody: new THREE.BoxGeometry(0.13, 0.085, 0.05),
+  cameraLens: new THREE.CylinderGeometry(0.03, 0.034, 0.04, 14),
 };
 
 const m = {
@@ -63,6 +90,10 @@ const m = {
   pink: new THREE.MeshStandardMaterial({ color: '#ff9bb3', roughness: 0.7 }),
   halo: new THREE.MeshBasicMaterial({ color: '#ffe27a' }),
   plate: new THREE.MeshStandardMaterial({ color: '#000000', roughness: 0.9, transparent: true, opacity: 0.22 }),
+  leaf: new THREE.MeshStandardMaterial({ color: '#5cc96b', roughness: 0.6 }),
+  metal: new THREE.MeshStandardMaterial({ color: '#9aa1ad', roughness: 0.35, metalness: 0.7 }),
+  flame: new THREE.MeshBasicMaterial({ color: '#ffb347' }),
+  red: new THREE.MeshStandardMaterial({ color: '#e5484d', roughness: 0.6 }),
 };
 
 const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0) => {
@@ -77,19 +108,19 @@ export const HALO_Y = 0.62;
 /** 머리 뒤쪽이 낮아지도록 기울인 모자·머리카락 (기본 머리카락과 같은 각도) */
 const HEAD_TILT = -0.32;
 
-type Builder = (accent: THREE.Material) => THREE.Group;
+type Builder = (color: THREE.Material) => THREE.Group;
 
 // ── 모자 (머리 좌표: 머리 중심이 (0, 0.22, 0), 반지름 0.24) ──────────────
 const hats: Record<string, { covers: boolean; build: Builder }> = {
   beanie: {
     covers: true,
-    build: (accent) => {
+    build: (color) => {
       const t = new THREE.Group();
       t.position.set(0, 0.235, -0.015);
       t.rotation.x = HEAD_TILT - 0.04;
-      t.add(mesh(g.beanie, accent));
+      t.add(mesh(g.beanie, color));
       // 모자 아랫단: 반구가 끝나는 높이(반지름 × cos 54%π)에 둘러요
-      const rim = mesh(g.beanieRim, accent, 0, 0.285 * Math.cos(PI * 0.54), 0);
+      const rim = mesh(g.beanieRim, color, 0, 0.285 * Math.cos(PI * 0.54), 0);
       rim.rotation.x = PI / 2;
       t.add(rim, mesh(g.pom, m.white, 0, 0.3, 0));
       return t;
@@ -97,13 +128,13 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
   },
   cap: {
     covers: true,
-    build: (accent) => {
+    build: (color) => {
       const t = new THREE.Group();
       const dome = new THREE.Group();
       dome.position.set(0, 0.235, -0.015);
       dome.rotation.x = HEAD_TILT;
-      dome.add(mesh(g.capDome, accent), mesh(g.capButton, m.white, 0, 0.278, 0));
-      const brim = mesh(g.capBrim, accent, 0, 0.29, 0.19);
+      dome.add(mesh(g.capDome, color), mesh(g.capButton, m.white, 0, 0.278, 0));
+      const brim = mesh(g.capBrim, color, 0, 0.29, 0.19);
       brim.rotation.x = 0.35;
       t.add(dome, brim);
       return t;
@@ -111,14 +142,14 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
   },
   catears: {
     covers: false,
-    build: (accent) => {
+    build: (color) => {
       const t = new THREE.Group();
       t.add(mesh(g.earBand, m.dark, 0, 0.22, 0));
       for (const s of [-1, 1]) {
         const ear = new THREE.Group();
         ear.position.set(s * 0.14, 0.43, -0.01);
         ear.rotation.z = -s * 0.3;
-        ear.add(mesh(g.catEar, accent, 0, 0.06, 0), mesh(g.catEarIn, m.pink, 0, 0.05, 0.03));
+        ear.add(mesh(g.catEar, color, 0, 0.06, 0), mesh(g.catEarIn, m.pink, 0, 0.05, 0.03));
         ear.rotation.y = PI / 4;
         t.add(ear);
       }
@@ -127,12 +158,12 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
   },
   propeller: {
     covers: true,
-    build: (accent) => {
+    build: (color) => {
       const t = new THREE.Group();
       const dome = new THREE.Group();
       dome.position.set(0, 0.235, -0.015);
       dome.rotation.x = HEAD_TILT;
-      dome.add(mesh(g.capDome, accent));
+      dome.add(mesh(g.capDome, color));
       t.add(dome, mesh(g.propStem, m.dark, 0, 0.53, -0.04));
       const spin = new THREE.Group();
       spin.name = 'spin';
@@ -186,40 +217,105 @@ const hats: Record<string, { covers: boolean; build: Builder }> = {
       return t;
     },
   },
+  beret: {
+    covers: true,
+    build: (color) => {
+      const t = new THREE.Group();
+      t.position.set(0.03, 0.42, -0.03);
+      t.rotation.set(HEAD_TILT * 0.6, 0, -0.22);
+      const cap = mesh(g.beret, color);
+      cap.scale.set(1.05, 0.3, 1.05);
+      t.add(cap, mesh(g.beretStem, color, 0, 0.09, 0));
+      return t;
+    },
+  },
+  bunny: {
+    covers: false,
+    build: (color) => {
+      const t = new THREE.Group();
+      t.add(mesh(g.earBand, m.dark, 0, 0.22, 0));
+      for (const s of [-1, 1]) {
+        const ear = new THREE.Group();
+        ear.position.set(s * 0.09, 0.47, -0.03);
+        ear.rotation.z = -s * 0.18;
+        ear.rotation.x = -0.15;
+        ear.add(mesh(g.bunnyEar, color, 0, 0.12, 0), mesh(g.bunnyEarIn, m.pink, 0, 0.12, 0.028));
+        t.add(ear);
+      }
+      return t;
+    },
+  },
+  party: {
+    covers: true,
+    build: (color) => {
+      const t = new THREE.Group();
+      t.position.set(0.05, 0.56, -0.02);
+      t.rotation.z = -0.2;
+      t.add(mesh(g.partyCone, color), mesh(g.pom, m.white, 0, 0.16, 0));
+      return t;
+    },
+  },
+  sprout: {
+    covers: false,
+    build: () => {
+      const t = new THREE.Group();
+      t.position.set(0, 0.48, 0.02);
+      t.add(mesh(g.sproutStem, m.leaf, 0, 0.045, 0));
+      for (const s of [-1, 1]) {
+        const leaf = mesh(g.sproutLeaf, m.leaf, s * 0.04, 0.095, 0);
+        leaf.scale.set(1, 0.45, 0.7);
+        leaf.rotation.z = s * 0.5;
+        t.add(leaf);
+      }
+      return t;
+    },
+  },
+  headband: {
+    covers: false,
+    build: (color) => {
+      const t = new THREE.Group();
+      t.position.set(0, 0.3, 0);
+      t.rotation.x = PI / 2 - 0.12;
+      t.add(mesh(g.headband, m.white));
+      // 이마 가운데 동그라미 (필승!)
+      t.add(mesh(g.headbandDot, color, 0, 0.29, 0));
+      return t;
+    },
+  },
 };
 
 /** 모자를 쓰면 위로 솟는 머리 모양(똥머리, 뾰족, 아프로)은 숨겨야 해서 알려줘요 */
 export const hatCoversHair = (id: string) => hats[id]?.covers ?? false;
 
-export function buildHat(id: string, accent: THREE.Material): THREE.Group | null {
-  return hats[id]?.build(accent) ?? null;
+export function buildHat(id: string, color: THREE.Material): THREE.Group | null {
+  return hats[id]?.build(color) ?? null;
 }
 
 // ── 머리 모양 (기본 단정 머리 위에 더해지는 부분. 머리 좌표) ─────────────
-const hairStyles: Record<string, (hair: THREE.Material, accent: THREE.Material) => THREE.Object3D[]> = {
+const hairStyles: Record<string, (hair: THREE.Material, tieMat: THREE.Material) => THREE.Object3D[]> = {
   short: () => [],
-  bun: (hair, accent) => {
+  bun: (hair, tieMat) => {
     const bun = mesh(g.bun, hair, 0, 0.5, -0.07);
     bun.userData.top = true;
-    const tie = mesh(g.tie, accent, 0, 0.44, -0.07);
+    const tie = mesh(g.tie, tieMat, 0, 0.44, -0.07);
     tie.rotation.x = PI / 2;
     tie.userData.top = true;
     return [bun, tie];
   },
-  ponytail: (hair, accent) => {
+  ponytail: (hair, tieMat) => {
     const tail = mesh(g.tail, hair, 0, 0.12, -0.31);
     tail.rotation.x = -0.35;
-    const tie = mesh(g.tie, accent, 0, 0.27, -0.255);
+    const tie = mesh(g.tie, tieMat, 0, 0.27, -0.255);
     tie.rotation.x = PI / 2 - 0.5;
     tie.scale.setScalar(0.8);
     return [tail, tie];
   },
-  twin: (hair, accent) => {
+  twin: (hair, tieMat) => {
     const out: THREE.Object3D[] = [];
     for (const s of [-1, 1]) {
       const t = mesh(g.twin, hair, s * 0.245, 0.08, -0.08);
       t.rotation.z = s * 0.25;
-      const tie = mesh(g.tie, accent, s * 0.23, 0.2, -0.08);
+      const tie = mesh(g.tie, tieMat, s * 0.23, 0.2, -0.08);
       tie.rotation.y = PI / 2;
       tie.scale.setScalar(0.8);
       out.push(t, tie);
@@ -254,11 +350,41 @@ const hairStyles: Record<string, (hair: THREE.Material, accent: THREE.Material) 
     a.userData.top = true;
     return [a];
   },
+  bob: (hair) => {
+    const back = mesh(g.longBack, hair, 0, 0.12, -0.19);
+    back.scale.set(1.3, 0.5, 0.5);
+    const out: THREE.Object3D[] = [back];
+    for (const s of [-1, 1]) {
+      const side = mesh(g.bobSide, hair, s * 0.215, 0.13, -0.03);
+      side.rotation.z = s * 0.12;
+      out.push(side);
+    }
+    return out;
+  },
+  mohawk: (hair) => {
+    const fin = mesh(g.mohawk, hair, 0, 0.5, -0.03);
+    fin.rotation.x = HEAD_TILT * 0.5;
+    fin.userData.top = true;
+    return [fin];
+  },
+  braid: (hair, tieMat) => {
+    const out: THREE.Object3D[] = [];
+    for (let i = 0; i < 4; i++) {
+      const knot = mesh(g.braidKnot, hair, 0, 0.16 - i * 0.085, -0.27 - i * 0.012);
+      knot.scale.setScalar(1 - i * 0.08);
+      out.push(knot);
+    }
+    const tie = mesh(g.tie, tieMat, 0, -0.14, -0.31);
+    tie.rotation.x = PI / 2;
+    tie.scale.setScalar(0.7);
+    out.push(tie);
+    return out;
+  },
 };
 
-export function buildHair(style: string, hair: THREE.Material, accent: THREE.Material, hasHat: boolean): THREE.Group {
+export function buildHair(style: string, hair: THREE.Material, tieMat: THREE.Material, hasHat: boolean): THREE.Group {
   const t = new THREE.Group();
-  for (const part of (hairStyles[style] ?? hairStyles.short)(hair, accent)) {
+  for (const part of (hairStyles[style] ?? hairStyles.short)(hair, tieMat)) {
     if (hasHat && part.userData.top) continue;
     t.add(part);
   }
@@ -267,27 +393,27 @@ export function buildHair(style: string, hair: THREE.Material, accent: THREE.Mat
 
 // ── 등 (몸 좌표: 등판은 z -0.17 근처, 어깨 높이 0.78) ───────────────────
 const backs: Record<string, Builder> = {
-  backpack: (accent) => {
+  backpack: (color) => {
     const t = new THREE.Group();
-    t.add(mesh(g.pack, accent, 0, 0.58, -0.235), mesh(g.packPocket, m.dark, 0, 0.5, -0.3));
-    for (const s of [-1, 1]) t.add(mesh(g.packStrap, accent, s * 0.1, 0.62, 0.175));
+    t.add(mesh(g.pack, color, 0, 0.58, -0.235), mesh(g.packPocket, m.dark, 0, 0.5, -0.3));
+    for (const s of [-1, 1]) t.add(mesh(g.packStrap, color, s * 0.1, 0.62, 0.175));
     return t;
   },
-  cape: (accent) => {
+  cape: (color) => {
     const t = new THREE.Group();
     t.name = 'cape';
     t.position.set(0, 0.8, -0.16);
-    const body = mesh(g.cape, accent, 0, -0.29, -0.01);
+    const body = mesh(g.cape, color, 0, -0.29, -0.01);
     t.add(body);
     return t;
   },
-  wings: (accent) => {
+  wings: (color) => {
     const t = new THREE.Group();
     for (const s of [-1, 1]) {
       const pivot = new THREE.Group();
       pivot.name = s < 0 ? 'wingL' : 'wingR';
       pivot.position.set(s * 0.07, 0.7, -0.19);
-      const w = mesh(g.wing, accent, s * 0.13, 0.13, 0);
+      const w = mesh(g.wing, color, s * 0.13, 0.13, 0);
       w.scale.set(0.1, 0.27, 0.025);
       w.rotation.z = -s * 0.45;
       pivot.add(w);
@@ -295,9 +421,9 @@ const backs: Record<string, Builder> = {
     }
     return t;
   },
-  shell: (accent) => {
+  shell: (color) => {
     const t = new THREE.Group();
-    const shell = mesh(g.shell, accent, 0, 0.58, -0.25);
+    const shell = mesh(g.shell, color, 0, 0.58, -0.25);
     shell.scale.set(1, 0.95, 0.55);
     t.add(shell);
     for (const [x, y] of [
@@ -311,9 +437,47 @@ const backs: Record<string, Builder> = {
     }
     return t;
   },
+  jetpack: (color) => {
+    const t = new THREE.Group();
+    for (const s of [-1, 1]) {
+      t.add(mesh(g.tank, color, s * 0.075, 0.6, -0.26), mesh(g.nozzle, m.metal, s * 0.075, 0.42, -0.26));
+      const flame = mesh(g.flame, m.flame, s * 0.075, 0.33, -0.26);
+      flame.rotation.x = PI;
+      t.add(flame, mesh(g.packStrap, m.dark, s * 0.1, 0.62, 0.175));
+    }
+    return t;
+  },
+  guitar: (color) => {
+    const t = new THREE.Group();
+    const g2 = new THREE.Group();
+    g2.position.set(0, 0.55, -0.24);
+    g2.rotation.z = 0.55;
+    const lower = mesh(g.guitarBody, color, 0, -0.08, 0);
+    lower.scale.set(1, 1, 0.35);
+    const upper = mesh(g.guitarBody, color, 0, 0.08, 0);
+    upper.scale.set(0.8, 0.8, 0.35);
+    const hole = mesh(g.guitarHole, m.dark, 0, 0.02, -0.045);
+    hole.rotation.x = PI / 2;
+    g2.add(lower, upper, hole, mesh(g.guitarNeck, m.dark, 0, 0.3, 0), mesh(g.guitarHead, m.dark, 0, 0.5, 0));
+    // 어깨에 비스듬히 걸친 끈
+    t.add(g2, strap(new THREE.Vector3(-0.15, 0.79, 0.12), new THREE.Vector3(0.17, 0.42, 0.19), m.dark));
+    return t;
+  },
+  dinotail: (color) => {
+    const t = new THREE.Group();
+    t.position.set(0, 0.34, -0.18);
+    t.rotation.x = -PI / 2 - 0.45;
+    t.add(mesh(g.dinoTail, color, 0, 0.2, 0));
+    for (let i = 0; i < 3; i++) {
+      const spike = mesh(g.tailSpike, color, 0, 0.08 + i * 0.1, -0.075 + i * 0.022);
+      spike.rotation.x = -PI / 2;
+      t.add(spike);
+    }
+    return t;
+  },
 };
 
-export const buildBack = (id: string, accent: THREE.Material): THREE.Group | null => backs[id]?.(accent) ?? null;
+export const buildBack = (id: string, color: THREE.Material): THREE.Group | null => backs[id]?.(color) ?? null;
 
 // ── 목 ─────────────────────────────────────────────────────────────
 /** 두 점을 잇는 얇은 끈 */
@@ -327,46 +491,46 @@ function strap(a: THREE.Vector3, b: THREE.Vector3, mat: THREE.Material) {
 }
 
 const necks: Record<string, Builder> = {
-  scarf: (accent) => {
+  scarf: (color) => {
     const t = new THREE.Group();
     const ring = new THREE.Group();
     ring.position.set(0, 0.79, 0);
     ring.scale.set(1.1, 1, 0.92);
-    const torus = mesh(g.scarf, accent);
+    const torus = mesh(g.scarf, color);
     torus.rotation.x = PI / 2;
     ring.add(torus);
-    const tail1 = mesh(g.scarfTail, accent, 0.1, 0.68, 0.16);
+    const tail1 = mesh(g.scarfTail, color, 0.1, 0.68, 0.16);
     tail1.rotation.z = 0.12;
-    const tail2 = mesh(g.scarfTail, accent, 0.045, 0.66, 0.175);
+    const tail2 = mesh(g.scarfTail, color, 0.045, 0.66, 0.175);
     tail2.scale.y = 0.8;
     tail2.rotation.z = -0.08;
     t.add(ring, tail1, tail2);
     return t;
   },
-  lanyard: (accent) => {
+  lanyard: (color) => {
     const t = new THREE.Group();
     // 가슴 표면(z 약 0.17)보다 살짝 앞으로 띄워서 후드티에 묻히지 않게
     const bottom = new THREE.Vector3(0, 0.5, 0.19);
     for (const s of [-1, 1]) {
       const mid = new THREE.Vector3(s * 0.065, 0.66, 0.185);
-      t.add(strap(new THREE.Vector3(s * 0.1, 0.79, 0.14), mid, accent), strap(mid, bottom, accent));
+      t.add(strap(new THREE.Vector3(s * 0.1, 0.79, 0.14), mid, color), strap(mid, bottom, color));
     }
-    t.add(mesh(g.card, m.white, 0, 0.45, 0.195), mesh(g.cardStripe, accent, 0, 0.485, 0.2));
+    t.add(mesh(g.card, m.white, 0, 0.45, 0.195), mesh(g.cardStripe, color, 0, 0.485, 0.2));
     return t;
   },
-  bowtie: (accent) => {
+  bowtie: (color) => {
     const t = new THREE.Group();
     t.position.set(0, 0.765, 0.158);
     t.scale.setScalar(1.4);
-    t.add(mesh(g.bowKnot, accent));
+    t.add(mesh(g.bowKnot, color));
     for (const s of [-1, 1]) {
-      const wing = mesh(g.bowWing, accent, s * 0.05, 0, 0);
+      const wing = mesh(g.bowWing, color, s * 0.05, 0, 0);
       wing.rotation.z = -s * (PI / 2);
       t.add(wing);
     }
     return t;
   },
-  headphones: (accent) => {
+  headphones: (color) => {
     const t = new THREE.Group();
     const ring = new THREE.Group();
     ring.position.set(0, 0.79, 0);
@@ -377,12 +541,38 @@ const necks: Record<string, Builder> = {
     t.add(ring);
     // 귀 덮개는 가슴 앞에 늘어져 있음 (원통 축이 앞을 향하게)
     for (const s of [-1, 1]) {
-      const cup = mesh(g.neckCup, accent, s * 0.115, 0.68, 0.17);
+      const cup = mesh(g.neckCup, color, s * 0.115, 0.68, 0.17);
       cup.rotation.x = PI / 2;
       t.add(cup);
     }
     return t;
   },
+  tie: (color) => {
+    const t = new THREE.Group();
+    // 4각 기둥이라 모서리 하나가 앞을 향해서 넥타이처럼 보여요
+    const blade = mesh(g.tieBlade, color, 0, 0.62, 0.185);
+    blade.scale.set(1, 1, 0.35);
+    t.add(mesh(g.tieKnot, color, 0, 0.755, 0.165), blade);
+    return t;
+  },
+  medal: (color) => {
+    const t = new THREE.Group();
+    const bottom = new THREE.Vector3(0, 0.55, 0.19);
+    for (const s of [-1, 1]) t.add(strap(new THREE.Vector3(s * 0.1, 0.79, 0.14), bottom, color));
+    const disc = mesh(g.medal, m.gold, 0, 0.5, 0.2);
+    disc.rotation.x = PI / 2;
+    t.add(disc);
+    return t;
+  },
+  camera: (color) => {
+    const t = new THREE.Group();
+    const bottom = new THREE.Vector3(0, 0.5, 0.2);
+    for (const s of [-1, 1]) t.add(strap(new THREE.Vector3(s * 0.1, 0.79, 0.14), bottom, color));
+    const lens = mesh(g.cameraLens, m.metal, 0.02, 0.47, 0.25);
+    lens.rotation.x = PI / 2;
+    t.add(mesh(g.cameraBody, m.dark, 0, 0.47, 0.215), lens, mesh(g.capButton, m.red, -0.04, 0.52, 0.215));
+    return t;
+  },
 };
 
-export const buildNeck = (id: string, accent: THREE.Material): THREE.Group | null => necks[id]?.(accent) ?? null;
+export const buildNeck = (id: string, color: THREE.Material): THREE.Group | null => necks[id]?.(color) ?? null;

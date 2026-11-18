@@ -8,6 +8,8 @@ import {
   EMOTES,
   FEEDBACK_URL,
   LANGS,
+  MINIGAMES_ENABLED,
+  NICKNAME_MAX,
   NOISE_GROUPS,
   NOISES,
   PLACES,
@@ -33,6 +35,7 @@ import type { Commit, NewRoom, PeerState, RoomToday } from '../net/types';
 import { BLOCKED_WORDS_REASON, hasBadWord } from '../net/badwords';
 import { studyTodayAt } from '../studyClock';
 import { BREAK_MINUTES, FOCUS_MINUTES, type SessionState } from '../together/session';
+import type { ChatNotifyState } from './awayAlerts';
 import { $, h } from './dom';
 import {
   busyIntroText,
@@ -53,6 +56,8 @@ import {
 } from './together';
 import { enableDragScroll } from './dragScroll';
 import { loadPrivacyPolicy } from './privacy';
+import { applyChatSize, createChatResizeGrip } from './chatResize';
+import { currentChatLayout, onChatLayoutChange } from './chatLayout';
 import { Wardrobe, type LookPreviewHandle } from './wardrobe';
 import { renderSyncSheet, syncSheetTitle, type SyncArrival } from './syncSheet';
 import { canShareLink, isKakaoInApp } from '../sync/env';
@@ -63,18 +68,26 @@ import {
   getSessionsToday,
   getStudyHistory,
   hasSeenSync,
+  hasSeenArcade,
   hasSeenTogether,
   kstDate,
   markSyncSeen,
+  markArcadeSeen,
   markTogetherSeen,
   setMyHour,
+  getChatSize,
   type Profile,
 } from '../store';
 
 /** 채팅 목록에 쌓아두는 줄 수. 넘으면 오래된 것부터 지워요 (저장은 안 해요) */
-const CHAT_LOG_MAX = 30;
+/** 채팅 칸에 남겨 두는 줄 수 (대화와 알림을 합쳐서). 넘으면 오래된 것부터 지워요 */
+const CHAT_LOG_MAX = 60;
+/** 채팅 칸 맨 아래에서 이만큼(px) 안쪽이면 '맨 아래를 보는 중'으로 봐요 */
+const CHAT_STICK_PX = 24;
 /** 패널이 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const CHAT_FOCUS_DELAY_MS = 30;
+/** 채팅을 못 보낸 이유를 입력 칸 아래에 보여주는 시간. 그 전에 다시 입력하면 바로 지워요 */
+const CHAT_ERROR_VISIBLE_MS = 4000;
 /** 대화상자가 나타난 직후에 입력 칸에 포커스를 주기까지 기다리는 시간 */
 const MODAL_FOCUS_DELAY_MS = 30;
 
@@ -114,13 +127,18 @@ export interface UIHandlers {
   onChat(text: string, to?: string): string | null;
   /** 내 채팅 글을 방명록(커밋)에 남기기. 실패하면 이유를 돌려줌 */
   onChatPin(text: string): Promise<string | null>;
+  /** 채팅 칸의 🔔: 다른 창에 있을 때 브라우저 알림 켜기·끄기 */
+  onChatNotifyToggle(): void;
   onSound(on: boolean): void;
   /** 이 방에서 나만 들을 배경 소리 고르기 */
   onNoise(id: NoiseId): void;
   onShare(): void;
+  /** 🎮 탕비실 오락기 열기 */
+  onArcade(): void;
   /** 시점 버튼: 내 캐릭터 따라 보기 / 방 전체 보기 */
   onView(cmd: ViewCommand): void;
-  onProfileSave(p: Profile): void;
+  /** ⚙️ 프로필 저장. 바꾼 닉네임을 방에서 누가 쓰고 있으면 이유를 돌려줌 */
+  onProfileSave(p: Profile): string | null;
   onWave(id: string): void;
   /** ⚙️의 '처음 안내 다시 보기' */
   onReplayTips(): void;
@@ -174,9 +192,11 @@ export class UI {
   private roomsView: 'list' | 'create' = 'list';
   private chatBtn: HTMLButtonElement;
   private chatPanel!: HTMLElement;
+  private chatNotifyBtn!: HTMLButtonElement;
   private chatLog!: HTMLOListElement;
   private chatInput!: HTMLInputElement;
   private chatErr!: HTMLElement;
+  private chatErrTimer = 0;
   private whisperPill!: HTMLElement;
   private whisperName!: HTMLElement;
   private chatSubmit!: HTMLButtonElement;
@@ -187,6 +207,8 @@ export class UI {
   private wardrobe = new Wardrobe({ onLook: (look) => this.h.onLook(look), onPreview: (look) => this.h.onLookPreview(look) });
   /** 입장 화면 안의 옷장. 방 안 옷장(위)과 따로 둬서, 입장 화면에서 방 목록을 열어도 미리보기가 안 닫혀요 */
   private introWardrobe: Wardrobe | null = null;
+  /** 입장 화면 소개 아래 한 줄 (입장 화면을 다시 그려도 남게 들고 있어요) */
+  private introNote = '';
   /** 시점이 처음에서 벗어났거나 내 캐릭터를 따라가는 중이면 true (시점 버튼이 어느 쪽으로 가는지) */
   private viewAway = false;
   /** 지금 정각 세션 (main.ts가 매초 알려줘요) */
@@ -249,6 +271,15 @@ export class UI {
       h(
         'div',
         { class: 'hud hud-tools' },
+        // 쉬는 시간엔 반짝여서 한 판 하라고 알려요 (setSession이 켜고 꺼요)
+        // 처음엔 빨간 점을 찍어 눌러 보게 해요
+        MINIGAMES_ENABLED &&
+          h(
+            'button',
+            { class: 'icon-btn', id: 'arcade-btn', onclick: () => this.openArcade(), 'aria-label': '미니게임 (탕비실 오락기)', title: '미니게임' },
+            '🎮',
+            h('i', { class: 'new-dot', id: 'arcade-dot', hidden: hasSeenArcade(), 'aria-hidden': 'true' }),
+          ),
         h('button', { class: 'icon-btn', id: 'noise-btn', onclick: () => this.toggleSheet('noise'), 'aria-label': '배경 소리 고르기', title: '배경 소리' }, '🎧'),
         h('button', { class: 'icon-btn', onclick: () => this.h.onShare(), 'aria-label': '친구에게 공유' }, '🔗'),
         h(
@@ -285,7 +316,8 @@ export class UI {
     document.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
       if (!this.sheet) return;
-      if (t.closest('#sheet') || t.closest('.actions') || t.closest('.hud') || t.closest('.modal') || t.closest('.intro-room')) return;
+      // 넓은 화면에선 채팅과 시트가 같이 열려 있어서, 채팅 칸을 눌러도 시트는 그대로 둬요
+      if (t.closest('#sheet') || t.closest('#chat') || t.closest('.actions') || t.closest('.hud') || t.closest('.modal') || t.closest('.intro-room')) return;
       this.closeSheet();
     });
     document.addEventListener('keydown', (e) => {
@@ -300,6 +332,17 @@ export class UI {
       }
     });
     window.setTimeout(() => $('#hint').classList.add('gone'), 9000);
+    // 창을 줄여 채팅 칸이 시트와 같은 자리로 오면 둘 중 채팅을 닫아요
+    onChatLayoutChange(() => {
+      const bothOpen = !!this.sheet && !this.chatPanel.hidden;
+      if (bothOpen && this.chatSharesSheetSpot()) this.closeChat();
+    });
+  }
+
+  private openArcade() {
+    markArcadeSeen();
+    $('#arcade-dot').hidden = true;
+    this.h.onArcade();
   }
 
   private action(kind: SheetKind, icon: string, label: string, iconId?: string) {
@@ -318,7 +361,7 @@ export class UI {
   // ── 입장 화면 ───────────────────────────────────
   showIntro(profile: Profile, returning: boolean) {
     const p = { ...profile };
-    const nick = h('input', { id: 'nick', maxlength: 12, value: p.name, autocomplete: 'off', spellcheck: 'false' });
+    const nick = h('input', { id: 'nick', maxlength: NICKNAME_MAX, value: p.name, autocomplete: 'off', spellcheck: 'false' });
     const lang = h('select', { id: 'lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
     // 처음부터 옷장으로 꾸미고 들어가요. 고르는 값은 p에만 쌓고, 입장할 때 저장해요
     const dress = h('div', { class: 'intro-dress' });
@@ -348,7 +391,7 @@ export class UI {
           const unlocked = await this.h.onUnlockRoom();
           btn.disabled = false;
           if (!unlocked) return;
-          p.name = nick.value.trim().slice(0, 12) || p.name;
+          p.name = nick.value.trim().slice(0, NICKNAME_MAX) || p.name;
           p.lang = lang.value;
           this.introWardrobe?.close();
           $('#intro').classList.add('out');
@@ -361,6 +404,7 @@ export class UI {
       h('div', { class: 'intro-kicker', id: 'intro-kicker' }, placeMeta(this.room?.place).tagline),
       h('h1', {}, '온라인 모각코'),
       h('p', { class: 'intro-lead' }, '모여서 각자 코딩해요. 빈자리에 앉아 할 일을 하면 돼요.', h('br'), '말은 안 해도 괜찮아요.'),
+      h('p', { class: 'intro-note', id: 'intro-note', hidden: !this.introNote }, this.introNote),
       h('div', { class: 'intro-places', id: 'intro-places' }),
       h('div', { class: 'intro-room', id: 'intro-room' }),
       h(
@@ -565,6 +609,15 @@ export class UI {
   setProgress(p: number) {
     this.progress = p;
     if (this.introBar) this.introBar.style.width = `${Math.round(p * 100)}%`;
+  }
+
+  /** 입장 화면 소개 아래 한 줄 안내 (게임 주소로 들어왔을 때 '들어가면 바로 ○○ 한 판!') */
+  setIntroNote(text: string) {
+    this.introNote = text;
+    const el = document.getElementById('intro-note');
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = !text;
   }
 
   /** 입장하기 전에 프로필이 바뀌면(다른 기기에서 이어받았을 때) 입장 화면을 새 프로필로 다시 그려요 */
@@ -774,6 +827,7 @@ export class UI {
     $('#session-text').textContent = sessionPillText(s, now);
     btn.setAttribute('aria-label', sessionPillLabel(s, now));
     btn.classList.toggle('break', s.phase === 'break');
+    document.getElementById('arcade-btn')?.classList.toggle('break', s.phase === 'break');
     const intro = document.getElementById('ir-session');
     if (intro) intro.textContent = sessionIntroText(s, now);
     if (this.sheet !== 'together') return;
@@ -945,7 +999,14 @@ export class UI {
   private buildChat(): HTMLElement {
     this.chatLog = h('ol', { class: 'chat-log' });
     this.chatErr = h('p', { class: 'err', hidden: true });
-    this.chatInput = h('input', { id: 'chat-input', maxlength: CHAT_MAX_LENGTH, placeholder: '한마디 (Enter로 보내기)', autocomplete: 'off', enterkeyhint: 'send' });
+    this.chatInput = h('input', {
+      id: 'chat-input',
+      maxlength: CHAT_MAX_LENGTH,
+      placeholder: '한마디 (Enter로 보내기)',
+      autocomplete: 'off',
+      enterkeyhint: 'send',
+      oninput: () => this.hideChatError(),
+    });
     this.whisperName = h('b', {}, '');
     this.whisperPill = h(
       'div',
@@ -954,6 +1015,7 @@ export class UI {
       h('button', { type: 'button', class: 'whisper-x', onclick: () => this.clearWhisper(), 'aria-label': '귓속말 그만하기' }, '✕'),
     );
     this.chatSubmit = h('button', { class: 'primary', type: 'submit' }, '보내기');
+    this.chatNotifyBtn = h('button', { class: 'chat-notify', type: 'button', onclick: () => this.h.onChatNotifyToggle() }, '🔕');
     const form = h(
       'form',
       {
@@ -966,13 +1028,16 @@ export class UI {
       this.chatInput,
       this.chatSubmit,
     );
-    this.chatPanel = h(
-      'section',
-      { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' },
+    // 손잡이가 패널 안에 있어서, 패널을 먼저 만들고 내용을 채워요
+    const panel = h('section', { class: 'chat', id: 'chat', hidden: true, 'aria-label': '채팅' });
+    applyChatSize(panel, getChatSize());
+    panel.append(
       h(
         'header',
         { class: 'chat-head' },
-        h('p', {}, '말풍선으로 잠깐 보여요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
+        createChatResizeGrip(panel, this.chatLog),
+        h('p', {}, '말풍선으로 잠깐 보여요. 알림도 여기 남아요.', h('br'), '다른 사람을 누르면 귓속말도 가능 · 남기고 싶은 말은 📌'),
+        this.chatNotifyBtn,
         h('button', { class: 'x', type: 'button', onclick: () => this.closeChat(), 'aria-label': '채팅 닫기' }, '✕'),
       ),
       this.chatLog,
@@ -980,7 +1045,24 @@ export class UI {
       this.whisperPill,
       form,
     );
-    return this.chatPanel;
+    this.chatPanel = panel;
+    return panel;
+  }
+
+  /** 채팅 칸 🔔 버튼을 브라우저 알림 상태에 맞춰요. 알림을 못 띄우는 브라우저면 숨겨요 */
+  setChatNotify(state: ChatNotifyState) {
+    const btn = this.chatNotifyBtn;
+    const label: Record<ChatNotifyState, string> = {
+      on: '다른 창에 있을 때 채팅 알림 켜짐 (누르면 꺼요)',
+      off: '다른 창에 있을 때 채팅 알림 받기',
+      blocked: '브라우저에서 이 사이트 알림이 막혀 있어요',
+      unsupported: '',
+    };
+    btn.hidden = state === 'unsupported';
+    btn.textContent = state === 'on' ? '🔔' : '🔕';
+    btn.title = label[state];
+    btn.setAttribute('aria-label', label[state]);
+    btn.setAttribute('aria-pressed', String(state === 'on'));
   }
 
   /** 특정 사람에게만 보이는 귓속말 모드로 전환 (방을 나가거나 새로고침하면 상대를 다시 못 찾아요) */
@@ -1009,8 +1091,8 @@ export class UI {
 
   openChat() {
     if (!this.entered) return;
-    // 시트와 채팅은 화면의 같은 자리를 써서 둘 중 하나만 열어요 (openSheet도 채팅을 닫음)
-    this.closeSheet();
+    // 중간·좁은 화면에선 시트와 채팅이 같은 자리를 써서 둘 중 하나만 열어요 (openSheet도 채팅을 닫음)
+    if (this.chatSharesSheetSpot()) this.closeSheet();
     this.hidePop();
     this.chatPanel.hidden = false;
     this.chatBtn.classList.add('open');
@@ -1018,7 +1100,13 @@ export class UI {
     window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
   }
 
+  /** 넓은 화면에선 채팅이 왼쪽 아래에 붙어서 시트(가운데)와 같이 열 수 있어요 (chatLayout.ts) */
+  private chatSharesSheetSpot() {
+    return currentChatLayout() !== 'docked';
+  }
+
   closeChat() {
+    this.hideChatError();
     this.chatPanel.hidden = true;
     this.chatBtn.classList.remove('open');
     this.chatInput.blur();
@@ -1035,9 +1123,11 @@ export class UI {
     const text = this.chatInput.value.trim();
     if (!text) return;
     const problem = this.h.onChat(text, this.whisperTarget?.id);
-    this.chatErr.hidden = !problem;
-    this.chatErr.textContent = problem ?? '';
-    if (!problem) this.chatInput.value = '';
+    if (problem) this.showChatError(problem);
+    else {
+      this.hideChatError();
+      this.chatInput.value = '';
+    }
     this.chatInput.focus({ preventScroll: true });
   }
 
@@ -1061,26 +1151,61 @@ export class UI {
           )
         : null;
     const who = line.whisperWith ? (line.mine ? `🤫 나 → ${line.whisperWith}` : `🤫 ${line.name}`) : line.name;
-    this.chatLog.append(
+    this.appendChatLine(
       h(
         'li',
         { class: [line.mine && 'mine', line.whisperWith && 'whisper'].filter(Boolean).join(' ') || undefined },
-        h('span', { class: 'who', style: `--c:${langById(line.lang).color}` }, who),
+        timeTag(new Date()),
+        // 이름 칸은 폭이 정해져 있어서 긴 이름은 잘려요. 마우스를 올리면 전체가 보여요
+        h('span', { class: 'who', style: `--c:${langById(line.lang).color}`, title: who }, who),
         h('span', { class: 'msg' }, line.text),
         pin,
       ),
     );
-    while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
-    this.chatLog.scrollTop = this.chatLog.scrollHeight;
     // 패널이 닫혀 있으면 새 글이 왔다는 표시만 해둬요
     if (!line.mine && this.chatPanel.hidden) this.chatBtn.classList.add('unread');
+  }
+
+  /**
+   * 토스트로 잠깐 띄우고, 채팅 칸에도 시각과 함께 남겨요 (나중에 채팅을 열어 다시 볼 수 있게).
+   * 사람이 들고 나는 일처럼 자주 오는 알림이라 💬 버튼에 새 글 표시는 하지 않아요
+   */
+  notify(text: string, kind: 'info' | 'good' | 'bad' = 'info', ms?: number) {
+    this.toast(text, kind, ms);
+    this.addNotice(text);
+  }
+
+  /** 채팅 칸에만 알림 한 줄 (토스트 없이). 배포 경보처럼 화면에 따로 띄우는 알림을 남길 때 */
+  addNotice(text: string) {
+    this.appendChatLine(h('li', { class: 'notice' }, timeTag(new Date()), h('span', { class: 'msg' }, text)));
+  }
+
+  private appendChatLine(li: HTMLElement) {
+    // 맨 아래를 보고 있을 때만 따라 내려가요 (위로 올려 지난 글을 읽는 중이면 그대로)
+    const atBottom = this.chatLog.scrollHeight - this.chatLog.scrollTop - this.chatLog.clientHeight < CHAT_STICK_PX;
+    this.chatLog.append(li);
+    while (this.chatLog.children.length > CHAT_LOG_MAX) this.chatLog.firstElementChild?.remove();
+    if (atBottom) this.chatLog.scrollTop = this.chatLog.scrollHeight;
   }
 
   /** 방을 옮기면 이전 방의 대화는 비워요 */
   clearChat() {
     this.chatLog.replaceChildren();
-    this.chatErr.hidden = true;
+    this.hideChatError();
     this.chatBtn.classList.remove('unread');
+  }
+
+  /** 못 보낸 이유를 잠깐 보여줘요. CHAT_ERROR_VISIBLE_MS가 지나거나 다시 입력하면 사라져요 */
+  private showChatError(text: string) {
+    this.chatErr.textContent = text;
+    this.chatErr.hidden = false;
+    window.clearTimeout(this.chatErrTimer);
+    this.chatErrTimer = window.setTimeout(() => this.hideChatError(), CHAT_ERROR_VISIBLE_MS);
+  }
+
+  private hideChatError() {
+    window.clearTimeout(this.chatErrTimer);
+    this.chatErr.hidden = true;
   }
 
   private async pinChat(text: string, btn: HTMLButtonElement) {
@@ -1088,8 +1213,7 @@ export class UI {
     const problem = await this.h.onChatPin(text);
     if (problem) {
       btn.disabled = false;
-      this.chatErr.hidden = false;
-      this.chatErr.textContent = problem;
+      this.showChatError(problem);
       return;
     }
     btn.textContent = '✓';
@@ -1102,8 +1226,8 @@ export class UI {
   }
 
   openSheet(kind: SheetKind) {
-    // 채팅과 같은 자리를 쓰니까 열려 있으면 닫아요 (openChat도 시트를 닫음)
-    this.closeChat();
+    // 중간·좁은 화면에선 채팅과 같은 자리를 쓰니까 열려 있으면 닫아요 (openChat도 시트를 닫음)
+    if (this.chatSharesSheetSpot()) this.closeChat();
     this.hidePop();
     if (kind === 'rooms' && this.sheet !== 'rooms') this.roomsView = 'list';
     if (kind === 'together') {
@@ -1358,7 +1482,8 @@ export class UI {
       case 'profile': {
         const s = this.self;
         const p: Profile = { id: s.id, name: s.name, color: s.color, lang: s.lang, hair: s.hair, skin: s.skin, glasses: s.glasses, outfit: s.outfit };
-        const nick = h('input', { id: 'p-nick', maxlength: 12, value: p.name, autocomplete: 'off' });
+        const nick = h('input', { id: 'p-nick', maxlength: NICKNAME_MAX, value: p.name, autocomplete: 'off' });
+        const nickErr = h('p', { class: 'err', hidden: true, role: 'alert' });
         const lang = h('select', { id: 'p-lang' }, ...LANGS.map((l) => h('option', { value: l.id, selected: l.id === p.lang }, l.label)));
         const history = getStudyHistory();
         const today = kstDate();
@@ -1394,14 +1519,21 @@ export class UI {
               onsubmit: (e: Event) => {
                 e.preventDefault();
                 if (this.rejectBadNick(nick)) return;
-                p.name = nick.value.trim().slice(0, 12) || p.name;
+                p.name = nick.value.trim().slice(0, NICKNAME_MAX) || p.name;
                 p.lang = lang.value;
-                this.h.onProfileSave(p);
+                const problem = this.h.onProfileSave(p);
+                if (problem) {
+                  nickErr.textContent = problem;
+                  nickErr.hidden = false;
+                  nick.focus();
+                  return;
+                }
                 this.closeSheet();
               },
             },
             h('label', { for: 'p-nick' }, '닉네임'),
             nick,
+            nickErr,
             h('label', { for: 'p-lang' }, '주력 언어'),
             lang,
             h('button', { class: 'primary wide', type: 'submit' }, '저장'),
@@ -1951,6 +2083,76 @@ export class UI {
     });
   }
 
+  /**
+   * 방에 같은 닉네임이 있어서 들어가지 못했을 때 새 닉네임을 받아요. 들어가야 닫혀요 (취소하면 방에 나 없이 남게 돼서).
+   * suggest가 준 방에 없는 이름을 미리 채워 두고, '다른 이름'을 누르면 또 받아요.
+   * enter가 이유(글)를 돌려주면 그 자리에서 다시 입력받고, null을 돌려주면 들어간 거예요.
+   */
+  askNewNickname(current: string, suggest: (except: string) => string, enter: (name: string) => string | null): Promise<void> {
+    return new Promise((resolve) => {
+      const m = $('#modal');
+      const input = h('input', { maxlength: NICKNAME_MAX, value: suggest(current), autocomplete: 'off', spellcheck: 'false', 'aria-label': '새 닉네임' });
+      const err = h('p', { class: 'err', hidden: true, role: 'alert' });
+      const another = h(
+        'button',
+        {
+          class: 'ghost',
+          type: 'button',
+          onclick: () => {
+            input.value = suggest(input.value) || input.value;
+            err.hidden = true;
+            input.select();
+          },
+        },
+        '🎲 다른 이름',
+      );
+      const showProblem = (problem: string) => {
+        err.hidden = false;
+        err.textContent = problem;
+        input.select();
+      };
+      const form = h(
+        'form',
+        {
+          class: 'modal-card nick-ask',
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-label': '같은 닉네임이 있어요',
+          onsubmit: (e: Event) => {
+            e.preventDefault();
+            const name = input.value.trim().slice(0, NICKNAME_MAX);
+            if (!name) {
+              input.focus();
+              return;
+            }
+            if (hasBadWord(name)) {
+              showProblem(`${BLOCKED_WORDS_REASON} 다른 닉네임으로 적어주세요.`);
+              return;
+            }
+            const problem = enter(name);
+            if (problem) {
+              showProblem(problem);
+              return;
+            }
+            m.hidden = true;
+            m.innerHTML = '';
+            resolve();
+          },
+        },
+        h('h2', {}, '🪪 같은 닉네임이 있어요'),
+        h('p', {}, `이 방에 '${current}' 닉네임을 쓰는 사람이 있어요. 방에 없는 이름을 골라 뒀으니 그대로 들어가거나 바꿔 적어 주세요. 그전까지 방 사람들에게 나는 안 보여요.`),
+        input,
+        err,
+        h('div', { class: 'modal-actions' }, another, h('button', { class: 'primary', type: 'submit' }, '들어가기')),
+      );
+      m.innerHTML = '';
+      m.append(form);
+      m.onclick = null;
+      m.hidden = false;
+      window.setTimeout(() => input.select(), MODAL_FOCUS_DELAY_MS);
+    });
+  }
+
   alarm(text: string, seconds: number) {
     const a = $('#alarm');
     $('#alarm-text').textContent = text;
@@ -2033,4 +2235,14 @@ export function ago(at: number) {
   if (s < 3600) return `${Math.floor(s / 60)}분 전`;
   if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
   return `${Math.floor(s / 86400)}일 전`;
+}
+
+/** 알림 줄에 붙이는 시각 (KST, 15:43) */
+function clockOf(d: Date): string {
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+}
+
+/** 채팅·알림 줄 앞의 시각 (14:31). 받은 시각이에요 (실시간으로 바로 오니까 보낸 시각과 거의 같아요) */
+function timeTag(d: Date): HTMLElement {
+  return h('time', { class: 'when', datetime: d.toISOString() }, clockOf(d));
 }

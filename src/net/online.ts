@@ -7,6 +7,10 @@
 // 보안: 채널은 공개라서 받은 값은 전부 validate.ts로 검사하고, 보낸 사람별로 속도를 제한해요.
 // 커밋 알림은 Broadcast 내용을 믿지 않고 DB에서 다시 읽어서 진짜 저장된 것만 보여줘요.
 //
+// 같은 닉네임: 방 채널에 들어가면 먼저 누가 있는지(첫 sync) 보고, 같은 닉네임이 없을 때만 Presence로 나를 알려요.
+//   거의 동시에 들어와 서로 못 본 경우는 알린 직후(NAME_RACE_WINDOW_MS) 같은 닉네임이 보이면 늦게 온 쪽이 물러나요.
+//   검사는 각자 브라우저에서 해서, 고친 클라이언트로 일부러 겹치게 들어오는 건 막지 못해요.
+//
 // 비밀번호 방(가벼운 잠금): 비밀번호에서 나온 값(net/roomKey.ts)을 채널 이름 끝에 붙여서, 비밀번호를 아는 사람끼리만 같은 채널에 모여요.
 //   서버(room_key_ok)에는 확인값만 맡겨요. 로그인은 없어요.
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
@@ -27,6 +31,7 @@ import {
 import * as store from '../store';
 import type { BusyHours, Commit, JoinResult, Net, NetEvent, NetHandlers, NewRoom, PeerState, RoomTimeReport, RoomToday, SeatTrace } from './types';
 import { maskIfBad } from './badwords';
+import { hasNickname, isSameNickname } from './nickname';
 import { deriveRoomKey } from './roomKey';
 import { COMMIT_REFRESH_GAP_MS, RateLimiter, cleanCommit, cleanEvent, cleanPeer, cleanBusyHours, cleanRoomToday, cleanRoomsToday, cleanSeatTraces, text } from './validate';
 
@@ -52,6 +57,14 @@ const LOBBY_TRACK_RETRIES = 3;
 
 /** 로비에 "나 여기 있어요"를 다시 알리는 간격. 서버가 조용히 내 기록을 잃어도 이 안에 복구돼요 */
 const LOBBY_HEARTBEAT_MS = 60_000;
+/** 방 채널에 들어간 뒤 누가 있는지(첫 sync) 기다리는 최대 시간. 넘으면 확인 없이 들어가요 */
+const FIRST_SYNC_WAIT_MS = 2000;
+/** 나를 알린 뒤 이 시간 안에 같은 닉네임이 보이면 거의 동시에 들어온 걸로 봐요 */
+const NAME_RACE_WINDOW_MS = 5000;
+
+/** 같은 방에 먼저 들어온 쪽. 들어온 시각이 같으면 id로 정해서 두 브라우저가 같은 답을 내요 */
+const enteredBefore = (a: PeerState, b: PeerState) => (a.joinedAt !== b.joinedAt ? a.joinedAt < b.joinedAt : a.id < b.id);
+
 /** 커밋 알림을 받은 뒤 DB를 읽기까지 모아두는 시간 (같이 온 알림을 한 번에 읽으려고) */
 const COMMIT_FLUSH_DELAY_MS = 800;
 /** 한 번 읽을 때 확인할 커밋 해시 수 (가짜 알림으로 메모리가 늘지 않게) */
@@ -103,6 +116,12 @@ export class OnlineNet implements Net {
   private checkedCap = false;
   /** 지금 방에 Presence로 들어와 있는 사람들. 여기 없는 id가 보낸 이벤트는 버려요 */
   private present = new Set<string>();
+  /** 마지막 sync로 받은 방 사람들 (나 제외) */
+  private peers: PeerState[] = [];
+  /** 지금 채널에서 Presence로 나를 알린 시각. 아직 안 알렸으면 0 */
+  private trackedAt = 0;
+  /** 같은 닉네임이 있어서 나를 알리지 않고 기다리는 중 */
+  private heldForName = false;
   private limiter = new RateLimiter();
   private pendingCommits = new Set<string>();
   /** 숨겨진 커밋 알림을 받아서 다음에 읽을 때 목록 전체를 바꿔야 하는지 */
@@ -319,6 +338,11 @@ export class OnlineNet implements Net {
     }
     return new Promise((resolve) => {
       this.checkedCap = false;
+      this.peers = [];
+      this.trackedAt = 0;
+      this.heldForName = false;
+      let firstSynced: () => void = () => {};
+      const firstSync = new Promise<void>((r) => (firstSynced = r));
       this.h.onStatus?.('connecting');
       const ch = this.sb.channel(topic, {
         config: { presence: { key: this.self.id }, broadcast: { self: false } },
@@ -337,10 +361,13 @@ export class OnlineNet implements Net {
           if (peers.length >= MAX_PEERS) break;
         }
         this.present = new Set(peers.map((p) => p.id));
+        this.peers = peers;
+        firstSynced();
         if (!this.checkedCap) {
           this.checkedCap = true;
           if (this.overCapacity(peers)) return;
         }
+        if (this.lostNameRace(peers)) this.holdForName(ch);
         this.h.onPeers(peers);
       });
 
@@ -350,7 +377,10 @@ export class OnlineNet implements Net {
 
       ch.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          warnIfTrackFailed(await this.trackAndRecordTime(ch, this.self));
+          await Promise.race([firstSync, new Promise((r) => window.setTimeout(r, FIRST_SYNC_WAIT_MS))]);
+          if (this.ch !== ch) return resolve(); // 기다리는 사이 방을 옮겼거나 다음 호점으로 갔어요
+          if (hasNickname(this.peers, this.self.name)) this.holdForName(ch);
+          else await this.trackSelf(ch);
           this.h.onStatus?.('online');
           resolve();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -423,6 +453,27 @@ export class OnlineNet implements Net {
     return true;
   }
 
+  private async trackSelf(ch: RealtimeChannel) {
+    this.trackedAt = Date.now();
+    warnIfTrackFailed(await this.trackAndRecordTime(ch, this.self));
+  }
+
+  /** 나를 알린 직후 같은 닉네임이 먼저 들어와 있던 게 보이면 true (거의 동시에 들어와 서로 못 본 경우) */
+  private lostNameRace(peers: PeerState[]): boolean {
+    if (!this.trackedAt || Date.now() - this.trackedAt > NAME_RACE_WINDOW_MS) return false;
+    return peers.some((p) => isSameNickname(p.name, this.self.name) && enteredBefore(p, this.self));
+  }
+
+  /** 같은 닉네임 때문에 방 사람들에게 나를 알리지 않아요. 이미 알렸으면 거둬들여요 */
+  private holdForName(ch: RealtimeChannel) {
+    if (this.trackedAt) void ch.untrack();
+    this.trackedAt = 0;
+    this.heldForName = true;
+    clearTimeout(this.trackTimer);
+    this.trackTimer = 0;
+    this.h.onNameTaken?.();
+  }
+
   /**
    * Presence track을 보내면서 보낸 시각을 기록해요.
    * updateSelf가 호출 한도를 지키려면 로비를 포함한 모든 track이 시각을 남겨야 해서 한 함수로 모았어요.
@@ -450,12 +501,23 @@ export class OnlineNet implements Net {
     const wait = Math.max(PRESENCE_BATCH_MS, this.lastTrackAt + PRESENCE_MIN_GAP_MS - Date.now());
     this.trackTimer = window.setTimeout(() => {
       this.trackTimer = 0;
-      if (this.ch) void this.trackAndRecordTime(this.ch, this.self).then(warnIfTrackFailed);
+      // 같은 닉네임 때문에 기다리는 중이면 알리지 않아요 (retryJoin이 그때 최신 상태로 보내요)
+      if (this.ch && !this.heldForName) void this.trackAndRecordTime(this.ch, this.self).then(warnIfTrackFailed);
     }, wait);
   }
 
   send(e: NetEvent) {
     void this.ch?.send({ type: 'broadcast', event: 'ev', payload: e });
+  }
+
+  isNameTaken(name: string): boolean {
+    return hasNickname(this.peers, name);
+  }
+
+  retryJoin() {
+    if (!this.heldForName || !this.ch) return;
+    this.heldForName = false;
+    void this.trackSelf(this.ch);
   }
 
   async loadCommits(room: string): Promise<Commit[]> {

@@ -26,6 +26,7 @@ import {
   std,
   type V3,
 } from './kit';
+import { buildStressCorner, stressObstacles, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -62,6 +63,12 @@ const seats: Seat[] = [
 
 const laptopBoxes = seats.filter((s) => s.kind === 'floor').map((s) => ({ x: s.lx, z: s.lz, rot: s.yaw }));
 
+// 스트레스 해소 코너: 자판기 앞쪽 빈 바닥. 레거시 서버 샌드백과 온콜 호출기 더미
+const STRESS: StressCorner = {
+  punch: { theme: 'legacyServer', x: -2.8, z: 2.3, yaw: FACE.E },
+  smash: { theme: 'pagers', x: -2.8, z: 3.4, yaw: FACE.E },
+};
+
 const obstacles: Box[] = [
   { x0: ROW_A.x - RACK.w / 2, x1: ROW_A.x + (ROW_A.n - 1) * RACK.gap + RACK.w / 2, z0: ROOM.z0, z1: ROW_A_FRONT },
   { x0: ROOM.x0, x1: ROW_B_FRONT, z0: ROW_B.z - (ROW_B.n - 1) * RACK.gap - RACK.w / 2, z1: ROW_B.z + RACK.w / 2 },
@@ -75,6 +82,7 @@ const obstacles: Box[] = [
   boxAt(-5.65, 3.75, 0.45, 0.45), // 소화약제 탱크
   boxAt(-5.65, 2.85, 0.35, 0.35), // 쓰레기통
   ...laptopBoxes.map((l) => (Math.abs(Math.sin(l.rot)) > 0.5 ? boxAt(l.x, l.z, 0.35, 0.45) : boxAt(l.x, l.z, 0.45, 0.35))),
+  ...stressObstacles(STRESS),
   ...seatObstacles(seats),
 ];
 
@@ -89,6 +97,7 @@ const layout: PlaceLayout = {
     pet: { x: -4.3, z: 1.15 },
     idle: { x: 3.2, z: 2.8 },
   },
+  stress: STRESS,
 };
 
 const RACK_NOTES = [
@@ -386,6 +395,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
   const wallsCut = wallCutaway(walls, ROOM);
 
   // 랙 줄은 줄마다 따로 합침 (LED 인스턴스는 그대로 남음)
+  const stress = buildStressCorner(b, STRESS);
   b.finish([walls.left, walls.right, walls.back, rowA, rowB]);
 
   let darkK = 0;
@@ -396,6 +406,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
     seatHits: b.seatHits,
     gitlog,
     update(dt: number, cam: THREE.Camera) {
+      stress.update(dt);
       wallsCut(cam);
       alarm.update(dt);
       for (const f of ledFields) f.update(dt, alarm.on);
@@ -410,7 +421,10 @@ function build(scene: THREE.Scene, mobile: boolean) {
       }
     },
     alarm: (sec: number) => alarm.start(sec),
-    poke: (key: string) => key === 'duck' && duckAnim.poke(),
+    poke: (key: string) => {
+      if (key === 'duck') duckAnim.poke();
+      stress.poke(key);
+    },
     get alarming() {
       return alarm.on;
     },

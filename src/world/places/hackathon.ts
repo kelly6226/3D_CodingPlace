@@ -26,6 +26,7 @@ import {
   std,
   type V3,
 } from './kit';
+import { buildStressCorner, stressObstacles, type StressCorner } from './stress';
 import type { PlaceDef } from './types';
 
 // ── 배치도 ─────────────────────────────────────────
@@ -56,6 +57,12 @@ TEAMS.forEach((t, ti) => {
 // 멘토 자리
 seats.push(seat('mentor', 'chair', '멘토 데스크', 7.4, -1.6, FACE.W, { dist: 0.65, ax: 7.4, az: -0.45 }));
 
+// 스트레스 해소 코너: 왼쪽 벽, 피자 테이블과 침낭 사이. 데모 직전 버그 인형과 빈 에너지 드링크 캔
+const STRESS: StressCorner = {
+  punch: { theme: 'bugPlush', x: -7.2, z: 2.0, yaw: FACE.E },
+  smash: { theme: 'cans', x: -7.2, z: 3.2, yaw: FACE.E },
+};
+
 const obstacles: Box[] = [
   STAGE,
   ...TEAMS.map((t) => boxAt(t.x, t.z, TABLE.w, TABLE.d)),
@@ -64,6 +71,7 @@ const obstacles: Box[] = [
   boxAt(PODIUM.x, PODIUM.z, 0.6, 0.5),
   boxAt(-6.1, 4.9, 1.9, 0.75), // 침낭
   boxAt(-7.4, -4.6, 0.6, 0.6), // 쓰레기통
+  ...stressObstacles(STRESS),
   ...seatObstacles(seats),
 ];
 
@@ -78,6 +86,7 @@ const layout: PlaceLayout = {
     pet: { x: 6.0, z: -1.9 },
     idle: { x: 0, z: 3.6 },
   },
+  stress: STRESS,
 };
 
 // ── 만들기 ─────────────────────────────────────────
@@ -282,6 +291,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
 
   const alarm = alarmKit(b, ROOM, [M.red]);
   const wallsCut = wallCutaway(walls, ROOM);
+  const stress = buildStressCorner(b, STRESS);
   b.finish([walls.left, walls.right, walls.back]);
 
   let t = 0;
@@ -292,6 +302,7 @@ function build(scene: THREE.Scene, mobile: boolean) {
     seatHits: b.seatHits,
     gitlog,
     update(dt: number, cam: THREE.Camera) {
+      stress.update(dt);
       t += dt;
       wallsCut(cam);
       alarm.update(dt);
@@ -302,7 +313,10 @@ function build(scene: THREE.Scene, mobile: boolean) {
       stageLights[1].intensity = 7 + Math.cos(t * 0.7) * 2.5;
     },
     alarm: (sec: number) => alarm.start(sec),
-    poke: (key: string) => key === 'duck' && duckAnim.poke(),
+    poke: (key: string) => {
+      if (key === 'duck') duckAnim.poke();
+      stress.poke(key);
+    },
     get alarming() {
       return alarm.on;
     },

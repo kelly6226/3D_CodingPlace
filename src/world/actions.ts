@@ -1,6 +1,6 @@
-// 큰 동작(춤, 노트북 던지기, 책상 뒤집기, 기절)의 몸 자세
+// 큰 동작(춤, 노트북 던지기, 책상 뒤집기, 기절, 샌드백 치기, 키보드 부수기)의 몸 자세
 // 시간(초)에 따라 자세 값을 정해요. 바탕 자세(걷기·앉기)에서 서서히 이어지고 끝나면 서서히 돌아와요.
-import type { ActionId } from '../config';
+import type { ActionId, StressActionId } from '../config';
 
 /** 관절·몸 기울기 값 (라디안, 높이는 m). Avatar.animate가 매 프레임 만들고 동작이 덧씌워요 */
 export interface Pose {
@@ -168,7 +168,53 @@ const faint: PoseFn = (t, seconds, seated, p) => {
   }
 };
 
-const POSES: Record<ActionId, PoseFn> = { dance, throw: throwLaptop, flip: flipTable, faint };
+/** 동작이 물건에 닿는 시각(초). 이때마다 물건이 흔들리고(main.ts) 키보드는 키캡이 튀어요(avatar.ts) */
+export const STRESS_HITS_S: Record<StressActionId, number[]> = {
+  punch: [0.45, 0.85, 1.4],
+  smash: [0.75, 1.35],
+};
+
+/** 이 동작이 물건에 닿는 시각들. 스트레스 해소 동작이 아니면 빈 배열 */
+export function hitTimesOf(id: ActionId): number[] {
+  return id in STRESS_HITS_S ? STRESS_HITS_S[id as StressActionId] : [];
+}
+
+/** 시각 at을 가운데로 짧게 솟았다 내려오는 값 (0~1). 주먹을 뻗는 순간에 써요 */
+const pulse = (t: number, at: number, width = 0.09) => Math.exp(-(((t - at) / width) ** 2));
+
+/** 샌드백 치기: 가드 올리고 오른손·왼손 잽, 마지막에 크게 한 방 */
+const punch: PoseFn = (t, _seconds, _seated, p) => {
+  const [r1, l1, r2] = STRESS_HITS_S.punch;
+  const right = pulse(t, r1) + pulse(t, r2, 0.12) * 1.3;
+  const left = pulse(t, l1);
+  // 가드: 두 팔을 반쯤 앞으로 들고 안쪽으로 모음
+  p.armRX = -1.15 - 0.55 * right;
+  p.armLX = -1.15 - 0.55 * left;
+  p.armRZ = -0.25 * (1 - right);
+  p.armLZ = 0.25 * (1 - left);
+  p.pitch = 0.08 + 0.12 * (right + left);
+  p.roll = 0.08 * (left - right);
+  p.headX = 0.1;
+  p.bob = Math.abs(Math.sin(t * 9)) * 0.02;
+};
+
+/** 키보드 부수기: 두 주먹을 머리 위로 들었다가 내리쳐요 */
+const smash: PoseFn = (t, _seconds, _seated, p) => {
+  let arms = -0.7;
+  let lean = 0.05;
+  for (const at of STRESS_HITS_S.smash) {
+    const raise = smooth(at - 0.45, at - 0.15, t) * (1 - smooth(at - 0.12, at, t));
+    arms -= 2.3 * raise;
+    lean += -0.15 * raise + 0.3 * pulse(t, at, 0.12);
+  }
+  p.armLX = p.armRX = arms;
+  p.armLZ = -0.12;
+  p.armRZ = 0.12;
+  p.pitch = lean;
+  p.headX = 0.15 + 0.2 * lean;
+};
+
+const POSES: Record<ActionId, PoseFn> = { dance, throw: throwLaptop, flip: flipTable, faint, punch, smash };
 
 /** 바탕 자세 pose에 동작 자세를 섞어 넣어요. t는 동작을 시작하고 지난 초, seconds는 동작 전체 길이 */
 export function applyActionPose(id: ActionId, t: number, seconds: number, seated: boolean, pose: Pose) {

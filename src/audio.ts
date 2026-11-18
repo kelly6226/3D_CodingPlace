@@ -377,6 +377,74 @@ class Sound {
   pop() {
     this.burst(1200, 0.06, 0.12);
   }
+
+  /** 샌드백을 칠 때 '퍽' */
+  thud() {
+    this.burst(160, 0.14, 0.45, 'lowpass');
+    this.burst(900, 0.04, 0.08);
+  }
+
+  /** 키보드 더미를 내리칠 때 키캡이 우수수 */
+  clatter() {
+    for (let i = 0; i < 6; i++) window.setTimeout(() => this.key(0.12 + Math.random() * 0.08), i * (25 + Math.random() * 35));
+  }
+
+  /** 쿠션을 칠 때 푹신한 '퍽' (thud보다 낮고 작게) */
+  soft() {
+    this.burst(110, 0.18, 0.3, 'lowpass');
+  }
+
+  /** 온콜 호출기를 내리칠 때 '삐삐' */
+  beep() {
+    const ctx = this.ctx;
+    if (!ctx || !this.enabled) return;
+    const t = ctx.currentTime;
+    [0, 0.12].forEach((d) => {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 2200;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + d);
+      g.gain.linearRampToValueAtTime(0.05, t + d + 0.005);
+      g.gain.setValueAtTime(0.05, t + d + 0.07);
+      g.gain.linearRampToValueAtTime(0.0001, t + d + 0.08);
+      o.connect(g).connect(this.master);
+      o.start(t + d);
+      o.stop(t + d + 0.1);
+    });
+    this.burst(400, 0.05, 0.2, 'lowpass');
+  }
+
+  /** 뽁뽁이가 연달아 터지는 소리 */
+  pops() {
+    for (let i = 0; i < 5; i++) window.setTimeout(() => this.burst(1800 + Math.random() * 1400, 0.02, 0.25), i * (30 + Math.random() * 50));
+  }
+
+  /** 빈 캔이 찌그러지는 '우지끈' */
+  crunch() {
+    this.burst(3200, 0.09, 0.18, 'highpass');
+    this.burst(700, 0.12, 0.25);
+  }
+
+  /** 다른 창에 있을 때 채팅이 왔다는 짧은 '띵동' (chime보다 짧고 작게) */
+  ping() {
+    const ctx = this.ctx;
+    if (!ctx || !this.enabled) return;
+    const t = ctx.currentTime;
+    [1046.5, 1318.5].forEach((freq, i) => {
+      const at = t + i * 0.09;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(0.08, at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
+      o.connect(g).connect(this.master);
+      o.start(at);
+      o.stop(at + 0.5);
+    });
+  }
 }
 
 export const sound = new Sound();

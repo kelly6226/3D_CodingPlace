@@ -26,7 +26,7 @@ export function startRenderHud(renderer: WebGLRenderer) {
     const { calls, triangles } = renderer.info.render;
     box.textContent = [
       `t=${Math.round(performance.now() / 1000)}s vis=${document.visibilityState}`,
-      `canvas ${canvas.width}x${canvas.height} (css ${canvas.clientWidth}x${canvas.clientHeight})`,
+      `canvas ${canvas.width}x${canvas.height} (css ${canvas.clientWidth}x${canvas.clientHeight}) ratio=${renderer.getPixelRatio()}`,
       `lost=${renderer.getContext().isContextLost()} calls=${calls} tris=${triangles}`,
       `err: ${lastError}`,
     ].join('\n');

@@ -1078,3 +1078,365 @@ revoke all on function public.sync_study(text, text, jsonb) from public, anon, a
 grant execute on function public.sync_study(text, text, jsonb) to anon, authenticated;
 revoke all on function public.sync_delete(text) from public, anon, authenticated;
 grant execute on function public.sync_delete(text) to anon, authenticated;
+
+
+-- ── 9. 탕비실 오락기 스코어 판 (게임별 이번 주 TOP 10) ─────────
+-- 브라우저마다 스코어 판용으로 따로 만든 비밀 번호(minigames/records.ts scoreKey)의 해시로 게임·주마다 최고 점수 한 줄만 남겨요.
+-- 방에서 쓰는 id는 같은 방 사람들에게 보여서, 그걸로는 남의 줄 이름을 바꿀 수 있어 쓰지 않아요. 비밀 번호 원문은 저장하지 않아요.
+-- 주는 월요일 0시(KST)에 바뀌고, 4주가 지난 기록은 지워요.
+-- 점수는 브라우저가 보내는 값이라 조작을 완전히 막을 수는 없어요.
+-- 그래서 게임마다 나올 수 있는 점수 위로는 받지 않고, 한 사람이 너무 자주 올리지 못하게 해요.
+create table if not exists public.game_scores (
+  game text not null check (game in ('deploy-guard', 'bug-catch', 'overtime-run', 'commit-maze')),
+  week date not null,
+  player text not null check (player ~ '^[0-9a-f]{64}$'),
+  name text not null check (char_length(name) between 1 and 20 and btrim(name) <> '' and name !~ '[[:cntrl:]]'),
+  color text not null check (color ~ '^#[0-9a-fA-F]{6}$'),
+  score int not null check (score >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (game, week, player)
+);
+
+-- 예전(방 id로 저장하던) 기록은 지우고, 해시만 받도록 제약을 바꿔요 (여러 번 실행해도 괜찮아요)
+delete from public.game_scores where player !~ '^[0-9a-f]{64}$';
+alter table public.game_scores drop constraint if exists game_scores_player_check;
+alter table public.game_scores add constraint game_scores_player_check check (player ~ '^[0-9a-f]{64}$');
+
+create index if not exists game_scores_board_idx on public.game_scores (game, week, score desc, updated_at);
+create index if not exists game_scores_player_idx on public.game_scores (player, updated_at desc);
+
+alter table public.game_scores enable row level security;
+revoke all on public.game_scores from anon, authenticated;
+
+-- 스코어 판 함수들의 호출 수 (1분 단위, 서비스 전체). 사람을 알아보는 값은 없어요
+create table if not exists public.game_calls (
+  minute timestamptz primary key,
+  calls int not null default 0 check (calls >= 0)
+);
+
+alter table public.game_calls enable row level security;
+revoke all on public.game_calls from anon, authenticated;
+
+create or replace function public.game_call_ok()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  calls_per_minute constant int := 600;
+  v_calls int;
+begin
+  insert into public.game_calls as t (minute, calls) values (date_trunc('minute', now()), 1)
+  on conflict (minute) do update set calls = t.calls + 1
+  returning t.calls into v_calls;
+  return v_calls <= calls_per_minute;
+end;
+$$;
+
+-- 이번 주(KST 월요일)
+create or replace function public.game_week()
+returns date
+language sql
+stable
+set search_path = public
+as $$
+  select date_trunc('week', now() at time zone 'Asia/Seoul')::date;
+$$;
+
+-- 스코어 판 비밀 번호 → 저장할 해시 (형식이 틀리면 null)
+create or replace function public.game_player_hash(p_key text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case when p_key ~ '^[0-9a-f]{32}$' then encode(sha256(convert_to(p_key, 'UTF8')), 'hex') end;
+$$;
+
+-- 게임마다 받을 수 있는 가장 큰 점수 (실제로 나오기 어려운 값보다 넉넉하게)
+-- 배포 막기: 손 1개 1점 / 버그 잡기: 30초 / 야근 러너: 1초에 5분 → 100분 넘게 버텨야 30000 / 커밋 미로: 단계마다 약 700점
+create or replace function public.game_score_max(p_game text)
+returns int
+language sql
+immutable
+set search_path = public
+as $$
+  select case p_game
+    when 'deploy-guard' then 3000
+    when 'bug-catch' then 400
+    when 'overtime-run' then 30000
+    when 'commit-maze' then 100000
+  end;
+$$;
+
+-- 점수 올리기: 이번 주 내 최고 점수보다 높을 때만 바꿔요. 이번 주 내 순위와 최고 점수를 돌려줘요
+create or replace function public.submit_game_score(p_game text, p_player text, p_name text, p_color text, p_score int)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  min_gap constant interval := interval '3 seconds';
+  v_week date := public.game_week();
+  v_name text := btrim(coalesce(p_name, ''));
+  v_player text := public.game_player_hash(p_player);
+  v_best int;
+begin
+  if public.game_score_max(p_game) is null then
+    raise exception 'bad game';
+  end if;
+  if v_player is null then
+    raise exception 'bad player';
+  end if;
+  if p_color is null or p_color !~ '^#[0-9a-fA-F]{6}$' then
+    raise exception 'bad color';
+  end if;
+  if p_score is null or p_score not between 0 and public.game_score_max(p_game) then
+    raise exception 'bad score';
+  end if;
+  if char_length(v_name) not between 1 and 20 or v_name ~ '[[:cntrl:]]' or public.has_bad_word(v_name) then
+    raise exception 'bad name';
+  end if;
+  if exists (select 1 from public.game_scores where player = v_player and updated_at > now() - min_gap) then
+    raise exception 'too many scores, slow down';
+  end if;
+  if not public.game_call_ok() then
+    raise exception 'too many calls, slow down';
+  end if;
+
+  insert into public.game_scores as s (game, week, player, name, color, score)
+  values (p_game, v_week, v_player, v_name, p_color, p_score)
+  on conflict (game, week, player) do update
+    set score = greatest(s.score, excluded.score),
+        name = excluded.name,
+        color = excluded.color,
+        updated_at = now()
+  returning s.score into v_best;
+
+  -- 가끔(약 2%) 지난 기록과 지난 호출 수를 정리해요. 지우기 전에 명예의 전당(10번)에 옮겨 적어요
+  if random() < 0.02 then
+    perform public.game_hall_archive();
+    delete from public.game_scores where week < v_week - 28;
+    delete from public.game_calls where minute < now() - interval '10 minutes';
+  end if;
+
+  return json_build_object(
+    'rank', 1 + (select count(*) from public.game_scores where game = p_game and week = v_week and score > v_best),
+    'score', v_best,
+    'top', (
+      select json_build_object('name', name, 'score', score)
+      from public.game_scores
+      where game = p_game and week = v_week
+      order by score desc, updated_at
+      limit 1
+    )
+  );
+end;
+$$;
+
+-- 이번 주 TOP 10과 내 순위 (p_player는 내 비밀 번호). 누구의 해시도 돌려주지 않아요
+create or replace function public.game_board(p_game text, p_player text default null)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with week_scores as (
+    select player, name, color, score,
+           rank() over (order by score desc) as rank,
+           row_number() over (order by score desc, updated_at) as pos
+    from public.game_scores
+    where game = p_game and week = public.game_week()
+  )
+  select json_build_object(
+    'top', coalesce((
+      select json_agg(json_build_object('rank', rank, 'name', name, 'color', color, 'score', score, 'mine', player = public.game_player_hash(p_player)) order by pos)
+      from week_scores where pos <= 10
+    ), '[]'::json),
+    'me', (select json_build_object('rank', rank, 'score', score) from week_scores where player = public.game_player_hash(p_player))
+  );
+$$;
+
+-- 게임마다 이번 주 1위 (오락기 목록에 보여줘요). { "게임": { name, score } }
+create or replace function public.game_leaders()
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(json_object_agg(game, json_build_object('name', name, 'score', score)), '{}'::json)
+  from (
+    select distinct on (game) game, name, score
+    from public.game_scores
+    where week = public.game_week()
+    order by game, score desc, updated_at
+  ) leaders;
+$$;
+
+revoke all on function public.game_call_ok() from public, anon, authenticated;
+revoke all on function public.game_week() from public, anon, authenticated;
+revoke all on function public.game_leaders() from public, anon, authenticated;
+grant execute on function public.game_leaders() to anon, authenticated;
+revoke all on function public.game_score_max(text) from public, anon, authenticated;
+revoke all on function public.game_player_hash(text) from public, anon, authenticated;
+revoke all on function public.submit_game_score(text, text, text, text, int) from public, anon, authenticated;
+grant execute on function public.submit_game_score(text, text, text, text, int) to anon, authenticated;
+revoke all on function public.game_board(text, text) from public, anon, authenticated;
+grant execute on function public.game_board(text, text) to anon, authenticated;
+
+
+-- ── 10. 명예의 전당 (게임별·주별 1~3위, 계속 보관) ─────────
+-- 스코어 판(9번)은 4주가 지나면 지워져서, 지난주들의 1~3위를 여기에 옮겨 적어 계속 남겨요.
+-- 옮겨 적는 때: 명예의 전당을 읽을 때와 스코어 판을 정리하기 전. 주가 끝난 뒤 처음 읽는 사람이 옮겨 적어요 (예약 작업 없이).
+-- player는 스코어 판과 같은 해시라, 같은 사람이 몇 번 우승했는지 셀 수 있어요. 해시는 밖으로 돌려주지 않아요.
+-- 동점이면 그 점수를 먼저 낸 사람이 앞이에요 (스코어 판 순서와 같아요). 주마다 게임마다 3줄까지예요.
+create table if not exists public.game_hall (
+  game text not null check (public.game_score_max(game) is not null),
+  week date not null,
+  -- 순위. 동점이면 같은 순위예요 (공동 1위)
+  rank int not null check (rank between 1 and 3),
+  -- 그 주 판에서의 자리 (동점이면 먼저 낸 사람이 앞). 보여주는 순서예요
+  pos int not null check (pos between 1 and 3),
+  player text not null check (player ~ '^[0-9a-f]{64}$'),
+  name text not null check (char_length(name) between 1 and 20 and btrim(name) <> '' and name !~ '[[:cntrl:]]'),
+  color text not null check (color ~ '^#[0-9a-fA-F]{6}$'),
+  score int not null check (score > 0),
+  primary key (game, week, player),
+  unique (game, week, pos)
+);
+
+create index if not exists game_hall_week_idx on public.game_hall (game, week desc, pos);
+
+alter table public.game_hall enable row level security;
+revoke all on public.game_hall from anon, authenticated;
+
+-- 끝난 주 중 아직 안 옮긴 (게임, 주)의 1~3위를 옮겨 적어요. 이미 옮긴 주는 건드리지 않아요 (여러 번 불러도 같아요)
+create or replace function public.game_hall_archive()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.game_hall (game, week, rank, pos, player, name, color, score)
+  select game, week, rank, pos, player, name, color, score
+  from (
+    select s.game, s.week, s.player, s.name, s.color, s.score,
+           rank() over (partition by s.game, s.week order by s.score desc) as rank,
+           row_number() over (partition by s.game, s.week order by s.score desc, s.updated_at) as pos
+    from public.game_scores s
+    where s.week < public.game_week()
+      and s.score > 0
+      and not exists (select 1 from public.game_hall h where h.game = s.game and h.week = s.week)
+  ) ranked
+  where pos <= 3
+  on conflict do nothing;
+end;
+$$;
+
+-- 명예의 전당 줄마다: 그 게임에서 그 주까지 우승(1위)한 횟수, 1위면 그 주까지 몇 주 연속 1위인지
+create or replace function public.game_hall_rows(p_game text)
+returns table (week date, rank int, pos int, player text, name text, color text, score int, wins bigint, streak bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with firsts as (
+    -- 1위였던 주마다, 같은 사람의 이어진 주를 한 묶음으로 (주 - 순번*7일이 같으면 이어진 주)
+    select week, player,
+           week - (row_number() over (partition by player order by week))::int * 7 as run
+    from public.game_hall
+    where game = p_game and rank = 1
+  ),
+  streaks as (
+    select week, player, row_number() over (partition by player, run order by week) as streak
+    from firsts
+  )
+  select h.week, h.rank, h.pos, h.player, h.name, h.color, h.score,
+         (select count(*) from public.game_hall w where w.game = p_game and w.player = h.player and w.rank = 1 and w.week <= h.week) as wins,
+         coalesce(st.streak, 0) as streak
+  from public.game_hall h
+  left join streaks st on st.week = h.week and st.player = h.player and h.rank = 1
+  where h.game = p_game;
+$$;
+
+-- 이 게임의 명예의 전당: 최근 12주의 1~3위와 역대 최다 우승. p_player는 내 스코어 판 번호 (내 줄 표시용)
+create or replace function public.game_hall(p_game text, p_player text default null)
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  shown_weeks constant int := 12;
+  v_me text := public.game_player_hash(p_player);
+begin
+  if public.game_score_max(p_game) is null then
+    raise exception 'bad game';
+  end if;
+  perform public.game_hall_archive();
+  return json_build_object(
+    'weeks', coalesce((
+      select json_agg(json_build_object('week', w.week, 'rows', w.rows) order by w.week desc)
+      from (
+        select r.week,
+               json_agg(json_build_object('rank', r.rank, 'name', r.name, 'color', r.color, 'score', r.score,
+                                          'wins', r.wins, 'streak', r.streak, 'mine', r.player = v_me)
+                        order by r.pos) as rows
+        from public.game_hall_rows(p_game) r
+        where r.week in (select distinct week from public.game_hall where game = p_game order by week desc limit shown_weeks)
+        group by r.week
+      ) w
+    ), '[]'::json),
+    -- 역대 최다 우승: 횟수가 같으면 먼저 그 횟수에 닿은 사람. 이름은 가장 최근 우승 때 이름
+    'most', (
+      select json_build_object('name', name, 'color', color, 'wins', wins, 'mine', player = v_me)
+      from (
+        select distinct on (player) player, name, color, wins, week
+        from public.game_hall_rows(p_game)
+        where rank = 1
+        order by player, week desc
+      ) best
+      -- best.week는 마지막 우승 주 = 지금 횟수에 닿은 주
+      order by wins desc, week
+      limit 1
+    )
+  );
+end;
+$$;
+
+-- 게임마다 지난주 1위 (오락기 목록에 보여줘요). { "게임": { name, score, wins } }
+create or replace function public.game_last_champions()
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+begin
+  perform public.game_hall_archive();
+  return (
+    select coalesce(json_object_agg(game, json_build_object('name', name, 'score', score, 'wins', wins)), '{}'::json)
+    from (
+      select distinct on (g.game) g.game, r.name, r.score, r.wins
+      from (select distinct game from public.game_hall where week = public.game_week() - 7) g
+      cross join lateral public.game_hall_rows(g.game) r
+      where r.week = public.game_week() - 7 and r.rank = 1
+      order by g.game, r.pos
+    ) champs
+  );
+end;
+$$;
+
+revoke all on function public.game_hall_archive() from public, anon, authenticated;
+revoke all on function public.game_hall_rows(text) from public, anon, authenticated;
+revoke all on function public.game_hall(text, text) from public, anon, authenticated;
+grant execute on function public.game_hall(text, text) to anon, authenticated;
+revoke all on function public.game_last_champions() from public, anon, authenticated;
+grant execute on function public.game_last_champions() to anon, authenticated;

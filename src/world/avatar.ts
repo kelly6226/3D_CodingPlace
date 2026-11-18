@@ -4,8 +4,8 @@ import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { actionById, langById, statusById, type ActionDef, type ActionId } from '../config';
 import { sameOutfit, type Outfit } from '../look';
 import type { PeerState } from '../net/types';
-import { FlippedTable, ThrownLaptop, makeLaptopMesh, makeStars, type Prop } from './actionProps';
-import { FLIP_RELEASE_S, THROW_RELEASE_S, applyActionPose, emptyPose, faintStarsAt } from './actions';
+import { FlippedTable, FlyingDebris, ThrownLaptop, makeLaptopMesh, makeStars, type DebrisKind, type Prop } from './actionProps';
+import { FLIP_RELEASE_S, THROW_RELEASE_S, applyActionPose, emptyPose, faintStarsAt, hitTimesOf } from './actions';
 import { seatById, type Seat } from './layout';
 import { bakeStatic, type Baked } from './bake';
 import { HALO_Y, buildBack, buildHair, buildHat, buildNeck, hatCoversHair } from './outfit';
@@ -23,6 +23,9 @@ const FLIP_TABLE_REACH = 0.7;
 const FLIP_TABLE_WAIST_Y = 0.55;
 /** 앉아서 뒤집을 때 진짜 책상 윗면과 겹쳐 깜빡이지 않게 띄우는 높이 */
 const FLIP_TABLE_LIFT = 0.06;
+/** 물건 더미를 내리치는 자리: 아바타 앞으로 이만큼, 이 높이 (stress.ts 내리치는 물건 윗면쯤) */
+const SMASH_REACH = 0.62;
+const SMASH_Y = 0.42;
 
 const geo = {
   leg: new THREE.CapsuleGeometry(0.075, 0.17, 4, 10),
@@ -96,7 +99,11 @@ export class Avatar {
   // 바지·신발·포인트 색은 사람마다 달라서 아바타마다 하나씩 가져요
   private pantsMat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
   private shoeMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
-  private accentMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  // 머리끈·모자·등·목 장식 색 (칸마다 따로)
+  private tieMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  private hatMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  private backMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  private neckMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
   // 꾸미기 장식이 놓이는 자리 (모양은 world/outfit.ts)
   private hatSlot = new THREE.Group();
   private hairSlot = new THREE.Group();
@@ -108,7 +115,17 @@ export class Avatar {
   private wings: THREE.Object3D[] = [];
 
   // 큰 동작 (춤, 던지기, 뒤집기, 기절)
-  private act: { def: ActionDef; start: number; released: boolean } | null = null;
+  private act: {
+    def: ActionDef;
+    start: number;
+    released: boolean;
+    /** 물건에 닿는 시각들(초)과 지금까지 닿은 횟수 (샌드백 치기, 키보드 부수기) */
+    hitTimes: number[];
+    hits: number;
+    onHit?: () => void;
+    /** 닿을 때마다 튀는 조각 (내리치기) */
+    debris?: DebrisKind;
+  } | null = null;
   private props: Prop[] = [];
   private stars: THREE.Group | null = null;
   private heldLaptop: THREE.Group | null = null;
@@ -315,15 +332,18 @@ export class Avatar {
   private applyOutfit(o: Outfit) {
     this.pantsMat.color.set(o.pants);
     this.shoeMat.color.set(o.shoes);
-    this.accentMat.color.set(o.accent);
+    this.tieMat.color.set(o.tieColor);
+    this.hatMat.color.set(o.hatColor);
+    this.backMat.color.set(o.backColor);
+    this.neckMat.color.set(o.neckColor);
     const dress = (slot: THREE.Group, item: THREE.Group | null) => {
       slot.clear();
       if (item) slot.add(item);
     };
-    dress(this.hatSlot, buildHat(o.hat, this.accentMat));
-    dress(this.hairSlot, buildHair(o.hairStyle, this.hairMat, this.accentMat, hatCoversHair(o.hat)));
-    dress(this.backSlot, buildBack(o.back, this.accentMat));
-    dress(this.neckSlot, buildNeck(o.neck, this.accentMat));
+    dress(this.hatSlot, buildHat(o.hat, this.hatMat));
+    dress(this.hairSlot, buildHair(o.hairStyle, this.hairMat, this.tieMat, hatCoversHair(o.hat)));
+    dress(this.backSlot, buildBack(o.back, this.backMat));
+    dress(this.neckSlot, buildNeck(o.neck, this.neckMat));
     // 매 프레임 움직이는 장식은 이름으로 찾아 둠
     this.propeller = this.hatSlot.getObjectByName('spin') ?? null;
     this.halo = this.hatSlot.getObjectByName('halo') ?? null;
@@ -331,13 +351,18 @@ export class Avatar {
     this.wings = ['wingL', 'wingR'].flatMap((n) => this.backSlot.getObjectByName(n) ?? []);
   }
 
-  /** 큰 동작을 시작함. 머리 위에 말풍선(이모지+한마디)도 같이 띄우고, 하는 동안은 걷지 않고 제자리에 있어요 */
-  perform(id: ActionId) {
+  /**
+   * 큰 동작을 시작함. 머리 위에 말풍선(이모지+한마디)도 같이 띄우고, 하는 동안은 걷지 않고 제자리에 있어요.
+   * 스트레스 해소 동작은 장소마다 치는 물건이 달라서 말풍선과 튀는 조각을 opts로 받아요.
+   * opts.onHit은 동작이 물건에 닿을 때마다 불려요 (아바타 시간 기준이라 화면이 느려도 주먹과 맞아요)
+   */
+  perform(id: ActionId, opts: { onHit?: () => void; bubble?: { emoji: string; line: string }; debris?: DebrisKind } = {}) {
     const def = actionById(id);
     if (!def) return;
     this.endAct();
-    this.act = { def, start: this.t, released: false };
-    this.emote(def.emoji, def.line);
+    this.act = { def, start: this.t, released: false, hitTimes: hitTimesOf(id), hits: 0, onHit: opts.onHit, debris: opts.debris };
+    const bubble = opts.bubble ?? def;
+    this.emote(bubble.emoji, bubble.line);
     // 서 있는 채로 노트북을 던질 때는 손에 노트북을 듦
     if (id === 'throw' && !this.laptop) {
       this.heldLaptop = makeLaptopMesh();
@@ -385,7 +410,18 @@ export class Avatar {
       act.released = true;
       this.flipTable(act.def.seconds - elapsed);
     }
+    while (act.hits < act.hitTimes.length && elapsed >= act.hitTimes[act.hits]) {
+      act.hits++;
+      if (act.debris) this.scatterDebris(act.debris);
+      act.onHit?.();
+    }
     if (this.stars) this.stars.visible = faintStarsAt(elapsed, act.def.seconds);
+  }
+
+  private scatterDebris(kind: DebrisKind) {
+    const p = this.root.position;
+    const at = new THREE.Vector3(p.x + Math.sin(this.yaw) * SMASH_REACH, SMASH_Y, p.z + Math.cos(this.yaw) * SMASH_REACH);
+    this.addProp(new FlyingDebris(at, kind));
   }
 
   private addProp(p: Prop) {
@@ -667,7 +703,7 @@ export class Avatar {
     this.hairMat.dispose();
     this.pantsMat.dispose();
     this.shoeMat.dispose();
-    this.accentMat.dispose();
+    for (const m of [this.tieMat, this.hatMat, this.backMat, this.neckMat]) m.dispose();
   }
 
   // ── 매 프레임 ───────────────────────────────────
