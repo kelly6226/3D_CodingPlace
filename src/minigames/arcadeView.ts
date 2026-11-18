@@ -7,7 +7,7 @@ import { h } from '../ui/dom';
 import { GAMES, type GameDef, type GameId } from './catalog';
 import { bestScore, recordScore, scoreKey, type RecordOutcome } from './records';
 import { RoundView } from './round';
-import { ScoreApi, ScoreError, type Board, type Champion, type Hall, type HallRow, type Leader, type Player, type SubmitResult } from './scoreApi';
+import { ScoreApi, ScoreError, type Board, type BoardRow, type Champion, type Hall, type HallRow, type Leader, type Player, type SubmitResult } from './scoreApi';
 import { spriteIcon } from './sprites';
 
 const SESSION_LINE_REFRESH_MS = 1000;
@@ -30,6 +30,15 @@ const BOARD_TABS: readonly { id: BoardTab; label: string; sub: string }[] = [
   // 몇 주까지 보여 주는지는 서버(schema.sql game_hall의 shown_weeks)가 정해서 여기 적지 않아요
   { id: 'hall', label: '명예의 전당', sub: '끝난 주마다 1~3위가 여기 남아요. 최근 주부터 보여요.' },
 ];
+
+const EMPTY_CROWN_PX = 40;
+/** 명예의 전당에 오르는 순위 (schema.sql game_hall과 같아요) */
+const HALL_PLACES = 3;
+const HOUR_MS = 3600e3;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+/** 한국은 서머타임이 없어서 KST로 고정해요 (together/session.ts와 같아요) */
+const KST_OFFSET_MS = 9 * HOUR_MS;
 
 /** 이만큼 이어지거나 쌓여야 이름 옆에 붙여요 (1번은 우승 자체라 따로 안 적어요) */
 const BADGE_MIN = 2;
@@ -231,13 +240,21 @@ export class ArcadeView {
     if (focusTab) (tabs.querySelector('[aria-selected="true"]') as HTMLElement | null)?.focus();
     let content: HTMLElement;
     try {
-      content = tab === 'week' ? renderBoard(def, await this.loadBoard(scores, def)) : renderHall(def, await scores.hall(def.id, scoreKey()));
+      content = tab === 'week' ? renderBoard(def, await this.loadBoard(scores, def)) : await this.loadHall(scores, def);
     } catch {
       if (view === this.viewId) panel.replaceChildren(h('p', { class: 'arcade-loading' }, '순위를 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.'));
       return;
     }
     if (view !== this.viewId) return;
     panel.replaceChildren(content);
+  }
+
+  /** 명예의 전당. 아직 끝난 주가 없으면 이번 주 순위를 같이 읽어서 '이대로 끝나면'을 보여 줘요 */
+  private async loadHall(scores: ScoreApi, def: GameDef): Promise<HTMLElement> {
+    const hall = await scores.hall(def.id, scoreKey());
+    if (hall.weeks.length > 0) return renderHall(def, hall);
+    const board = await this.loadBoard(scores, def).catch(() => null);
+    return renderHallEmpty(def, board, Date.now());
   }
 
   /** 이번 주 순위. 방금 올린 점수가 있으면 올라간 뒤에 읽어요 */
@@ -448,8 +465,61 @@ function championRow(def: GameDef, champion: Champion, onOpen: () => void): HTML
   );
 }
 
+/** 순위가 새로 시작하는 다음 월요일 0시(KST) */
+function nextWeekStart(now: number): number {
+  const kst = now + KST_OFFSET_MS;
+  const daysSinceMonday = (new Date(kst).getUTCDay() + 6) % 7;
+  const thisMonday = Math.floor(kst / DAY_MS) * DAY_MS - daysSinceMonday * DAY_MS;
+  return thisMonday + WEEK_MS - KST_OFFSET_MS;
+}
+
+/** 남은 시간: 하루가 넘으면 '4일 11시간', 한 시간이 넘으면 '3시간 20분', 아니면 '12분' */
+function remainingText(ms: number): string {
+  const days = Math.floor(ms / DAY_MS);
+  const hours = Math.floor((ms % DAY_MS) / HOUR_MS);
+  const minutes = Math.max(1, Math.floor((ms % HOUR_MS) / 60e3));
+  if (days > 0) return `${days}일 ${hours}시간`;
+  if (hours > 0) return `${hours}시간 ${minutes}분`;
+  return `${minutes}분`;
+}
+
+/** 지금 순위에서 내 자리: 이대로 끝나면 명예의 전당에 오르는지 */
+function myPlaceLine(board: Board, podium: readonly BoardRow[]): string | null {
+  if (!board.me) return null;
+  if (podium.some((row) => row.mine)) return `지금 ${board.me.rank}위예요. 이대로 끝나면 내 이름도 올라가요.`;
+  // 동점이면 먼저 낸 사람이 올라가요 (schema.sql game_hall_archive의 pos)
+  if (board.me.rank <= HALL_PLACES) return `지금 공동 ${board.me.rank}위예요. 동점이면 먼저 낸 사람이 올라가니, 점수를 조금만 더 올려 보세요.`;
+  return `나는 지금 ${board.me.rank}위예요. ${HALL_PLACES}위 안에 들면 이름이 남아요.`;
+}
+
+/** 아직 끝난 주가 없을 때: 언제 처음 이름이 오르는지와, 지금 순위 그대로라면 누가 오르는지 */
+function renderHallEmpty(def: GameDef, board: Board | null, now: number): HTMLElement {
+  const end = nextWeekStart(now);
+  const endDay = new Date(end + KST_OFFSET_MS);
+  // 서버가 동점을 먼저 낸 순서로 보내서, 앞에서 세 줄이 그대로 명예의 전당에 오르는 줄이에요
+  const podium = board?.top.slice(0, HALL_PLACES) ?? [];
+  const myPlace = board && myPlaceLine(board, podium);
+  return h(
+    'div',
+    { class: 'hall-empty' },
+    spriteIcon('crown', EMPTY_CROWN_PX),
+    h('p', { class: 'he-title' }, '명예의 전당이 아직 비어 있어요'),
+    h('p', { class: 'he-text' }, `${endDay.getUTCMonth() + 1}월 ${endDay.getUTCDate()}일(월) 0시에 이번 주가 끝나면, 이번 주 1~${HALL_PLACES}위가 처음으로 이름을 올려요.`),
+    h('p', { class: 'he-left' }, `남은 시간 ${remainingText(end - now)}`),
+    board &&
+      h(
+        'section',
+        { class: 'he-preview', 'aria-labelledby': 'he-preview-title' },
+        h('h3', { id: 'he-preview-title' }, '지금 순위 그대로라면'),
+        podium.length > 0
+          ? h('ol', { class: 'hs-table' }, ...podium.map((row) => scoreRow({ ...row, score: def.formatScore(row.score), badge: null })))
+          : h('p', { class: 'he-none' }, '이번 주 기록이 아직 없어요. 지금 한 판 하면 1위예요.'),
+        myPlace ? h('p', { class: 'board-me' }, myPlace) : null,
+      ),
+  );
+}
+
 function renderHall(def: GameDef, hall: Hall): HTMLElement {
-  if (hall.weeks.length === 0) return h('p', { class: 'arcade-loading' }, '아직 끝난 주가 없어요. 이번 주 1~3위가 첫 주인공이 돼요');
   return h(
     'div',
     {},
