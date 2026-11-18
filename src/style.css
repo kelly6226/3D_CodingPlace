@@ -3110,19 +3110,6 @@ button.place-name {
   padding: 0;
   list-style: none;
 }
-.arcade-game {
-  display: flex;
-  gap: 12px;
-  width: 100%;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  text-align: left;
-}
-.arcade-game:hover {
-  border-color: rgba(242, 180, 90, 0.5);
-}
 /* 게임 그림 (도트를 캔버스로 그려요) */
 .ag-icon {
   flex: none;
@@ -3143,28 +3130,6 @@ button.place-name {
 .ag-how {
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--muted);
-  word-break: keep-all;
-  text-wrap: pretty;
-}
-.ag-best {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--amber);
-}
-.ag-leader {
-  font-size: 12px;
-  color: var(--muted);
-  word-break: keep-all;
-  text-wrap: pretty;
-}
-.ag-leader:empty {
-  display: none;
-}
-.arcade-foot {
-  margin: 12px 2px 0;
-  font-size: 11.5px;
-  line-height: 1.6;
   color: var(--muted);
   word-break: keep-all;
   text-wrap: pretty;
@@ -3217,7 +3182,9 @@ button.place-name {
   justify-content: center;
   padding: 24px;
   border-radius: 12px;
-  background: rgba(5, 7, 14, 0.8);
+  /* 뒤의 게임 안내 글씨가 비쳐 결과와 겹쳐 읽히지 않게 */
+  background: rgba(5, 7, 14, 0.92);
+  backdrop-filter: blur(3px);
   text-align: center;
 }
 .arcade-result p {
@@ -3260,29 +3227,6 @@ button.place-name {
     transform: scale(1);
   }
 }
-/* 게임마다 🏆 순위 버튼 (카드 오른쪽 위) */
-.arcade-item {
-  position: relative;
-}
-.arcade-item .arcade-game {
-  padding-right: 58px;
-}
-.arcade-rank-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--panel-solid);
-  font-size: 18px;
-}
-.arcade-rank-btn:hover {
-  border-color: rgba(242, 180, 90, 0.5);
-}
 .ar-board {
   margin-top: 8px !important;
   font-size: 12.5px;
@@ -3293,40 +3237,309 @@ button.place-name {
   white-space: pre-line;
   text-wrap: balance;
 }
-/* 스코어 판 */
-.arcade-board-sub {
-  margin: 0 0 10px;
+/* 게임 하나 = 카드 하나. 위쪽(그림·제목)을 누르면 시작, 아래 줄은 이번 주 1위와 순위 버튼 */
+.arcade-item {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.arcade-item:has(.arcade-game:hover) {
+  border-color: rgba(242, 180, 90, 0.45);
+}
+/* 키보드로 고를 때는 버튼 반쪽이 아니라 카드 전체에 테두리 (스크롤 칸이라 안쪽에 그려요) */
+.arcade-item:has(.arcade-game:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--amber);
+}
+.arcade-body .arcade-game:focus-visible {
+  outline: none;
+}
+.arcade-game {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  text-align: left;
+}
+.ag-title {
+  font-size: 15px;
+}
+.ag-best {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.ag-best.empty {
+  font-weight: 500;
+  color: var(--muted);
+}
+.ag-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-top: 1px solid var(--line);
+}
+.ag-leader {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12.5px;
   color: var(--muted);
-  word-break: keep-all;
-  text-wrap: balance;
 }
-.board-list {
+.ag-leader b {
+  color: var(--fg);
+}
+.ag-rank {
+  flex: none;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.ag-rank:hover {
+  border-color: rgba(242, 180, 90, 0.5);
+}
+.arcade-foot {
+  margin: 14px 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: pretty;
+}
+/* 목록 맨 위 '지난주 우승': 탕비실 벽에 붙은 트로피 진열판 */
+.arcade-champs {
+  margin-bottom: 10px;
+  padding: 10px 12px 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(242, 180, 90, 0.3);
+  background: rgba(242, 180, 90, 0.06);
+}
+.champs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--amber);
+}
+.champs-head canvas,
+.hall-most canvas,
+.champ canvas {
+  flex: none;
+  image-rendering: pixelated;
+}
+.champs-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.champ {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+}
+.champ-game {
+  flex: none;
+  color: var(--muted);
+}
+.champ-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.champ:hover .champ-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.champ-wins {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amber);
+}
+/* 순위 화면: 이번 주 / 명예의 전당 */
+.board-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.board-tabs [role='tab'] {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.board-tabs [aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fg);
+}
+.arcade-board-sub {
+  margin: 0 2px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: pretty;
+}
+/* 순위표: 오락실 최고 기록 화면처럼 순위 숫자, 이름, 점선, 점수 */
+.hs-table {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   margin: 0 0 10px;
   padding: 0;
   list-style: none;
 }
-.board-list li {
+.hs-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 9px 10px;
   border-radius: 10px;
-  background: var(--panel-2);
   font-size: 14px;
 }
-.board-list li.mine {
+.hs-row.mine {
   background: rgba(242, 180, 90, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(242, 180, 90, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(242, 180, 90, 0.45);
 }
-.bd-rank {
+.hs-rank {
+  flex: none;
   width: 22px;
   text-align: right;
   font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+/* 금·은·동 (미니게임 도트 그림과 같은 팔레트) */
+.hs-row.r1 .hs-rank {
+  color: var(--amber);
+}
+.hs-row.r2 .hs-rank {
+  color: #c9c5bd;
+}
+.hs-row.r3 .hs-rank {
+  color: #d49a6a;
+}
+.hs-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hs-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.hs-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.hs-row.r1 .hs-name,
+.hs-row.r2 .hs-name,
+.hs-row.r3 .hs-name {
   font-weight: 800;
+}
+/* 이름과 점수를 잇는 점선 (남는 폭만큼 늘어나요) */
+.hs-lead {
+  flex: 1 1 12px;
+  min-width: 12px;
+  align-self: flex-end;
+  margin-bottom: 6px;
+  border-bottom: 2px dotted rgba(255, 255, 255, 0.16);
+}
+.hs-score {
+  flex: none;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.hs-row.r1 .hs-score {
+  color: var(--amber);
+}
+.hs-me {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--amber);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--amber-ink);
+}
+.hs-badge {
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.board-me {
+  margin: 0 2px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.hall-most {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 180, 90, 0.3);
+  background: rgba(242, 180, 90, 0.06);
+  font-size: 14px;
+}
+.hm-label {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.hm-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-wins {
+  flex: none;
+  margin-left: auto;
+  font-weight: 800;
+  color: var(--amber);
+}
+.hall-week h3 {
+  margin: 14px 4px 2px;
+  font-size: 12.5px;
+  font-weight: 700;
   color: var(--muted);
 }
 .bd-dot {
@@ -3334,56 +3547,6 @@ button.place-name {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-}
-.bd-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-.bd-score {
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: var(--amber);
-}
-.board-me {
-  margin: 0 0 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--amber);
-}
-/* 순위 화면 탭과 명예의 전당 */
-.board-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.hall-most {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(242, 180, 90, 0.1);
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--amber);
-  word-break: keep-all;
-}
-.hall-week h3 {
-  margin: 12px 2px 6px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--muted);
-}
-.hall-badge {
-  flex: none;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--amber);
 }
 /* 화면에는 안 보이고 스크린 리더만 읽는 글자 */
 .sr-only {

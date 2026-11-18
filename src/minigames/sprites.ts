@@ -378,6 +378,25 @@ const ART = {
     "................",
     "................",
   ],
+  // 오락기 '지난주 우승'과 명예의 전당 머리에 쓰는 왕관
+  crown: [
+    "................",
+    "................",
+    "................",
+    ".kk....kk....kk.",
+    "kyyk..kyyk..kyyk",
+    "kyak.kyaayk.kayk",
+    ".kak.kaaaak.kak.",
+    ".kaakaayyaakaak.",
+    ".kaaaayaayaaaak.",
+    ".kaaraayyaaraak.",
+    ".kaaaaaaaaaaaak.",
+    ".kAAAAAAAAAAAAk.",
+    ".kkkkkkkkkkkkkk.",
+    "................",
+    "................",
+    "................",
+  ],
 } satisfies Record<string, readonly string[]>;
 
 export type SpriteName = keyof typeof ART;

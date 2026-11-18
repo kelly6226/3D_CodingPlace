@@ -13,6 +13,9 @@ import { spriteIcon } from './sprites';
 const SESSION_LINE_REFRESH_MS = 1000;
 const LIST_ICON_PX = 44;
 const HEAD_ICON_PX = 22;
+/** '지난주 우승' 줄에 붙는 게임 그림과 왕관 */
+const CHAMP_ICON_PX = 20;
+const CROWN_PX = 22;
 /** 목록을 다시 열 때 이 시간 안이면 이번 주 1위를 다시 묻지 않아요 */
 const LEADERS_FRESH_MS = 30_000;
 
@@ -23,12 +26,11 @@ export type ArcadeScreen = { kind: 'list' } | { kind: 'play' | 'board'; game: Ga
 type BoardTab = 'week' | 'hall';
 
 const BOARD_TABS: readonly { id: BoardTab; label: string; sub: string }[] = [
-  { id: 'week', label: '🏆 이번 주', sub: '이번 주 TOP 10 · 매주 월요일 0시(KST)에 새로 시작해요' },
+  { id: 'week', label: '이번 주', sub: '이번 주 TOP 10이에요. 매주 월요일 0시(KST)에 새로 시작해요.' },
   // 몇 주까지 보여 주는지는 서버(schema.sql game_hall의 shown_weeks)가 정해서 여기 적지 않아요
-  { id: 'hall', label: '🏛 명예의 전당', sub: '지난 주마다 1~3위가 계속 남아요 · 최근 주부터' },
+  { id: 'hall', label: '명예의 전당', sub: '끝난 주마다 1~3위가 여기 남아요. 최근 주부터 보여요.' },
 ];
 
-const MEDALS = ['🥇', '🥈', '🥉'];
 /** 이만큼 이어지거나 쌓여야 이름 옆에 붙여요 (1번은 우승 자체라 따로 안 적어요) */
 const BADGE_MIN = 2;
 
@@ -68,15 +70,10 @@ function rankLine(def: GameDef, mine: SubmitResult): string {
   return `🏆 이번 주 전체 ${mine.rank}위${top}`;
 }
 
-function leaderLine(def: GameDef, leader: Leader | undefined): string {
-  return leader ? `👑 이번 주 1위 ${leader.name} · ${def.formatScore(leader.score)}` : '👑 이번 주 1위 자리가 비어 있어요';
-}
-
-/** 지난주 1위가 없으면 빈 줄 (목록에서 숨겨요) */
-function championLine(def: GameDef, champion: Champion | undefined): string {
-  if (!champion) return '';
-  const wins = champion.wins >= BADGE_MIN ? ` · 🏆 ${champion.wins}회 우승` : '';
-  return `🏛 지난주 1위 ${champion.name} · ${def.formatScore(champion.score)}${wins}`;
+/** 목록 카드 아래 이번 주 1위 한 줄 */
+function leaderLine(def: GameDef, leader: Leader | undefined): (Node | string)[] {
+  if (!leader) return ['이번 주 1위 자리가 비어 있어요'];
+  return ['이번 주 1위 ', h('b', {}, leader.name), ` ${def.formatScore(leader.score)}`];
 }
 
 function submitFailureLine(e: unknown): string {
@@ -148,43 +145,48 @@ export class ArcadeView {
   showList() {
     const view = this.nextView({ kind: 'list' });
     this.body.replaceChildren(
-      h(
-        'ul',
-        { class: 'arcade-list' },
-        ...GAMES.map((def) => {
-          const best = bestScore(def.id);
-          return h(
-            'li',
-            { class: 'arcade-item' },
-            h(
-              'button',
-              { type: 'button', class: 'arcade-game', 'aria-label': `${def.title} 시작`, 'aria-describedby': `ag-how-${def.id} ag-best-${def.id}${this.scores ? ` ag-leader-${def.id} ag-champ-${def.id}` : ''}`, onclick: () => void this.play(def) },
-              h('span', { class: 'ag-icon' }, spriteIcon(def.icon, LIST_ICON_PX)),
-              h(
-                'span',
-                { class: 'ag-text' },
-                h('b', {}, def.title),
-                h('span', { class: 'ag-how', id: `ag-how-${def.id}` }, def.tagline),
-                h('span', { class: 'ag-best', id: `ag-best-${def.id}` }, best === null ? '아직 기록 없음' : `내 최고 기록 ${def.formatScore(best)}`),
-                this.scores && h('span', { class: 'ag-leader', id: `ag-leader-${def.id}` }, ''),
-                this.scores && h('span', { class: 'ag-leader', id: `ag-champ-${def.id}` }, ''),
-              ),
-            ),
-            this.scores && h('button', { type: 'button', class: 'arcade-rank-btn', 'aria-label': `${def.title} 이번 주 순위`, onclick: () => void this.showBoard(def) }, '🏆'),
-          );
-        }),
-      ),
+      // 지난주 우승자가 있을 때만 보여요 (showChampions가 채워요)
+      ...(this.scores ? [h('section', { class: 'arcade-champs', id: 'arcade-champs', hidden: true, 'aria-labelledby': 'champs-title' })] : []),
+      h('ul', { class: 'arcade-list' }, ...GAMES.map((def) => this.gameItem(def))),
       h(
         'p',
         { class: 'arcade-foot' },
-        ...(this.scores
-          ? ['🏆 점수를 내면 닉네임과 점수가 이번 주 스코어 판에 올라가요. 한 사람(브라우저)당 이번 주 최고 점수 하나만 올라가요.', h('br'), '스코어 판은 매주 월요일 0시(KST)에 새로 시작하고, 그 주의 1~3위는 🏛 명예의 전당에 계속 남아요. 내 최고 기록은 이 브라우저에만 남아요.']
-          : ['기록은 이 브라우저에만 남아요.']),
+        this.scores
+          ? '점수를 내면 닉네임과 이번 주 최고 점수가 순위에 올라가요(브라우저마다 한 줄). 순위는 매주 월요일 0시(KST)에 새로 시작하고, 1~3위는 명예의 전당에 남아요.'
+          : '기록은 이 브라우저에만 남아요.',
       ),
     );
     (this.body.querySelector('.arcade-game') as HTMLElement | null)?.focus();
     void this.showLeaders(view);
     void this.showChampions(view);
+  }
+
+  /** 목록의 게임 하나: 누르면 시작, 아래 줄에 이번 주 1위와 순위 버튼 */
+  private gameItem(def: GameDef): HTMLElement {
+    const best = bestScore(def.id);
+    return h(
+      'li',
+      { class: 'arcade-item' },
+      h(
+        'button',
+        { type: 'button', class: 'arcade-game', 'aria-label': `${def.title} 시작`, 'aria-describedby': `ag-how-${def.id} ag-best-${def.id}`, onclick: () => void this.play(def) },
+        h('span', { class: 'ag-icon' }, spriteIcon(def.icon, LIST_ICON_PX)),
+        h(
+          'span',
+          { class: 'ag-text' },
+          h('b', { class: 'ag-title' }, def.title),
+          h('span', { class: 'ag-how', id: `ag-how-${def.id}` }, def.tagline),
+          h('span', { class: `ag-best${best === null ? ' empty' : ''}`, id: `ag-best-${def.id}` }, best === null ? '아직 기록이 없어요' : `내 최고 ${def.formatScore(best)}`),
+        ),
+      ),
+      this.scores &&
+        h(
+          'div',
+          { class: 'ag-foot' },
+          h('span', { class: 'ag-leader', id: `ag-leader-${def.id}` }),
+          h('button', { type: 'button', class: 'ag-rank', 'aria-label': `${def.title} 순위 보기`, onclick: () => void this.showBoard(def) }, '순위'),
+        ),
+    );
   }
 
   async play(def: GameDef) {
@@ -279,12 +281,11 @@ export class ArcadeView {
     }
     if (view !== this.viewId) return;
     for (const def of GAMES) {
-      const line = document.getElementById(`ag-leader-${def.id}`);
-      if (line) line.textContent = leaderLine(def, leaders.byGame[def.id]);
+      document.getElementById(`ag-leader-${def.id}`)?.replaceChildren(...leaderLine(def, leaders.byGame[def.id]));
     }
   }
 
-  /** 목록 카드마다 지난주 1위를 채워요 (없거나 못 받아 오면 그 줄은 숨겨요) */
+  /** 목록 맨 위 '지난주 우승'을 채워요. 우승자가 없거나 못 받아 오면 숨긴 채로 둬요 */
   private async showChampions(view: number) {
     if (!this.scores) return;
     if (!this.champions) {
@@ -295,10 +296,15 @@ export class ArcadeView {
       }
     }
     if (view !== this.viewId) return;
-    for (const def of GAMES) {
-      const line = document.getElementById(`ag-champ-${def.id}`);
-      if (line) line.textContent = championLine(def, this.champions[def.id]);
-    }
+    const box = document.getElementById('arcade-champs');
+    const champions = this.champions;
+    const rows = GAMES.flatMap((def) => {
+      const champion = champions[def.id];
+      return champion ? [championRow(def, champion, () => void this.showBoard(def, 'hall'))] : [];
+    });
+    if (!box || rows.length === 0) return;
+    box.replaceChildren(h('h3', { class: 'champs-head', id: 'champs-title' }, spriteIcon('crown', CROWN_PX), '지난주 우승'), h('ul', { class: 'champs-list' }, ...rows));
+    box.hidden = false;
   }
 
   /** 한 판이 끝나면: 내 기록에 남기고, 결과를 보여주고, 스코어 판에 올려요 */
@@ -319,7 +325,7 @@ export class ArcadeView {
         'div',
         { class: 'modal-actions' },
         h('button', { type: 'button', class: 'ghost', onclick: () => this.showList() }, '다른 게임'),
-        this.scores && h('button', { type: 'button', class: 'ghost', onclick: () => void this.showBoard(def) }, '🏆 순위'),
+        this.scores && h('button', { type: 'button', class: 'ghost', onclick: () => void this.showBoard(def) }, '순위'),
         again,
       ),
     );
@@ -348,21 +354,8 @@ function renderBoard(def: GameDef, board: Board): HTMLElement {
   return h(
     'div',
     {},
-    h(
-      'ol',
-      { class: 'board-list' },
-      ...board.top.map((row) =>
-        h(
-          'li',
-          { class: row.mine ? 'mine' : undefined },
-          h('span', { class: 'bd-rank' }, String(row.rank)),
-          h('i', { class: 'bd-dot', style: `background:${row.color}`, 'aria-hidden': 'true' }),
-          h('span', { class: 'bd-name' }, row.mine ? `${row.name} (나)` : row.name),
-          h('span', { class: 'bd-score' }, def.formatScore(row.score)),
-        ),
-      ),
-    ),
-    board.me && !meInTop && h('p', { class: 'board-me' }, `나는 ${board.me.rank}위 · ${def.formatScore(board.me.score)}`),
+    h('ol', { class: 'hs-table' }, ...board.top.map((row) => scoreRow({ ...row, score: def.formatScore(row.score), badge: null }))),
+    board.me && !meInTop && h('p', { class: 'board-me' }, `나는 ${board.me.rank}위, ${def.formatScore(board.me.score)}`),
   );
 }
 
@@ -378,7 +371,6 @@ function boardTabs(current: BoardTab, onPick: (tab: BoardTab) => void): HTMLElem
           type: 'button',
           role: 'tab',
           id: `board-tab-${t.id}`,
-          class: 'chip-sm' + (t.id === current ? ' on' : ''),
           'aria-selected': String(t.id === current),
           'aria-controls': 'board-panel',
           onclick: () => {
@@ -397,12 +389,63 @@ function weekLabel(week: string): string {
   return `${month}월 ${day}일 주`;
 }
 
-/** 1위 줄 옆 한마디: 연속 우승이 먼저, 아니면 몇 번째 우승인지. 좁은 화면에서 이름이 잘리지 않게 짧게 */
-function hallBadge(row: HallRow): { text: string; label: string } | null {
+/** 1위 이름 아래 한마디: 연속 우승이 먼저, 아니면 몇 번째 우승인지 */
+function hallBadge(row: HallRow): string | null {
   if (row.rank !== 1) return null;
-  if (row.streak >= BADGE_MIN) return { text: `🔥 ${row.streak}연속`, label: `${row.streak}주 연속 우승` };
-  if (row.wins >= BADGE_MIN) return { text: `🏆 ${row.wins}번째`, label: `${row.wins}번째 우승` };
+  if (row.streak >= BADGE_MIN) return `${row.streak}주 연속 우승`;
+  if (row.wins >= BADGE_MIN) return `${row.wins}번째 우승`;
   return null;
+}
+
+interface ScoreRowParts {
+  rank: number;
+  name: string;
+  color: string;
+  mine: boolean;
+  /** 사람이 읽는 점수 ('손 12개 막음') */
+  score: string;
+  /** 이름 아래 작은 줄 (명예의 전당의 연속·몇 번째 우승) */
+  badge: string | null;
+}
+
+/**
+ * 순위표 한 줄. 이번 주 순위와 명예의 전당이 같은 모양이에요 (오락실 최고 기록 화면처럼 이름과 점수를 점선으로 이어요).
+ * 1~3위는 순위 숫자를 금·은·동 색으로 칠해요
+ */
+function scoreRow(p: ScoreRowParts): HTMLElement {
+  const podium = p.rank <= 3 ? ` r${p.rank}` : '';
+  return h(
+    'li',
+    { class: `hs-row${podium}${p.mine ? ' mine' : ''}` },
+    h('span', { class: 'hs-rank' }, String(p.rank), h('span', { class: 'sr-only' }, '위')),
+    h('i', { class: 'bd-dot', style: `background:${p.color}`, 'aria-hidden': 'true' }),
+    h(
+      'span',
+      { class: 'hs-who' },
+      h('span', { class: 'hs-line' }, h('span', { class: 'hs-name' }, p.name), p.mine ? h('span', { class: 'hs-me' }, '나') : null),
+      p.badge ? h('span', { class: 'hs-badge' }, p.badge) : null,
+    ),
+    h('span', { class: 'hs-lead', 'aria-hidden': 'true' }),
+    h('span', { class: 'hs-score' }, p.score),
+  );
+}
+
+/** 목록 맨 위 '지난주 우승' 한 줄. 누르면 그 게임의 명예의 전당이 열려요 */
+function championRow(def: GameDef, champion: Champion, onOpen: () => void): HTMLElement {
+  return h(
+    'li',
+    {},
+    h(
+      'button',
+      { type: 'button', class: 'champ', onclick: onOpen },
+      spriteIcon(def.icon, CHAMP_ICON_PX),
+      h('span', { class: 'champ-game' }, def.title),
+      h('span', { class: 'hs-lead', 'aria-hidden': 'true' }),
+      h('b', { class: 'champ-name' }, champion.name),
+      champion.wins >= BADGE_MIN ? h('span', { class: 'champ-wins' }, `${champion.wins}회 우승`) : null,
+      h('span', { class: 'sr-only' }, ', 명예의 전당 보기'),
+    ),
+  );
 }
 
 function renderHall(def: GameDef, hall: Hall): HTMLElement {
@@ -414,30 +457,18 @@ function renderHall(def: GameDef, hall: Hall): HTMLElement {
       h(
         'p',
         { class: 'hall-most' },
-        h('i', { class: 'bd-dot', style: `background:${hall.most.color}`, 'aria-hidden': 'true' }),
-        `👑 역대 최다 우승 ${hall.most.name}${hall.most.mine ? ' (나)' : ''} · 🏆 ${hall.most.wins}회`,
+        spriteIcon('crown', CROWN_PX),
+        h('span', { class: 'hm-label' }, '역대 최다 우승'),
+        h('b', { class: 'hm-name' }, hall.most.name),
+        hall.most.mine ? h('span', { class: 'hs-me' }, '나') : null,
+        h('span', { class: 'hm-wins' }, `${hall.most.wins}회`),
       ),
     ...hall.weeks.map((w) =>
       h(
         'section',
         { class: 'hall-week' },
         h('h3', {}, weekLabel(w.week)),
-        h(
-          'ol',
-          { class: 'board-list' },
-          ...w.rows.map((row) => {
-            const badge = hallBadge(row);
-            return h(
-              'li',
-              { class: row.mine ? 'mine' : undefined },
-              h('span', { class: 'bd-rank' }, h('span', { 'aria-hidden': 'true' }, MEDALS[row.rank - 1] ?? String(row.rank)), h('span', { class: 'sr-only' }, `${row.rank}위`)),
-              h('i', { class: 'bd-dot', style: `background:${row.color}`, 'aria-hidden': 'true' }),
-              h('span', { class: 'bd-name' }, row.mine ? `${row.name} (나)` : row.name),
-              badge ? h('span', { class: 'hall-badge' }, h('span', { 'aria-hidden': 'true' }, badge.text), h('span', { class: 'sr-only' }, badge.label)) : null,
-              h('span', { class: 'bd-score' }, def.formatScore(row.score)),
-            );
-          }),
-        ),
+        h('ol', { class: 'hs-table' }, ...w.rows.map((row) => scoreRow({ ...row, score: def.formatScore(row.score), badge: hallBadge(row) }))),
       ),
     ),
   );
