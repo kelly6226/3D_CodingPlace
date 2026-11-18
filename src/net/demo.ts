@@ -148,7 +148,7 @@ export class DemoNet implements Net {
       skin: pick(SKIN_TONES),
       glasses: Math.random() < 0.5,
       outfit: randomOutfit(),
-      status: seated ? pick(STATUSES.slice(0, 9)).id : 'coding',
+      status: seated ? pick(STATUSES.filter((s) => !s.rest)).id : 'coding',
       seat: null,
       seatAt: Date.now(),
       x: SPAWN.x,
