@@ -2066,13 +2066,27 @@ export class UI {
 
   /**
    * 방에 같은 닉네임이 있어서 들어가지 못했을 때 새 닉네임을 받아요. 들어가야 닫혀요 (취소하면 방에 나 없이 남게 돼서).
+   * suggest가 준 방에 없는 이름을 미리 채워 두고, '다른 이름'을 누르면 또 받아요.
    * enter가 이유(글)를 돌려주면 그 자리에서 다시 입력받고, null을 돌려주면 들어간 거예요.
    */
-  askNewNickname(current: string, enter: (name: string) => string | null): Promise<void> {
+  askNewNickname(current: string, suggest: (except: string) => string, enter: (name: string) => string | null): Promise<void> {
     return new Promise((resolve) => {
       const m = $('#modal');
-      const input = h('input', { maxlength: NICKNAME_MAX, value: current, autocomplete: 'off', spellcheck: 'false', 'aria-label': '새 닉네임' });
+      const input = h('input', { maxlength: NICKNAME_MAX, value: suggest(current), autocomplete: 'off', spellcheck: 'false', 'aria-label': '새 닉네임' });
       const err = h('p', { class: 'err', hidden: true, role: 'alert' });
+      const another = h(
+        'button',
+        {
+          class: 'ghost',
+          type: 'button',
+          onclick: () => {
+            input.value = suggest(input.value) || input.value;
+            err.hidden = true;
+            input.select();
+          },
+        },
+        '🎲 다른 이름',
+      );
       const showProblem = (problem: string) => {
         err.hidden = false;
         err.textContent = problem;
@@ -2107,10 +2121,10 @@ export class UI {
           },
         },
         h('h2', {}, '🪪 같은 닉네임이 있어요'),
-        h('p', {}, `이 방에 '${current}' 닉네임을 쓰는 사람이 있어요. 다른 닉네임으로 들어와 주세요. 그전까지 방 사람들에게 나는 안 보여요.`),
+        h('p', {}, `이 방에 '${current}' 닉네임을 쓰는 사람이 있어요. 방에 없는 이름을 골라 뒀으니 그대로 들어가거나 바꿔 적어 주세요. 그전까지 방 사람들에게 나는 안 보여요.`),
         input,
         err,
-        h('div', { class: 'modal-actions' }, h('button', { class: 'primary', type: 'submit' }, '이 닉네임으로 들어가기')),
+        h('div', { class: 'modal-actions' }, another, h('button', { class: 'primary', type: 'submit' }, '들어가기')),
       );
       m.innerHTML = '';
       m.append(form);
