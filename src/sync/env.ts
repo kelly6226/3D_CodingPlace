@@ -1,8 +1,8 @@
 // 이어하기 링크를 보내고 여는 환경 확인
 
-/** 이 브라우저에 공유 창(Web Share API)이 있는지. 파이어폭스 등은 없어서 링크 복사로 대신해요 */
+/** 공유 창이 있는지. 토스 앱은 토스 공유 시트(toss.ts shareText)가 늘 있어요 */
 export function canShareLink(): boolean {
-  return typeof navigator.share === 'function';
+  return true;
 }
 
 /**

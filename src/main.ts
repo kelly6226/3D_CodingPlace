@@ -27,7 +27,7 @@ import {
   type PlaceId,
   type RoomInfo,
 } from './config';
-import { entryRoomParam, shareRoom } from './toss';
+import { entryRoomParam, shareRoom, shareText } from './toss';
 import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
@@ -41,7 +41,7 @@ import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
 import { SyncApi } from './sync/api';
 import { formatSyncCode, parseSyncCode, syncLink, takeSyncCodeFromUrl } from './sync/code';
 import { DeviceSync, type SyncStart } from './sync/deviceSync';
-import { canShareLink, kakaoExternalUrl } from './sync/env';
+import { kakaoExternalUrl } from './sync/env';
 import { RoomTimeReporter } from './together/roomTime';
 import { SeatTimeReporter } from './together/seatTime';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
@@ -233,30 +233,23 @@ async function createSyncCode() {
   return result;
 }
 
-/** 내 링크를 공유 창으로 보내요. 공유 창이 없거나 실패하면 복사로 대신해요 */
+/** 내 링크를 토스 공유 시트로 보내요. 실패하면 복사로 대신해요 */
 async function shareSyncLink() {
   const state = deviceSync?.state();
   if (state?.kind !== 'linked') return;
-  if (!canShareLink()) {
-    await copySync('link');
-    return;
-  }
   try {
-    // 받는 앱마다 title·text·url을 붙이는 방식이 달라서(띄어쓰기 없이 이어 붙이는 앱도 있어요),
-    // 링크 뒤에 글자가 달라붙지 않게 안내 글과 링크를 한 덩어리로, 링크를 맨 끝 줄에 둬요
-    await navigator.share({ text: syncShareText(state.code) });
+    // 링크 뒤에 글자가 달라붙지 않게 안내 글과 링크를 한 덩어리로, 링크를 맨 끝 줄에 둬요.
+    // 토스 공유 시트는 닫았는지 보냈는지 알려주지 않아서, 시트가 열렸으면 보낸 걸로 봐요 (웹도 '보냈다'는 버튼 기준이에요)
+    await shareText(syncShareText(state.code));
     markSyncShared();
-    ui.toast('보냈어요. 다른 기기에서 이 링크를 열면 이어져요', 'good');
-  } catch (e) {
-    // 사용자가 공유 창을 닫은 거면 아무것도 안 해요
-    if (e instanceof DOMException && e.name === 'AbortError') return;
+  } catch {
     await copySync('link');
   }
 }
 
-/** 나에게 보내는 글. 링크는 맨 끝 줄에 따로 (뒤에 아무것도 붙지 않게) */
+/** 나에게 보내는 글. 링크는 맨 끝 줄에 따로 (뒤에 아무것도 붙지 않게). 토스 앱으로 이어할 때 쓰는 코드도 같이 */
 function syncShareText(code: string): string {
-  return `온라인 모각코 이어하기 링크예요. 다른 기기에서 열면 내 캐릭터와 잔디가 이어져요. 남에게는 보내지 마세요.\n${syncLink(code)}`;
+  return `온라인 모각코 이어하기예요. 다른 기기 브라우저에서 링크를 열거나, 토스 앱의 이어하기에 코드 ${formatSyncCode(code)}를 넣으면 내 캐릭터와 잔디가 이어져요. 남에게는 보내지 마세요.\n${syncLink(code)}`;
 }
 
 function markSyncShared() {
@@ -306,7 +299,7 @@ async function eraseSync() {
   ui.toast('서버에 남은 기록을 지웠어요');
 }
 
-/** 클립보드에 복사. 막혀 있거나 오래 걸리면 false (토스 앱에서는 이어하기가 꺼져 있어서 지금은 안 불려요) */
+/** 클립보드에 복사. 막혀 있거나 오래 걸리면 false (토스 앱에서 막히면 부르는 쪽이 글자를 토스트로 보여줘요) */
 async function copyText(text: string) {
   try {
     return await Promise.race([navigator.clipboard.writeText(text).then(() => true), wait(1500).then(() => false)]);
@@ -1316,7 +1309,8 @@ function onFrame(dt: number) {
 // ── 탕비실 오락기 ─────────────────────────────────
 /** 🎮를 처음 누를 때 게임 코드를 받아와요 (처음 들어올 때 받는 양은 그대로). game을 주면 그 게임부터 */
 async function openArcade(game: GameId | null = null, onClosed?: () => void) {
-  if (!world || !self) return;
+  // 오락기를 끈 곳(토스 앱): 게임 코드를 불러오지 않아요. 상수라 빌드할 때 아래 import가 빠지길 기대해요 (dist에서 확인)
+  if (!MINIGAMES_ENABLED || !world || !self) return;
   const arcade = await import('./minigames/arcade');
   arcade.openArcade(
     {
@@ -1344,6 +1338,7 @@ function openArcadeFromUrl(game: GameId | null, firstVisit: boolean) {
 
 /** 입장 화면에 '들어가면 바로 ○○ 한 판'을 띄워요 (게임 이름은 오락기 목록에서) */
 async function showIntroArcadeNote(game: GameId | null) {
+  if (!MINIGAMES_ENABLED) return;
   const { GAMES } = await import('./minigames/catalog');
   const def = GAMES.find((g) => g.id === game);
   ui.setIntroNote(def ? `🎮 들어가면 바로 ${def.title} 한 판!` : '🎮 들어가면 탕비실 오락기가 바로 열려요');
@@ -1358,6 +1353,7 @@ function shareNewRecord(game: GameId, score: number) {
 
 /** '버그 잡기에서 신기록! (23점)'. 게임 이름과 점수 글은 오락기 목록에서 가져와요 (없는 게임이면 null) */
 async function recordSentence(game: GameId, score: number): Promise<string | null> {
+  if (!MINIGAMES_ENABLED) return null;
   const { GAMES } = await import('./minigames/catalog');
   const def = GAMES.find((g) => g.id === game);
   return def ? `${def.title}에서 신기록! (${def.formatScore(score)})` : null;

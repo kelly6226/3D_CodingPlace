@@ -20,15 +20,21 @@ export const PRIVATE_ROOMS_ENABLED = false;
 
 /**
  * 🎮 탕비실 오락기(미니게임). 언제든 열 수 있고, 쉬는 시간엔 버튼이 반짝여요.
- * 토스 앱 안에서는 게임물 등급분류에 해당하는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
+ * 토스 앱에서는 꺼요: 앱인토스 답변(2026-11-18) 게임 기능을 넣으려면 게임으로 등록하고 등급분류를 받아야 해요.
  */
-export const MINIGAMES_ENABLED = true;
+export const MINIGAMES_ENABLED = false;
 
 /**
  * 다른 기기에서 이어하기(이어하기 코드). 서버(Supabase)가 없는 데모 모드에서는 늘 꺼져요.
- * 토스 앱 안에서는 로그인 규정(토스 로그인만 허용)에 걸리는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
+ * 토스 앱에서도 켜요: 앱인토스에 물어보고 괜찮다는 답을 받았어요 (2026-11-18).
  */
-export const DEVICE_SYNC_ENABLED = false;
+export const DEVICE_SYNC_ENABLED = true;
+
+/**
+ * 이어하기 링크가 열리는 주소. 토스 앱 안의 주소는 앱 밖(다른 기기 브라우저)에서 열 수 없어서 웹 사이트 주소로 고정해요.
+ * 웹에서 이 링크를 열면 웹에서 이어지고, 토스 앱으로 이어할 때는 이어하기 창에 코드를 넣어요
+ */
+export const SYNC_LINK_ORIGIN = 'https://code-alone-together.vercel.app';
 
 /** 브라우저 탭 제목: 기본 방은 사이트 제목, 다른 방은 방 이름을 앞에 */
 export const pageTitle = (room: { slug: string; name: string }) => (room.slug === DEFAULT_ROOM ? SITE.title : `${room.name} · ${SITE.name}`);
