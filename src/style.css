@@ -122,6 +122,14 @@ button {
   border-color: var(--amber);
   color: #fff3dc;
 }
+/* 집중 중인 사람: 이름 옆에 '채팅 못 해요'를 작게 붙여요 (말풍선 위치가 이름표 높이에 맞춰져 있어 줄은 안 늘려요) */
+.av-focus {
+  padding-left: 5px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 0.85em;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.65);
+}
 .av-bubble-wrap {
   pointer-events: none;
   /* 말풍선 아랫변은 이름표 가운데에 맞춰지니(avatar.ts), 이름표 절반 높이 + 꼬리만큼 띄워요 */
@@ -448,6 +456,42 @@ button {
 }
 .chip .e {
   font-size: 18px;
+}
+/* 상태 시트 맨 위 집중 모드 버튼 */
+.focus-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--fg);
+  text-align: left;
+}
+.focus-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.focus-toggle.on {
+  border-color: var(--amber);
+  background: rgba(242, 180, 90, 0.12);
+}
+.focus-toggle .e {
+  font-size: 22px;
+}
+.focus-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.focus-toggle-text b {
+  font-size: 14px;
+}
+.focus-toggle-text small {
+  font-size: 12px;
+  color: var(--muted);
 }
 /* 배경 소리 시트: 방 기본값 표시와 '소리가 꺼져 있어요' 줄 */
 .noise-default {
@@ -1970,6 +2014,25 @@ button.place-name {
 .chat-form {
   display: flex;
   gap: 8px;
+}
+/* 집중 모드: 입력 칸 대신 보여요 (ui.ts setChatLocked) */
+.focus-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+.focus-lock button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 .chat-form button[type='submit'] {
   padding: 0 12px;

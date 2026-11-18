@@ -7,6 +7,7 @@ import {
   DEFAULT_NOISE,
   EMOTES,
   FEEDBACK_URL,
+  FOCUS_STATUS_ID,
   LANGS,
   MINIGAMES_ENABLED,
   NICKNAME_MAX,
@@ -114,6 +115,8 @@ export interface NoiseState {
 export interface UIHandlers {
   onEnter(p: Profile): void;
   onStatus(id: string): void;
+  /** 🎧 집중 모드 켜기/끄기. 켜 둔 동안은 내 채팅 입력이 잠겨요 */
+  onFocusToggle(): void;
   onEmote(id: string): void;
   /** 춤추기, 노트북 던지기 같은 큰 동작 */
   onAct(id: ActionId): void;
@@ -200,6 +203,10 @@ export class UI {
   private whisperPill!: HTMLElement;
   private whisperName!: HTMLElement;
   private chatSubmit!: HTMLButtonElement;
+  private chatForm!: HTMLFormElement;
+  /** 집중 모드일 때 입력 칸 자리에 보이는 안내와 '집중 풀기' 버튼 */
+  private focusLock!: HTMLElement;
+  private chatLocked = false;
   /** 지금 귓속말 모드로 고른 상대. 없으면 평소처럼 방 전체에 보여요 */
   private whisperTarget: { id: string; name: string } | null = null;
   /** 비밀번호 방을 만들 수 있는지 (실시간 모드에서만) */
@@ -644,6 +651,7 @@ export class UI {
   setSelf(s: PeerState) {
     this.self = s;
     $('#status-icon').textContent = statusById(s.status).emoji;
+    this.setChatLocked(s.status === FOCUS_STATUS_ID);
     if (this.sheet === 'status' || this.sheet === 'profile') this.renderSheet();
   }
 
@@ -791,6 +799,29 @@ export class UI {
     const el = $('#study-today');
     el.hidden = ms < 60e3;
     el.textContent = `오늘 ${elapsedText(ms)}째`;
+  }
+
+  /** 상태 시트 맨 위 집중 모드 버튼. 켜져 있으면 끄는 버튼이 돼요 */
+  private renderFocusToggle(): HTMLElement {
+    const on = this.self?.status === FOCUS_STATUS_ID;
+    return h(
+      'button',
+      {
+        // 글자가 '켜기/끄기'로 바뀌어서 aria-pressed는 붙이지 않아요 (둘 다 붙이면 '끄기, 눌림'처럼 겹쳐 읽혀요)
+        class: 'focus-toggle' + (on ? ' on' : ''),
+        onclick: () => {
+          this.h.onFocusToggle();
+          this.closeSheet();
+        },
+      },
+      h('span', { class: 'e' }, '🎧'),
+      h(
+        'span',
+        { class: 'focus-toggle-text' },
+        h('b', {}, on ? '집중 모드 끄기' : '집중 모드 켜기'),
+        h('small', {}, on ? '다시 채팅할 수 있어요' : '내 채팅 입력이 잠기고, 다른 사람에게 ‘채팅 못 해요’로 보여요'),
+      ),
+    );
   }
 
   /** '정각 모각코' 시트 내용 */
@@ -1016,7 +1047,13 @@ export class UI {
     );
     this.chatSubmit = h('button', { class: 'primary', type: 'submit' }, '보내기');
     this.chatNotifyBtn = h('button', { class: 'chat-notify', type: 'button', onclick: () => this.h.onChatNotifyToggle() }, '🔕');
-    const form = h(
+    this.focusLock = h(
+      'div',
+      { class: 'focus-lock', hidden: true },
+      h('span', {}, '🎧 집중 중이라 채팅 입력을 잠갔어요'),
+      h('button', { type: 'button', class: 'ghost', onclick: () => this.h.onFocusToggle() }, '집중 풀기'),
+    );
+    this.chatForm = h(
       'form',
       {
         class: 'chat-form',
@@ -1043,7 +1080,8 @@ export class UI {
       this.chatLog,
       this.chatErr,
       this.whisperPill,
-      form,
+      this.focusLock,
+      this.chatForm,
     );
     this.chatPanel = panel;
     return panel;
@@ -1069,7 +1107,7 @@ export class UI {
   startWhisper(id: string, name: string) {
     this.whisperTarget = { id, name };
     this.whisperName.textContent = name;
-    this.whisperPill.hidden = false;
+    this.whisperPill.hidden = this.chatLocked;
     this.chatPanel.classList.add('whispering');
     this.chatInput.placeholder = `${name}님에게 귓속말`;
     this.chatSubmit.textContent = '귓속말 보내기';
@@ -1097,7 +1135,20 @@ export class UI {
     this.chatPanel.hidden = false;
     this.chatBtn.classList.add('open');
     this.chatBtn.classList.remove('unread');
-    window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
+    if (!this.chatLocked) window.setTimeout(() => this.chatInput.focus({ preventScroll: true }), CHAT_FOCUS_DELAY_MS);
+  }
+
+  /** 집중 모드면 입력 칸 대신 잠금 안내를 보여요. 다른 사람 채팅은 그대로 쌓여요 */
+  private setChatLocked(locked: boolean) {
+    if (this.chatLocked === locked) return;
+    this.chatLocked = locked;
+    this.chatForm.hidden = locked;
+    this.focusLock.hidden = !locked;
+    this.whisperPill.hidden = locked || !this.whisperTarget;
+    if (locked) {
+      this.chatInput.blur();
+      this.hideChatError();
+    }
   }
 
   /** 넓은 화면에선 채팅이 왼쪽 아래에 붙어서 시트(가운데)와 같이 열 수 있어요 (chatLayout.ts) */
@@ -1121,7 +1172,7 @@ export class UI {
 
   private sendChat() {
     const text = this.chatInput.value.trim();
-    if (!text) return;
+    if (!text || this.chatLocked) return;
     const problem = this.h.onChat(text, this.whisperTarget?.id);
     if (problem) this.showChatError(problem);
     else {
@@ -1293,10 +1344,11 @@ export class UI {
       case 'status': {
         el.append(
           head('지금 뭐 해요?', '머리 위에 이모지로 보여요'),
+          this.renderFocusToggle(),
           h(
             'div',
             { class: 'grid' },
-            ...STATUSES.map((s) =>
+            ...STATUSES.filter((s) => s.id !== FOCUS_STATUS_ID).map((s) =>
               h(
                 'button',
                 {
