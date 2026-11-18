@@ -77,7 +77,7 @@ export const FOCUS_STATUS_ID = 'focus';
  * 토스 앱은 앱인토스 민감 콘텐츠 기준(음주·흡연)에 걸려 진입 안내 화면이 붙거나 틴즈 노출에서 빠질 수 있어서 꺼요 (toss-appinToss 브랜치, 2026-11-18).
  * 꺼진 쪽은 이 상태를 목록에서 몰라서, 웹 사람이 이 상태여도 '코딩 중'으로 보여요 (net/validate.ts)
  */
-export const SMOKE_DRINK_STATUSES_ENABLED = true;
+export const SMOKE_DRINK_STATUSES_ENABLED = false;
 
 const SMOKE_DRINK_STATUSES: StatusDef[] = [
   { id: 'smoke', emoji: '🚬', label: '담배 타임', rest: true },
