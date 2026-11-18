@@ -61,6 +61,12 @@ export interface StatusDef {
 }
 
 /**
+ * 🎧 집중 모드. 상태 하나로 보내서 다른 사람 화면에도 그대로 보이고, 켜 둔 동안은 내 채팅 입력이 잠겨요.
+ * 받은 채팅은 그대로 보여요. 상태 시트 맨 위 버튼과 채팅 칸의 '집중 풀기'로 켜고 꺼요 (2026-11-18)
+ */
+export const FOCUS_STATUS_ID = 'focus';
+
+/**
  * 🚬 🍺 상태. 웹에서만 켜요.
  * 토스 앱은 앱인토스 민감 콘텐츠 기준(음주·흡연)에 걸려 진입 안내 화면이 붙거나 틴즈 노출에서 빠질 수 있어서 꺼요 (toss-appinToss 브랜치, 2026-11-18).
  * 꺼진 쪽은 이 상태를 목록에서 몰라서, 웹 사람이 이 상태여도 '코딩 중'으로 보여요 (net/validate.ts)
@@ -74,6 +80,7 @@ const SMOKE_DRINK_STATUSES: StatusDef[] = [
 
 export const STATUSES: StatusDef[] = [
   { id: 'coding', emoji: '💻', label: '코딩 중' },
+  { id: FOCUS_STATUS_ID, emoji: '🎧', label: '집중 중 · 채팅 못 해요' },
   { id: 'bug', emoji: '🐛', label: '버그 잡는 중' },
   { id: 'hotfix', emoji: '🔥', label: '핫픽스 중' },
   { id: 'review', emoji: '👀', label: '코드리뷰 중' },
