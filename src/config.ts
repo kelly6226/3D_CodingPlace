@@ -74,7 +74,7 @@ export const FOCUS_STATUS_ID = 'focus';
 export const SMOKE_DRINK_STATUSES_ENABLED = true;
 
 const SMOKE_DRINK_STATUSES: StatusDef[] = [
-  { id: 'smoke', emoji: '🚬', label: '담배 타임', rest: true },
+  { id: 'smoke', emoji: '🚬', label: '구름과자 먹는 중', rest: true },
   { id: 'beer', emoji: '🍺', label: '맥주 한잔 중', rest: true },
 ];
 
