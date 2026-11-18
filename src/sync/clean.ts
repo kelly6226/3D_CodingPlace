@@ -2,6 +2,7 @@
 // 코드를 아는 사람은 누구나 서버 값을 바꿀 수 있어서, 화면과 저장소에 넣기 전에 모양·범위를 확인해요.
 import { HEX_RE, LANGS, ROOM_SLUG_RE, isNoiseId, type NoiseId } from '../config';
 import { normalizeOutfit } from '../look';
+import { isScoreKey } from '../minigames/records';
 import { text } from '../net/validate';
 import type { Profile } from '../store';
 
@@ -14,6 +15,8 @@ export interface SyncedSettings {
   myHour: number | null;
   /** 방마다 고른 배경 소리 */
   noise: Record<string, NoiseId>;
+  /** 오락기 스코어 판에서 나를 알아보는 번호 (minigames/records.ts). 이 기능 전에 만든 코드에는 없어요(null) */
+  scoreKey: string | null;
 }
 
 export interface Remote {
@@ -55,7 +58,11 @@ export function cleanSettings(raw: unknown): SyncedSettings {
   if (isObj(o.noise)) {
     for (const [slug, id] of Object.entries(o.noise).slice(-NOISE_MAX)) if (ROOM_SLUG_RE.test(slug) && isNoiseId(id)) noise[slug] = id;
   }
-  return { myHour: Number.isInteger(hour) && (hour as number) >= 0 && (hour as number) <= 23 ? (hour as number) : null, noise };
+  return {
+    myHour: Number.isInteger(hour) && (hour as number) >= 0 && (hour as number) <= 23 ? (hour as number) : null,
+    noise,
+    scoreKey: isScoreKey(o.scoreKey) ? o.scoreKey : null,
+  };
 }
 
 /** 날짜별 시간(ms). 하루 24시간을 넘는 값과 날짜가 아닌 칸은 버려요 */

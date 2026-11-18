@@ -4,10 +4,13 @@
 // 맞추는 규칙
 // - 프로필·설정: 마지막에 바꾼 기기의 것이 남아요. 다른 기기에서 바꾼 건 이 기기를 다시 열 때 받아와요.
 // - 날짜별 시간: 기기마다 따로 더해서 서버가 합쳐요. 그래서 두 기기를 같이 켜 두면 그 시간은 두 번 세요.
+// - 오락기 스코어 판 번호: 서버에 있는 것으로 맞춰요. 마지막에 바꾼 기기 것으로 하면 기기마다 번호가 번갈아 바뀌어서 판에 줄이 늘어나요.
+//   서버에 없으면(이 기능 전에 만든 코드) 이 기기 번호를 올려요.
 import { newSyncCode, parseSyncCode } from './code';
 import { SyncApi, SyncError, type SyncFailure } from './api';
 import { DAY_MS, cleanDays, cleanProfile, cleanRemote, type Remote, type SyncedProfile, type SyncedSettings } from './clean';
 import * as store from '../store';
+import { replaceScoreKey, scoreKey } from '../minigames/records';
 
 /** 화면이 알아야 하는 상태. 서버가 없으면(데모 모드) 'off' */
 export type SyncState =
@@ -71,10 +74,13 @@ interface Synced {
 /** 이 기기의 지금 프로필·설정 */
 function localSynced(): Synced {
   const { id: _id, ...profile } = store.getProfile();
-  return { profile: cleanProfile(profile, profile), settings: { myHour: store.getMyHour(), noise: store.getNoiseChoices() } };
+  return { profile: cleanProfile(profile, profile), settings: { myHour: store.getMyHour(), noise: store.getNoiseChoices(), scoreKey: scoreKey() } };
 }
 
-/** 비교용 글자. 칸 순서를 고정해서 같은 값이면 같은 글자가 돼요 */
+/**
+ * 비교용 글자. 칸 순서를 고정해서 같은 값이면 같은 글자가 돼요.
+ * 스코어 판 번호는 넣지 않아요 (마지막에 바꾼 기기 규칙을 따르지 않고 adoptRemoteScoreKey로 따로 맞춰요)
+ */
 function snapshotOf({ profile: p, settings: s }: Synced): string {
   const noise = Object.fromEntries(Object.entries(s.noise).sort(([a], [b]) => a.localeCompare(b)));
   return JSON.stringify({
@@ -87,6 +93,13 @@ function applyToLocal(remote: Remote) {
   store.saveProfile({ ...store.getProfile(), ...remote.profile });
   store.setMyHour(remote.settings.myHour);
   store.setNoiseChoices(remote.settings.noise);
+}
+
+/** 서버에 스코어 판 번호가 있으면 이 기기 번호를 그걸로 바꾸고 true. 없으면(이 기능 전에 만든 코드) false */
+function adoptRemoteScoreKey(remote: Remote): boolean {
+  if (!remote.settings.scoreKey) return false;
+  replaceScoreKey(remote.settings.scoreKey);
+  return true;
 }
 
 /** 다른 기기들 + 이 기기 = 화면에 보여줄 날짜별 시간 */
@@ -104,6 +117,8 @@ function recentDays(mine: Record<string, number>): Record<string, number> {
 export class DeviceSync {
   /** 지금 서버에 알리는 중이면 그 작업 (겹쳐 부르면 기다렸다 같이 끝나요) */
   private flushing: Promise<void> | null = null;
+  /** 서버에 스코어 판 번호가 없어서, 다음에 알릴 때 이 기기 번호를 올려야 해요 */
+  private scoreKeyMissing = false;
 
   constructor(private api: SyncApi) {}
 
@@ -131,6 +146,7 @@ export class DeviceSync {
         return 'gone';
       }
       const remote = cleanRemote(raw, localSynced().profile);
+      this.scoreKeyMissing = !adoptRemoteScoreKey(remote);
       const localUnchanged = snapshotOf(localSynced()) === link.snapshot;
       if (localUnchanged && remote.updatedAt !== link.at) {
         applyToLocal(remote);
@@ -169,8 +185,9 @@ export class DeviceSync {
     try {
       const local = localSynced();
       const localSnapshot = snapshotOf(local);
-      if (localSnapshot !== link.snapshot) {
+      if (localSnapshot !== link.snapshot || this.scoreKeyMissing) {
         const res = await this.api.push(link.code, local.profile, local.settings);
+        this.scoreKeyMissing = false;
         store.saveSyncLink({ ...(store.getSyncLink() ?? link), at: String(res.updated_at), snapshot: localSnapshot });
       }
       const days = link.sendAllDays ? link.mine : recentDays(link.mine);
@@ -238,6 +255,7 @@ export class DeviceSync {
       const remote = cleanRemote(raw, localSynced().profile);
       const mine = store.getStudyHistory();
       applyToLocal(remote);
+      this.scoreKeyMissing = !adoptRemoteScoreKey(remote);
       // 받은 링크나 코드로 이어한 기기는 이미 어딘가에 링크를 갖고 있어서 '보냈다'로 봐요
       store.saveSyncLink({ code, device, at: remote.updatedAt, snapshot: snapshotOf(remote), mine, sendAllDays: true, shared: true });
       store.replaceStudyHistory(mergeDays(cleanDays(raw.others), mine));
