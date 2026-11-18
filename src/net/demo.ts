@@ -23,6 +23,7 @@ import { randomOutfit } from '../look';
 import { SEATS, SPAWN, SPOTS } from '../world/layout';
 import { nearestWalkable } from '../world/pathfinding';
 import { getDemoCommits, getDemoRooms, randomId, setDemoCommits, setDemoRooms } from '../store';
+import { hasNickname, isSameNickname } from './nickname';
 import type { BusyHours, Commit, JoinResult, Net, NetHandlers, NewRoom, PeerState, RoomToday, SeatTrace } from './types';
 
 type SavedCommit = Commit & { room?: string };
@@ -133,8 +134,9 @@ export class DemoNet implements Net {
   }
 
   private makeBot(over: Partial<PeerState>): PeerState {
-    let name = pick(DEFAULT_NAMES);
-    for (let t = 0; t < 10 && this.usedNames.has(name); t++) name = pick(DEFAULT_NAMES);
+    // 다른 봇과 내 닉네임은 피해요 (내가 나중에 바꾼 닉네임도)
+    const free = DEFAULT_NAMES.filter((n) => !this.usedNames.has(n) && !isSameNickname(n, this.self.name));
+    const name = free.length ? pick(free) : pick(DEFAULT_NAMES);
     this.usedNames.add(name);
     const seated = !!over.seat;
     return {
@@ -293,6 +295,13 @@ export class DemoNet implements Net {
     this.emit(true);
     window.setTimeout(() => this.h.onEvent({ type: 'deploy', id: b.id, name: b.name }), 6000);
   }
+
+  isNameTaken(name: string): boolean {
+    return hasNickname(this.bots, name);
+  }
+
+  /** 데모 봇은 내 닉네임을 피해서 이름을 지어서(makeBot), 기다릴 일이 없어요 */
+  retryJoin() {}
 
   updateSelf(patch: Partial<PeerState>) {
     Object.assign(this.self, patch);

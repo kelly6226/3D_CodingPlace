@@ -2306,7 +2306,8 @@ button.place-name {
   font-size: 12px;
   line-height: 1.5;
 }
-.pw-ask input {
+.pw-ask input,
+.nick-ask input {
   width: 100%;
   min-height: 44px;
   margin-top: 14px;
@@ -2318,10 +2319,12 @@ button.place-name {
   font-size: 15px;
   outline: 0;
 }
-.pw-ask input:focus {
+.pw-ask input:focus,
+.nick-ask input:focus {
   border-color: var(--amber);
 }
-.pw-ask .err {
+.pw-ask .err,
+.nick-ask .err {
   margin: 8px 0 0;
 }
 

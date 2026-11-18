@@ -94,6 +94,11 @@ export interface NetHandlers {
   /** 방명록을 DB에서 다시 읽었을 때 (신고로 숨겨진 커밋이 빠진 목록) */
   onCommits?(list: Commit[]): void;
   onRoomChange?(instance: number): void;
+  /**
+   * 방에 같은 닉네임이 있어서 방 사람들에게 나를 알리지 않았어요 (방 안은 보이지만 다른 사람에게 나는 안 보여요).
+   * 닉네임을 바꾼 뒤 Net.retryJoin()으로 다시 들어가요
+   */
+  onNameTaken?(): void;
   onStatus?(s: 'connecting' | 'online' | 'offline'): void;
 }
 
@@ -132,6 +137,10 @@ export interface Net {
   /** 내 상태(자리, 상태 메시지 등)를 방 사람들에게 알림 */
   updateSelf(patch: Partial<PeerState>): void;
   send(e: NetEvent): void;
+  /** 지금 방에 이 닉네임을 쓰는 다른 사람이 있는지 (같은 닉네임 기준은 net/nickname.ts) */
+  isNameTaken(name: string): boolean;
+  /** 같은 닉네임 때문에 들어가지 못한 방에 지금 닉네임으로 다시 들어가요. 부르기 전에 isNameTaken으로 확인해요 */
+  retryJoin(): void;
   loadCommits(room: string): Promise<Commit[]>;
   postCommit(c: Commit): Promise<void>;
   /** 커밋 신고. 신고가 쌓여 모두에게서 숨겨졌으면 true */
