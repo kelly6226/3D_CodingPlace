@@ -19,6 +19,12 @@ export const FEEDBACK_URL = `mailto:${SITE.contact}?subject=${encodeURIComponent
 export const PRIVATE_ROOMS_ENABLED = false;
 
 /**
+ * 🎮 탕비실 오락기(미니게임). 언제든 열 수 있고, 쉬는 시간엔 버튼이 반짝여요.
+ * 토스 앱 안에서는 게임물 등급분류에 해당하는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
+ */
+export const MINIGAMES_ENABLED = true;
+
+/**
  * 다른 기기에서 이어하기(이어하기 코드). 서버(Supabase)가 없는 데모 모드에서는 늘 꺼져요.
  * 토스 앱 안에서는 로그인 규정(토스 로그인만 허용)에 걸리는지 확인하기 전까지 끄고 써요 (toss-appinToss 브랜치).
  */
@@ -97,7 +103,9 @@ export interface ViewState {
   following: boolean;
 }
 
-export type ActionId = 'dance' | 'throw' | 'flip' | 'faint';
+/** 스트레스 해소 코너에서만 하는 동작 (STRESS_ACTIONS) */
+export type StressActionId = 'punch' | 'smash';
+export type ActionId = 'dance' | 'throw' | 'flip' | 'faint' | StressActionId;
 
 export interface ActionDef {
   id: ActionId;
@@ -117,7 +125,22 @@ export const ACTIONS: ActionDef[] = [
   { id: 'faint', emoji: '😵', label: '번아웃 기절', line: '번아웃…', seconds: 5 },
 ];
 
-export const actionById = (id: unknown): ActionDef | undefined => ACTIONS.find((a) => a.id === id);
+/**
+ * 스트레스 해소 코너에서 하는 큰 동작 (치기, 내리치기). 물건 앞에 가서 해야 해서 동작 시트에는 안 나와요.
+ * 무엇을 치는지(물건 모양, 말풍선, 소리)는 장소마다 달라서 src/world/places/stress.ts 테마가 정해요.
+ * 여기 emoji·line은 테마를 못 찾을 때 쓰는 기본값이에요.
+ * 다른 사람에게는 다른 큰 동작처럼 'act'로 전해지고, 받은 쪽도 같은 장소라 같은 테마를 보여줘요.
+ * 토스 미니앱 민감 콘텐츠 기준 때문에 사람은 때리지 않고 물건만 치고, 대사도 거칠게 쓰지 않아요
+ */
+export const STRESS_ACTIONS: ActionDef[] = [
+  { id: 'punch', emoji: '🥊', label: '치기', line: '퍽!', seconds: 2.6 },
+  { id: 'smash', emoji: '💥', label: '내리치기', line: '쾅!', seconds: 2.4 },
+];
+
+export const stressActionById = (id: unknown): (ActionDef & { id: StressActionId }) | undefined =>
+  STRESS_ACTIONS.find((a) => a.id === id) as (ActionDef & { id: StressActionId }) | undefined;
+
+export const actionById = (id: unknown): ActionDef | undefined => ACTIONS.find((a) => a.id === id) ?? stressActionById(id);
 
 /**
  * 받는 쪽은 같은 사람의 동작을 이 간격보다 빨리 받으면 버려요.
@@ -179,12 +202,22 @@ export const HOODIE_COLORS = [
   '#c9873a', // 머스타드
   '#5b7fa6', // 스카이
   '#7a5a8c', // 보라
+  '#e07a5f', // 코랄
+  '#2f8f83', // 틸
+  '#e89ab6', // 핑크
+  '#a99ad6', // 라벤더
+  '#2f5d3a', // 포레스트
+  '#e9c46a', // 레몬
 ];
+
+/** 닉네임 최대 글자 수 (입장 화면, 프로필, 게임만 따로 연 페이지가 같이 씀) */
+export const NICKNAME_MAX = 12;
 
 /** #rrggbb 색 (저장된 값·실시간으로 받은 값을 검사할 때 같이 씀) */
 export const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
-export const HAIR_COLORS = ['#1d1a18', '#2b2220', '#4a3426', '#6b4a2e', '#262a33', '#3a2e2a'];
+/** 자연색 6개 뒤에 염색한 색 (금발, 은발, 핑크, 파랑, 빨강) */
+export const HAIR_COLORS = ['#1d1a18', '#2b2220', '#4a3426', '#6b4a2e', '#262a33', '#3a2e2a', '#d8b26e', '#c9c9cf', '#e58fb5', '#4a6fd6', '#a83b32'];
 export const SKIN_TONES = ['#f3d2b8', '#eac3a3', '#d9a988', '#c68f6c', '#f6dcc6'];
 
 // 접속할 때마다 이 중에서 무작위로 하나씩 받아요. 넉넉히 많아야 사람이 몰려도 닉네임이 덜 겹쳐요

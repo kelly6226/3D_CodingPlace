@@ -5,6 +5,7 @@ import { cafe } from './cafe';
 import { hackathon } from './hackathon';
 import { serverroom } from './serverroom';
 import { studio } from './studio';
+import { STRESS_TEXT } from './stress';
 import { TEX2_TEXT } from './tex2';
 import type { PlaceDef } from './types';
 
@@ -16,7 +17,7 @@ export const placeDef = (id: PlaceId | string | null | undefined): PlaceDef => D
 export const ALL_CANVAS_TEXT = {
   hand: CANVAS_TEXT.hand + ' ' + TEX2_TEXT,
   mono: CANVAS_TEXT.mono,
-  ui: [CANVAS_TEXT.ui, TEX2_TEXT, ...Object.values(DEFS).map((d) => d.canvasText)].join(' '),
+  ui: [CANVAS_TEXT.ui, TEX2_TEXT, STRESS_TEXT, ...Object.values(DEFS).map((d) => d.canvasText)].join(' '),
 };
 
 export type { PlaceDef };

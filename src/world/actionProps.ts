@@ -1,4 +1,4 @@
-// 큰 동작에서 날아가고 뒤집히는 소품 (던진 노트북, 뒤집힌 책상, 기절했을 때 도는 별)
+// 큰 동작에서 날아가고 뒤집히는 소품 (던진 노트북, 뒤집힌 책상, 기절했을 때 도는 별, 내리칠 때 튀는 조각)
 import * as THREE from 'three';
 
 const PI = Math.PI;
@@ -142,6 +142,105 @@ export class FlippedTable implements Prop {
     const rest = this.t - this.flipS;
     if (rest > 0) this.group.scale.setScalar(Math.max(0.001, shrinkAt(rest)));
     return rest < REST_S + SHRINK_S;
+  }
+}
+
+/** 물건을 내리칠 때 튀는 조각 종류 (places/stress.ts 테마가 골라요) */
+export type DebrisKind = 'keycaps' | 'pagerBits' | 'bubbles' | 'canTabs';
+
+interface DebrisStyle {
+  count: number;
+  geo: THREE.BufferGeometry;
+  mats: THREE.Material[];
+  /** 위로 튀는 속도 (m/s) */
+  up: number;
+  /** 옆으로 퍼지는 속도 (m/s) */
+  spread: number;
+  /** 떨어지는 가속도. 뽁뽁이 방울은 거의 안 떨어지고 둥실 떠올라요 */
+  gravity: number;
+  spin: number;
+}
+
+const DEBRIS: Record<DebrisKind, DebrisStyle> = {
+  keycaps: {
+    count: 8,
+    geo: new THREE.BoxGeometry(0.045, 0.03, 0.045),
+    mats: ['#f4efe4', '#2b2f3a', '#f2b45a', '#58a6ff'].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.5 })),
+    up: 2.6,
+    spread: 1.0,
+    gravity: GRAVITY,
+    spin: 14,
+  },
+  pagerBits: {
+    count: 7,
+    geo: new THREE.BoxGeometry(0.05, 0.02, 0.03),
+    mats: ['#1d1f26', '#3fe07a', '#d42a2a'].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.5 })),
+    up: 2.4,
+    spread: 1.0,
+    gravity: GRAVITY,
+    spin: 16,
+  },
+  bubbles: {
+    count: 10,
+    geo: new THREE.SphereGeometry(0.03, 10, 8),
+    mats: [new THREE.MeshStandardMaterial({ color: '#dff4ff', roughness: 0.1, transparent: true, opacity: 0.55 })],
+    up: 0.9,
+    spread: 0.6,
+    gravity: -0.3,
+    spin: 0,
+  },
+  canTabs: {
+    count: 6,
+    geo: new THREE.CylinderGeometry(0.035, 0.035, 0.02, 12),
+    mats: ['#c9ccd2', '#3fae5a', '#1f2126'].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.6 })),
+    up: 2.2,
+    spread: 0.9,
+    gravity: GRAVITY,
+    spin: 12,
+  },
+};
+
+/** 내리친 자리에서 사방으로 튀었다가 바닥에 떨어지는(방울은 떠오르는) 조각들 */
+export class FlyingDebris implements Prop {
+  readonly group = new THREE.Group();
+  private t = 0;
+  private style: DebrisStyle;
+  private bits: { mesh: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; landed: boolean }[] = [];
+
+  constructor(origin: THREE.Vector3, kind: DebrisKind) {
+    this.style = DEBRIS[kind];
+    const { count, geo: g, mats, up, spread, spin } = this.style;
+    this.group.position.copy(origin);
+    for (let i = 0; i < count; i++) {
+      const mesh = new THREE.Mesh(g, mats[i % mats.length]);
+      const a = (i / count) * PI * 2 + Math.random() * 0.6;
+      const side = spread * (0.6 + Math.random() * 0.8);
+      const v = new THREE.Vector3(Math.cos(a) * side, up * (0.85 + Math.random() * 0.4), Math.sin(a) * side);
+      const turn = new THREE.Vector3(Math.random() * spin, Math.random() * spin, Math.random() * spin);
+      this.bits.push({ mesh, v, spin: turn, landed: false });
+      this.group.add(mesh);
+    }
+  }
+
+  update(dt: number) {
+    this.t += dt;
+    // 바닥 높이를 group 안 좌표로 (group은 내리친 자리에 있어요)
+    const floorY = FLOOR_Y - this.group.position.y;
+    for (const b of this.bits) {
+      if (b.landed) continue;
+      b.v.y -= this.style.gravity * dt;
+      b.mesh.position.addScaledVector(b.v, dt);
+      b.mesh.rotation.x += b.spin.x * dt;
+      b.mesh.rotation.y += b.spin.y * dt;
+      b.mesh.rotation.z += b.spin.z * dt;
+      if (b.mesh.position.y <= floorY) {
+        b.mesh.position.y = floorY;
+        b.mesh.rotation.set(0, b.mesh.rotation.y, 0);
+        b.landed = true;
+      }
+    }
+    this.group.scale.setScalar(Math.max(0.001, shrinkAt(this.t)));
+    return this.t < REST_S + SHRINK_S;
   }
 }
 

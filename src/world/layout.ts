@@ -2,6 +2,8 @@
 // 장소가 바뀌면 useLayout()으로 통째로 갈아끼워요. ES 모듈 live binding이라
 // SEATS, SPOTS 등을 import한 쪽에서도 바뀐 값이 그대로 보여요.
 
+import type { StressCorner } from './places/stress';
+
 export type SeatKind = 'stool' | 'chair' | 'beanbag' | 'stand' | 'floor' | 'bed';
 
 export interface Seat {
@@ -38,6 +40,11 @@ export interface Spot {
   yaw?: number;
 }
 
+/** 서서 무언가를 바라보는 곳 (보는 방향이 꼭 있어요) */
+export interface FacingSpot extends Spot {
+  yaw: number;
+}
+
 export interface RoomBounds {
   x0: number;
   x1: number;
@@ -61,6 +68,8 @@ export interface PlaceLayout {
     /** 자리가 다 찼을 때 서 있을 곳 */
     idle: Spot;
   };
+  /** 스트레스 해소 코너: 치는 물건과 내리치는 물건의 테마와 자리 (places/stress.ts) */
+  stress: StressCorner;
 }
 
 export let ROOM: RoomBounds = { x0: -7, x1: 7, z0: -5, z1: 5, wallH: 3.2 };
@@ -73,6 +82,10 @@ export let SPOTS: PlaceLayout['spots'] = {
   pet: { x: 0, z: 0 },
   idle: { x: 0, z: 0 },
 };
+export let STRESS: StressCorner = {
+  punch: { theme: 'beanSack', x: 0, z: 0, yaw: 0 },
+  smash: { theme: 'keyboards', x: 0, z: 0, yaw: 0 },
+};
 
 export function useLayout(l: PlaceLayout) {
   ROOM = l.room;
@@ -80,6 +93,7 @@ export function useLayout(l: PlaceLayout) {
   SEATS = l.seats;
   OBSTACLES = l.obstacles;
   SPOTS = l.spots;
+  STRESS = l.stress;
 }
 
 export const seatById = (id: string | null | undefined) => (id ? SEATS.find((s) => s.id === id) : undefined);

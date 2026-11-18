@@ -3,8 +3,10 @@ import {
   CHAT_MAX_LENGTH,
   CHAT_SEND_GAP_MS,
   CONTEXT_LOSS_TOAST_MS,
+  DEFAULT_NAMES,
   DEFAULT_ROOM,
   DEVICE_SYNC_ENABLED,
+  MINIGAMES_ENABLED,
   PRESENCE_LAG_MS,
   PRIVATE_ROOMS_ENABLED,
   REPORTS_TO_HIDE,
@@ -18,7 +20,9 @@ import {
   roomAddress,
   roomPasswordProblem,
   statusById,
+  stressActionById,
   type ActionId,
+  type StressActionId,
   type NoiseId,
   type PlaceId,
   type RoomInfo,
@@ -28,6 +32,9 @@ import type { Look } from './look';
 import { sound } from './audio';
 import { BLOCKED_WORDS_REASON, hasBadWord, isBlockedWordsError } from './net/badwords';
 import { DemoNet, randomHash } from './net/demo';
+import { isSameNickname } from './net/nickname';
+import { serverConfig } from './net/server';
+import { gameFromPath, type GameId } from './minigames/ids';
 import type { Commit, Net, NetEvent, PeerState, SeatTrace } from './net/types';
 import * as store from './store';
 import { startStudyClock, studySinceFor, studyTodayAt } from './studyClock';
@@ -40,10 +47,13 @@ import { SeatTimeReporter } from './together/seatTime';
 import { BREAK_MINUTES, FOCUS_MINUTES, SESSION_DONE_MIN_MS, sessionAt, watchSession, type SessionState } from './together/session';
 import { hasRoomRecord, hourLabel, roomTodaySentence, seatTraceLine } from './ui/together';
 import { Tips } from './ui/tips';
+import { AwayChatAlerts, chatNotifyState, turnOnChatNotify, type ChatNotifyState } from './ui/awayAlerts';
 import { UI, type RoomDraft } from './ui/ui';
 import { followVisualViewport } from './ui/viewport';
+import type { Avatar } from './world/avatar';
 import { watchContextLoss } from './world/contextWatch';
-import { SEATS, SPAWN, SPOTS, seatById, type SeatKind } from './world/layout';
+import { SEATS, SPAWN, SPOTS, STRESS, seatById, type SeatKind } from './world/layout';
+import { stressSpot, stressThemeOf, type StressSound } from './world/places/stress';
 import type { InteractData } from './world/places/kit';
 import { startRenderHud } from './world/renderHud';
 import type { World } from './world/world';
@@ -56,18 +66,25 @@ const app = document.getElementById('app')!;
 const stage = document.getElementById('stage')!;
 const ui = new UI(app);
 
+/** 기본 옷 그대로였던 프로필에 이번에 옷을 골라 입혔는지 (입장한 뒤 알려줘요) */
+const outfitVaried = store.varyDefaultOutfitOnce();
 const profile = store.getProfile();
 ui.showIntro(profile, store.hasSavedProfile());
 ui.setSound(store.getSound());
 sound.enabled = store.getSound();
 
+/** 다른 창에 있을 때 온 채팅을 탭 제목·알림음·(켠 사람만) 브라우저 알림으로 알려요 */
+const awayAlerts = new AwayChatAlerts({ ping: () => sound.ping(), notifyOn: () => chatNotifyState(store.getChatNotify()) === 'on' });
+ui.setChatNotify(chatNotifyState(store.getChatNotify()));
+
 const params = new URLSearchParams(location.search);
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
-const isOnline = !!supabaseUrl && !!supabaseKey && params.get('demo') !== '1';
+const server = serverConfig(params);
+/** /games, /games/<게임 id>로 들어왔으면 입장한 뒤 오락기를 바로 열어요. 오락기를 끈 곳(토스 앱)에서는 그냥 방이에요 */
+const arcadeFromUrl = MINIGAMES_ENABLED ? gameFromPath(location.pathname) : undefined;
+if (arcadeFromUrl) void showIntroArcadeNote(arcadeFromUrl.game);
 
 /** 다른 기기에서 이어하기. 서버가 없으면(데모 모드) null */
-const deviceSync = isOnline && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(supabaseUrl!, supabaseKey!)) : null;
+const deviceSync = server && DEVICE_SYNC_ENABLED ? new DeviceSync(new SyncApi(server.url, server.key)) : null;
 /** 이어하기 링크(#sync=…)로 들어왔으면 그 코드. 주소에서는 바로 지워요 */
 const syncCodeFromLink = deviceSync ? takeSyncCodeFromUrl() : null;
 
@@ -126,9 +143,9 @@ async function boot() {
   places = await placesP;
   ui.setProgress(0.35);
 
-  if (isOnline) {
+  if (server) {
     const { OnlineNet } = await import('./net/online');
-    net = new OnlineNet(supabaseUrl!, supabaseKey!, profile.id);
+    net = new OnlineNet(server.url, server.key, profile.id);
   } else {
     net = new DemoNet();
   }
@@ -388,7 +405,7 @@ async function loadRoomCommits() {
   const list = await Promise.race([net.loadCommits(slug), wait(5000).then(() => [] as Commit[])]);
   if (slug !== room.slug) return; // 그 사이 방을 옮겼으면 버림
   showCommits(list);
-  document.title = pageTitle(room);
+  awayAlerts.setBaseTitle(pageTitle(room));
 }
 
 /** 방명록을 TV와 시트에 그려요. 내가 신고한 커밋은 빼요 */
@@ -400,6 +417,9 @@ function showCommits(list: Commit[]) {
 }
 
 // ── 2. 입장 ──────────────────────────────────────
+const OUTFIT_VARIED_NOTICE = '👕 다들 같은 기본 옷이라 한 벌 골라 입혀 뒀어요. 옷장에서 언제든 바꿀 수 있어요';
+const OUTFIT_VARIED_NOTICE_MS = 6000;
+
 async function enter(p: store.Profile) {
   // saveProfile 전에 봐야 해요. 저장하고 나면 항상 '저장된 프로필 있음'이 돼요
   const firstVisit = !store.hasSavedProfile();
@@ -443,8 +463,9 @@ async function enter(p: store.Profile) {
         lastMoves.clear();
         metThisSession.clear();
         ui.clearChat();
-        ui.toast(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
+        ui.notify(`자리가 꽉 차서 ${n}호점으로 안내했어요`);
       },
+      onNameTaken: () => void askNewNickname(),
     },
     room,
     startInstance,
@@ -460,6 +481,13 @@ async function enter(p: store.Profile) {
   autoSeat(!firstVisit);
   if (store.getMyHour() === sessionAt(Date.now()).hour) {
     window.setTimeout(() => ui.toast('정해 둔 시간에 맞춰 왔어요', 'good'), NUDGE_DELAY_MS);
+  }
+  if (outfitVaried) {
+    window.setTimeout(() => ui.toast(OUTFIT_VARIED_NOTICE, 'info', OUTFIT_VARIED_NOTICE_MS), NUDGE_DELAY_MS);
+  }
+  if (arcadeFromUrl) {
+    openArcadeFromUrl(arcadeFromUrl.game, firstVisit);
+    return;
   }
   if (firstVisit) {
     await wait(TIPS_DELAY_MS);
@@ -591,7 +619,7 @@ async function pickRoom(slug: string, push = true) {
   }
   if (!(await unlockRoom(r))) {
     // 뒤로가기로 주소만 먼저 바뀐 경우, 지금 방 주소로 되돌려요
-    if (!push) history.replaceState(null, '', room.slug === DEFAULT_ROOM ? '/' : `/r/${room.slug}`);
+    if (!push) history.replaceState(null, '', roomAddress(room.slug));
     return;
   }
   await switchRoom(r, push);
@@ -628,7 +656,7 @@ async function switchRoom(r: RoomInfo, push = true) {
   switching = false;
   roomTime?.enter(r.slug);
   reloadRoomToday(ROOM_TODAY_AFTER_ENTER_MS);
-  ui.toast(enteredMessage(r), 'good', 4200);
+  ui.notify(enteredMessage(r), 'good', 4200);
   await wait(600);
   autoSeat(false);
 }
@@ -749,16 +777,96 @@ function changeLook(look: Look) {
   net.updateSelf(look);
 }
 
+/** ⚙️ 프로필 저장과 같은 닉네임 창이 같이 써요: 저장하고, 내 아바타와 화면에 반영하고, 방 사람들에게 알림 */
+function applyProfile(p: store.Profile) {
+  store.saveProfile(p);
+  Object.assign(self, p);
+  meAvatar().apply(self);
+  ui.setSelf(self);
+  net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
+}
+
+const nameTakenReason = (name: string) => `이 방에 '${name}' 닉네임을 쓰는 사람이 있어요. 다른 닉네임을 적어주세요.`;
+
+/** 같은 닉네임 창에 채워 줄 이름: 기본 닉네임 중 지금 방에 없는 것 하나 (except는 빼요). 다 쓰이고 있으면 빈칸 */
+function suggestFreeName(except: string): string {
+  const free = DEFAULT_NAMES.filter((n) => !isSameNickname(n, except) && !net.isNameTaken(n));
+  return free.length ? pick(free) : '';
+}
+
+let askingNickname = false;
+/** 방에 같은 닉네임이 있어서 못 들어갔을 때: 새 닉네임을 받아서 다시 들어가요 */
+async function askNewNickname() {
+  if (askingNickname) return;
+  askingNickname = true;
+  await ui.askNewNickname(self.name, suggestFreeName, (name) => {
+    if (net.isNameTaken(name)) return nameTakenReason(name);
+    applyProfile({ ...profileOf(self), name });
+    net.retryJoin();
+    return null;
+  });
+  askingNickname = false;
+  ui.toast(`'${self.name}' 닉네임으로 들어왔어요`, 'good');
+}
+
+const STILL_ACTING_TOAST = '아직 하던 동작이 안 끝났어요';
+
 /** 춤추기, 노트북 던지기 같은 큰 동작. 하던 동작이 끝나야 다음 동작을 할 수 있어요 */
 function act(id: ActionId) {
   const me = meAvatar();
   if (me.acting) {
-    ui.toast('아직 하던 동작이 안 끝났어요');
+    ui.toast(STILL_ACTING_TOAST);
     return;
   }
-  me.perform(id);
+  performAction(me, id);
   sound.pop();
   net.send({ type: 'act', id: self.id, act: id });
+}
+
+/**
+ * 아바타 하나가 큰 동작을 해요 (내 것이든 다른 사람 것이든).
+ * 스트레스 해소 동작은 지금 장소의 물건 쪽으로 돌아서서 하고, 말풍선·튀는 조각은 장소 테마를 따라요.
+ * 동작이 물건에 닿을 때마다 물건이 흔들리고 소리가 나요
+ */
+function performAction(a: Avatar, id: ActionId) {
+  const stress = stressActionById(id);
+  if (!stress) {
+    a.perform(id);
+    return;
+  }
+  const theme = stressThemeOf(STRESS, stress.id);
+  a.face(stressSpot(STRESS, stress.id).yaw);
+  a.perform(id, {
+    bubble: theme.bubble,
+    debris: theme.debris,
+    onHit: () => {
+      world.room.poke(stress.id);
+      STRESS_SOUND[theme.sound]();
+    },
+  });
+}
+
+const STRESS_SOUND: Record<StressSound, () => void> = {
+  thud: () => sound.thud(),
+  soft: () => sound.soft(),
+  clatter: () => sound.clatter(),
+  beep: () => sound.beep(),
+  pops: () => sound.pops(),
+  crunch: () => sound.crunch(),
+};
+
+/** 스트레스 해소 코너의 물건을 눌렀을 때: 물건 앞으로 걸어가서 치기·내리치기를 해요 */
+function goStress(id: StressActionId) {
+  if (meAvatar().acting) {
+    ui.toast(STILL_ACTING_TOAST);
+    return;
+  }
+  const spot = stressSpot(STRESS, id);
+  const slug = room.slug;
+  moveTo(spot.x, spot.z, () => {
+    if (room.slug !== slug) return;
+    act(id);
+  });
 }
 
 function emote(id: string, to?: string) {
@@ -777,6 +885,23 @@ let lastChat = 0;
  * 방 사람들에게 한마디(말풍선). 보낼 수 없으면 이유를 돌려줘요. 커밋 입력과 같은 방식이에요.
  * to를 주면 그 사람에게만 보이는 귓속말이 돼요 (로그인이 없어서 이 방문 동안만 가요. 암호화는 안 돼요)
  */
+const CHAT_NOTIFY_TOAST: Record<ChatNotifyState, { text: string; kind: 'good' | 'bad' | 'info' }> = {
+  on: { text: '🔔 다른 창에 있을 때 채팅이 오면 알려드릴게요', kind: 'good' },
+  off: { text: '🔕 채팅 알림을 껐어요. 탭 제목 숫자와 알림음은 그대로예요', kind: 'info' },
+  blocked: { text: '브라우저에서 이 사이트 알림이 막혀 있어요. 주소창 왼쪽 사이트 설정에서 알림을 허용해 주세요', kind: 'bad' },
+  unsupported: { text: '이 브라우저에서는 채팅 알림을 띄울 수 없어요. 탭 제목 숫자와 알림음으로 알려드릴게요', kind: 'info' },
+};
+
+/** 채팅 칸 🔔: 켜져 있으면 끄고, 꺼져 있으면 권한을 물어 켜요 */
+async function toggleChatNotify() {
+  const wasOn = chatNotifyState(store.getChatNotify()) === 'on';
+  const next: ChatNotifyState = wasOn ? 'off' : await turnOnChatNotify();
+  store.setChatNotify(next === 'on');
+  ui.setChatNotify(next);
+  const toast = CHAT_NOTIFY_TOAST[next];
+  ui.toast(toast.text, toast.kind, 5000);
+}
+
 function chat(text: string, to?: string): string | null {
   const waitMs = CHAT_SEND_GAP_MS - (Date.now() - lastChat);
   if (waitMs > 0) return `조금만 천천히요. ${Math.ceil(waitMs / 1000)}초 뒤에 보낼 수 있어요.`;
@@ -851,14 +976,16 @@ function triggerDeploy(name: string) {
   const d = placeMeta(room.place).deploy;
   world.room.alarm(sec);
   sound.siren(sec - 0.5);
-  ui.alarm(d.alarm.replace('{name}', name), sec);
+  const alarmText = d.alarm.replace('{name}', name);
+  ui.alarm(alarmText, sec);
+  ui.addNotice(alarmText);
   let i = 0;
   for (const a of world.avatars.values()) {
     const e = pick(['🔥 불났다', '🤯 뭐야', '🙏 롤백 제발', '😱 내 코드 아님']);
     window.setTimeout(() => a.emote(e.split(' ')[0], e.slice(e.indexOf(' ') + 1)), 300 + i++ * 180);
   }
   window.setTimeout(() => {
-    ui.toast(d.done, 'good', 4200);
+    ui.notify(d.done, 'good', 4200);
     sound.chime();
   }, sec * 1000 + 300);
 }
@@ -910,7 +1037,7 @@ async function commit(type: string, msg: string): Promise<string | null> {
   myCommitHashes.add(c.hash);
   addCommit(c);
   meAvatar().emote('⎇', 'commit!');
-  ui.toast(`[main ${c.hash}] ${c.msg}`, 'good');
+  ui.notify(`[main ${c.hash}] ${c.msg}`, 'good');
   return null;
 }
 
@@ -959,7 +1086,7 @@ function onPeers(presencePeers: PeerState[]) {
         a.state.seat = p.seat;
         if (p.seat) a.goTo(p.x, p.z, p.seat);
         else if (p.x !== SPAWN.x || p.z !== SPAWN.z) a.goTo(p.x, p.z);
-        ui.toast(`👋 ${p.name}님이 모각코에 들어왔어요`);
+        ui.notify(`👋 ${p.name}님이 모각코에 들어왔어요`);
       } else {
         a = world.addAvatar(p, false);
       }
@@ -984,7 +1111,7 @@ function onPeers(presencePeers: PeerState[]) {
     world.removeAvatar(id);
     known.delete(id);
     lastMoves.delete(id);
-    if (name) ui.toast(`${name}님이 퇴근했어요`);
+    if (name) ui.notify(`${name}님이 퇴근했어요`);
   }
   ui.setPeers(peers);
   syncTraceVisibility();
@@ -1011,13 +1138,20 @@ function onEvent(e: NetEvent) {
       const em = emoteById(e.emote);
       if (!a || !em) return;
       a.emote(em.emoji, em.label);
-      if (e.to && e.to === self?.id) ui.toast(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
+      if (e.to && e.to === self?.id) ui.notify(`${a.state.name}님이 손을 흔들었어요 👋`, 'good');
       break;
     }
     case 'act': {
       const a = world.avatars.get(e.id);
       if (!a || a.isSelf) return;
-      a.perform(e.act);
+      const stress = stressActionById(e.act);
+      if (stress) {
+        // 물건 앞에 가서 해요. 이동 소식이 먼저 와서 아직 걸어가는 중이면 도착한 뒤에 해요
+        const spot = stressSpot(STRESS, stress.id);
+        a.goTo(spot.x, spot.z, null, () => performAction(a, e.act));
+      } else {
+        performAction(a, e.act);
+      }
       break;
     }
     case 'chat': {
@@ -1026,6 +1160,7 @@ function onEvent(e: NetEvent) {
       if (e.to && e.to !== self.id) return; // 나한테 온 귓속말이 아니면 못 본 척해요
       a.say(e.text);
       ui.addChat({ name: a.state.name, lang: a.state.lang, text: e.text, mine: false, whisperWith: e.to ? a.state.name : undefined });
+      awayAlerts.alertIfAway({ name: a.state.name, text: e.text, whisper: !!e.to });
       break;
     }
     case 'deploy':
@@ -1033,13 +1168,16 @@ function onEvent(e: NetEvent) {
       break;
     case 'commit':
       addCommit(e.commit);
-      ui.toast(`⎇ ${e.commit.name}: ${e.commit.msg}`);
+      ui.notify(`⎇ ${e.commit.name}: ${e.commit.msg}`);
       break;
     case 'coffee':
       world.avatars.get(e.id)?.sip();
       break;
     case 'typing':
       world.avatars.get(e.id)?.typeBurst();
+      break;
+    case 'record':
+      void showPeerRecord(e);
       break;
   }
 }
@@ -1094,6 +1232,11 @@ function interact(d: InteractData) {
     case 'note':
       if (d.lines?.length) ui.toast(fillNote(pick(d.lines)), 'info', 4200);
       break;
+    case 'stress': {
+      const def = stressActionById(d.key);
+      if (def) goStress(def.id);
+      break;
+    }
   }
 }
 
@@ -1170,9 +1313,78 @@ function onFrame(dt: number) {
   }
 }
 
+// ── 탕비실 오락기 ─────────────────────────────────
+/** 🎮를 처음 누를 때 게임 코드를 받아와요 (처음 들어올 때 받는 양은 그대로). game을 주면 그 게임부터 */
+async function openArcade(game: GameId | null = null, onClosed?: () => void) {
+  if (!world || !self) return;
+  const arcade = await import('./minigames/arcade');
+  arcade.openArcade(
+    {
+      pauseWorld: () => world.pause(),
+      resumeWorld: () => world.resume(),
+      player: () => ({ name: self.name, color: self.color }),
+      scoreServer: server,
+      onNewRecord: shareNewRecord,
+      onClosed,
+    },
+    game,
+  );
+}
+
+/**
+ * 게임 주소로 들어왔을 때: 방에 들어가자마자 오락기를 열어요.
+ * 닫으면 주소를 방 주소로 돌려서 새로고침해도 방으로 오게 하고, 처음 온 사람 안내는 그때 보여줘요
+ */
+function openArcadeFromUrl(game: GameId | null, firstVisit: boolean) {
+  void openArcade(game, () => {
+    history.replaceState(null, '', roomAddress(room.slug));
+    if (firstVisit) window.setTimeout(showTips, TIPS_DELAY_MS);
+  });
+}
+
+/** 입장 화면에 '들어가면 바로 ○○ 한 판'을 띄워요 (게임 이름은 오락기 목록에서) */
+async function showIntroArcadeNote(game: GameId | null) {
+  const { GAMES } = await import('./minigames/catalog');
+  const def = GAMES.find((g) => g.id === game);
+  ui.setIntroNote(def ? `🎮 들어가면 바로 ${def.title} 한 판!` : '🎮 들어가면 탕비실 오락기가 바로 열려요');
+}
+
+/** 내 최고 기록을 깨면 내 머리 위에 띄우고, 방 사람들에게도 한 번 알려요 (실시간 메시지 1개) */
+function shareNewRecord(game: GameId, score: number) {
+  meAvatar().emote('🏆', '신기록');
+  net.send({ type: 'record', id: self.id, game, score });
+  void recordSentence(game, score).then((text) => text && ui.addNotice(`🏆 나: ${text}`));
+}
+
+/** '버그 잡기에서 신기록! (23점)'. 게임 이름과 점수 글은 오락기 목록에서 가져와요 (없는 게임이면 null) */
+async function recordSentence(game: GameId, score: number): Promise<string | null> {
+  const { GAMES } = await import('./minigames/catalog');
+  const def = GAMES.find((g) => g.id === game);
+  return def ? `${def.title}에서 신기록! (${def.formatScore(score)})` : null;
+}
+
+const RECORD_TOAST_MS = 5000;
+
+/** 다른 사람의 신기록: 그 사람 머리 위와 토스트로 띄우고 채팅에도 남겨요 */
+async function showPeerRecord(e: Extract<NetEvent, { type: 'record' }>) {
+  if (!MINIGAMES_ENABLED) return; // 오락기가 꺼진 곳(토스 앱)에서는 알림도 안 띄워요
+  const a = world.avatars.get(e.id);
+  if (!a || a.isSelf) return;
+  const text = await recordSentence(e.game, e.score);
+  if (!text) return;
+  a.emote('🏆', '신기록');
+  ui.notify(`🏆 ${a.state.name}님이 ${text}`, 'good', RECORD_TOAST_MS);
+}
+
 // ── 정각 세션 ─────────────────────────────────────
 /** 세션 끝 토스트 다음에 안내 토스트를 띄우기까지 */
 const NUDGE_DELAY_MS = 2500;
+const BREAK_GAME_NUDGE = '🎮 쉬는 동안 오른쪽 위 오락기에서 한 판 해도 돼요';
+const BREAK_GAME_NUDGE_MS = 6000;
+
+function nudgeBreakGame() {
+  if (MINIGAMES_ENABLED) window.setTimeout(() => ui.toast(BREAK_GAME_NUDGE, 'info', BREAK_GAME_NUDGE_MS), NUDGE_DELAY_MS);
+}
 
 /** 이번 집중 시간에 실제로 있었던 시간(ms). SESSION_DONE_MIN_MS를 넘기면 세션 하나를 끝낸 걸로 쳐요 */
 let focusedThisSession = 0;
@@ -1184,23 +1396,26 @@ function onSessionPhaseChange(next: SessionState, prev: SessionState) {
   if (!self) return;
   sound.chime();
   if (next.phase === 'focus') {
-    ui.toast(`${hourLabel(next.hour)} 정각이에요. ${FOCUS_MINUTES}분 동안 같이 집중해요`, 'good', 5000);
+    ui.notify(`${hourLabel(next.hour)} 정각이에요. ${FOCUS_MINUTES}분 동안 같이 집중해요`, 'good', 5000);
     return;
   }
   const nextStart = hourLabel((next.hour + 1) % 24);
   if (finished) {
     const n = store.addSessionDone();
     meAvatar().emote('✅', `${n}칸째`);
-    ui.toast(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
+    ui.notify(`오늘 ${n}칸째 채웠어요. ${BREAK_MINUTES}분 쉬고 ${nextStart}에 다시 시작해요`, 'good', 6000);
     // 한 칸 채운 직후에 안내를 하나만: 아직 내 시간을 안 정했으면 그것부터, 아니면 이어하기
     if (store.getMyHour() === null && store.takeMyHourNudge()) {
       window.setTimeout(() => ui.toast("내일도 이 시간에 올 거면 왼쪽 위 '집중' 버튼에서 매일 오는 시간을 정해 두세요", 'info', 7000), NUDGE_DELAY_MS);
     } else if (shouldNudgeSync()) {
       window.setTimeout(() => ui.toast('📱 오늘 기록은 이 브라우저에만 남아요. 회사·집, 폰에서도 이어 쓰려면 오른쪽 위 👤에서 이어하기를 켜 두세요', 'info', 8000), NUDGE_DELAY_MS);
+    } else {
+      nudgeBreakGame();
     }
     return;
   }
-  ui.toast(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
+  ui.notify(`쉬는 시간이에요. ${nextStart}에 다시 시작해요`, 'info', 5000);
+  nudgeBreakGame();
 }
 
 watchSession({ onTick: (s) => ui.setSession(s), onPhaseChange: onSessionPhaseChange });
@@ -1248,12 +1463,14 @@ ui.bind({
   onCommit: commit,
   onChat: chat,
   onChatPin: (text) => commit(CHAT_PIN_COMMIT_TYPE, text),
+  onChatNotifyToggle: () => void toggleChatNotify(),
   onSound: (on) => {
     store.setSound(on);
     sound.setEnabled(on);
     if (on) sound.start();
   },
   onNoise: pickNoise,
+  onArcade: () => void openArcade(),
   onShare: async () => {
     try {
       await shareRoom(room.slug, room.name);
@@ -1272,12 +1489,11 @@ ui.bind({
     return unlocked;
   },
   onProfileSave: (p) => {
-    store.saveProfile(p);
-    Object.assign(self, p);
-    meAvatar().apply(self);
-    ui.setSelf(self);
-    net.updateSelf({ name: p.name, color: p.color, lang: p.lang, hair: p.hair, skin: p.skin, glasses: p.glasses, outfit: p.outfit });
+    const renamed = !isSameNickname(p.name, self.name);
+    if (renamed && net.isNameTaken(p.name)) return nameTakenReason(p.name);
+    applyProfile(p);
     ui.toast('프로필을 바꿨어요');
+    return null;
   },
   onReportCommit: (c) => void reportCommit(c),
   onSyncCreate: createSyncCode,
@@ -1292,7 +1508,7 @@ ui.bind({
   onWave: (id) => {
     emote('wave', id);
     const a = world.avatars.get(id);
-    if (a) ui.toast(`${a.state.name}님에게 손을 흔들었어요`);
+    if (a) ui.notify(`${a.state.name}님에게 손을 흔들었어요`);
   },
   onFocusPeer: (id) => {
     const a = world.avatars.get(id);
