@@ -45,6 +45,11 @@ export function recordScore(id: GameId, score: number): RecordOutcome {
 const SCORE_KEY = 'mogakco:games:key';
 const SCORE_KEY_RE = /^[0-9a-f]{32}$/;
 
+/** 스코어 판 번호 모양인지 (이어하기 서버에서 받은 값을 확인할 때도 써요) */
+export function isScoreKey(v: unknown): v is string {
+  return typeof v === 'string' && SCORE_KEY_RE.test(v);
+}
+
 function newScoreKey(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -68,3 +73,17 @@ export function scoreKey(): string {
   }
 }
 let sessionKey: string | null = null;
+
+/**
+ * 이어하기로 다른 기기의 스코어 판 번호를 받아 이 브라우저 번호를 바꿔요 (sync/deviceSync.ts).
+ * 바꾼 뒤에 올리는 점수는 그 기기와 같은 줄에 올라가요. 이 브라우저로 이미 올린 이번 주 줄은 판에 남아요
+ */
+export function replaceScoreKey(key: string) {
+  if (!isScoreKey(key)) return;
+  sessionKey = key;
+  try {
+    localStorage.setItem(SCORE_KEY, key);
+  } catch {
+    /* 저장이 막힌 브라우저는 이번 접속 동안만 바뀌어요 */
+  }
+}
