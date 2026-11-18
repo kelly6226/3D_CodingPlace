@@ -3539,6 +3539,59 @@ button.place-name {
   font-weight: 800;
   color: var(--amber);
 }
+/* 명예의 전당이 비어 있을 때 */
+.hall-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0 4px;
+  text-align: center;
+}
+.hall-empty > canvas {
+  image-rendering: pixelated;
+}
+.he-title {
+  margin: 10px 0 4px;
+  font-size: 15px;
+  font-weight: 800;
+}
+.he-text {
+  max-width: 30em;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: keep-all;
+  text-wrap: balance;
+}
+.he-left {
+  margin: 10px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(242, 180, 90, 0.4);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+}
+.he-preview {
+  align-self: stretch;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  text-align: left;
+}
+.he-preview h3 {
+  margin: 0 4px 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.he-none {
+  margin: 8px 4px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
 .hall-week h3 {
   margin: 14px 4px 2px;
   font-size: 12.5px;
