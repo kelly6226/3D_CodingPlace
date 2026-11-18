@@ -28,6 +28,39 @@ export interface Leader {
   score: number;
 }
 
+/** 명예의 전당 한 줄 (지난 어느 주의 1~3위) */
+export interface HallRow {
+  rank: number;
+  name: string;
+  color: string;
+  score: number;
+  /** 그 주까지 이 게임에서 1위를 한 횟수 */
+  wins: number;
+  /** 1위면 그 주까지 몇 주 연속 1위인지 (1위가 아니면 0) */
+  streak: number;
+  mine: boolean;
+}
+
+export interface HallWeek {
+  /** 그 주 월요일 (YYYY-MM-DD, KST) */
+  week: string;
+  rows: HallRow[];
+}
+
+/** 이 게임의 명예의 전당: 최근 주들(최근 순)과 역대 최다 우승 */
+export interface Hall {
+  weeks: HallWeek[];
+  most: { name: string; color: string; wins: number; mine: boolean } | null;
+}
+
+/** 지난주 1위 */
+export interface Champion {
+  name: string;
+  score: number;
+  /** 그 주까지 1위를 한 횟수 */
+  wins: number;
+}
+
 /** 점수를 올린 뒤 이번 주 내 순위와 1위 */
 export interface SubmitResult {
   rank: number;
@@ -49,6 +82,11 @@ export class ScoreError extends Error {
 
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const FALLBACK_COLOR = '#a2a6b4';
+const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const count = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 ? (v as number) : 0);
+const colorOf = (v: unknown) => (typeof v === 'string' && COLOR_RE.test(v) ? v : FALLBACK_COLOR);
 
 /** 서버가 준 값을 화면에 그려도 되는 모양으로 */
 function cleanRank(raw: unknown): { rank: number; score: number } | null {
@@ -70,13 +108,39 @@ function cleanRow(raw: unknown): BoardRow | null {
   if (!ranked) return null;
   const { name, color, mine } = raw as Record<string, unknown>;
   if (typeof name !== 'string' || !name.trim()) return null;
-  return { ...ranked, name: name.slice(0, 20), color: typeof color === 'string' && COLOR_RE.test(color) ? color : FALLBACK_COLOR, mine: mine === true };
+  return { ...ranked, name: name.slice(0, 20), color: colorOf(color), mine: mine === true };
 }
 
 function cleanBoard(raw: unknown): Board {
   const { top, me } = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const rows = Array.isArray(top) ? top.map(cleanRow).filter((r): r is BoardRow => r !== null) : [];
   return { top: rows, me: cleanRank(me) };
+}
+
+function cleanHallRow(raw: unknown): HallRow | null {
+  const row = cleanRow(raw);
+  if (!row || !isObj(raw)) return null;
+  return { ...row, wins: count(raw.wins), streak: count(raw.streak) };
+}
+
+function cleanHall(raw: unknown): Hall {
+  const { weeks, most } = isObj(raw) ? raw : {};
+  const cleanWeeks = (Array.isArray(weeks) ? weeks : []).flatMap((w): HallWeek[] => {
+    if (!isObj(w) || typeof w.week !== 'string' || !WEEK_RE.test(w.week)) return [];
+    const rows = (Array.isArray(w.rows) ? w.rows : []).map(cleanHallRow).filter((r): r is HallRow => r !== null);
+    return rows.length ? [{ week: w.week, rows }] : [];
+  });
+  const mostOk = isObj(most) && typeof most.name === 'string' && most.name.trim() && count(most.wins) > 0;
+  return {
+    weeks: cleanWeeks,
+    most: mostOk ? { name: (most.name as string).slice(0, 20), color: colorOf(most.color), wins: count(most.wins), mine: most.mine === true } : null,
+  };
+}
+
+function cleanChampion(raw: unknown): Champion | null {
+  const leader = cleanLeader(raw);
+  if (!leader || !isObj(raw)) return null;
+  return { ...leader, wins: count(raw.wins) };
 }
 
 /** schema.sql에서 raise exception 하는 문구로 이유를 나눠요 */
@@ -115,6 +179,23 @@ export class ScoreApi {
   /** 이 게임의 이번 주 TOP 10과 내 순위 (key: records.ts scoreKey) */
   async board(game: GameId, key: string): Promise<Board> {
     return cleanBoard(await this.rpc('game_board', { p_game: game, p_player: key }));
+  }
+
+  /** 이 게임의 명예의 전당 (schema.sql 10번). 끝난 주의 1~3위는 서버가 읽을 때 옮겨 적어요 */
+  async hall(game: GameId, key: string): Promise<Hall> {
+    return cleanHall(await this.rpc('game_hall', { p_game: game, p_player: key }));
+  }
+
+  /** 게임마다 지난주 1위 (목록에 보여줄 것) */
+  async champions(): Promise<Partial<Record<GameId, Champion>>> {
+    const raw = await this.rpc('game_last_champions', {});
+    const out: Partial<Record<GameId, Champion>> = {};
+    if (!isObj(raw)) return out;
+    for (const [game, value] of Object.entries(raw)) {
+      const champion = cleanChampion(value);
+      if (champion) out[game as GameId] = champion;
+    }
+    return out;
   }
 
   private async rpc(fn: string, args: object): Promise<unknown> {
